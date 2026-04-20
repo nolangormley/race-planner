@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="auth-container glass-panel" style="animation: fade-up 0.5s ease-out; text-align: center;">
+    <h1 style="margin-bottom: 1rem; font-size: 2.5rem;">Connect Strava</h1>
+    
+    <p>To provide custom insights and your race schedule, we need to sync with your Strava account. We'll analyze your past runs to determine your training zones and fitness levels.</p>
+
+    <div style="margin: 3rem 0;">
+        <svg fill="#fc4c02" width="80" height="80" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"></path>
+        </svg>
+    </div>
+
+    <a href="{{ strava_auth_url }}" class="btn btn-strava" style="font-size: 1.1rem; padding: 1rem 2rem;">
+        Authorize with Strava
+    </a>
+</div>
+
+<style>
+@keyframes fade-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+</style>
+{% endblock %}

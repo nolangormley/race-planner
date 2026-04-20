@@ -1,0 +1,14 @@
+requests
+duckdb
+python-dotenv
+pandas
+fastapi
+uvicorn
+numpy
+playwright
+beautifulsoup4
+openai
+jinja2
+sqlalchemy
+psycopg2-binary
+python-multipart
