@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+
+  api:
+    build:
+      context: .
+      dockerfile: ./src/api/Dockerfile
+    container_name: fast-api-app
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+      - ./src:/app/src
+    network_mode: "host"
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://user:password@localhost:5432/raceplanner
+
+  db:
+    image: postgres:15
+    container_name: race-planner-db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: raceplanner
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

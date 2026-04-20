@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+
+{% block split_styles %}
+<style>
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 3fr;
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+@media(max-width: 900px) {
+    .dashboard-grid { grid-template-columns: 1fr; }
+}
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.main-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.stat-box {
+    text-align: center;
+    padding: 1rem;
+    background: rgba(0,0,0,0.1);
+    border-radius: 12px;
+    border: 1px solid var(--panel-border);
+}
+
+.stat-box h3 {
+    margin: 0;
+    font-size: 2.5rem;
+    background: linear-gradient(135deg, var(--primary) 0%, #f9a8d4 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.stat-box p {
+    margin: 0;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--panel-border);
+    padding-bottom: 0.5rem;
+}
+
+.chart-container {
+    position: relative;
+    height: 300px;
+    width: 100%;
+}
+
+.insight-text {
+    font-size: 1rem;
+    line-height: 1.8;
+}
+
+.race-module {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(147, 197, 253, 0.05) 100%);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.timeline {
+    border-left: 2px solid var(--primary);
+    padding-left: 1.5rem;
+    margin-left: 1rem;
+    margin-top: 1.5rem;
+}
+
+.timeline-item {
+    position: relative;
+    margin-bottom: 1.5rem;
+}
+
+.timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -1.8rem;
+    top: 0.25rem;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--primary);
+    border: 2px solid var(--bg-color);
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1 style="font-size: 2.5rem;">Your Race Planner Dashboard</h1>
+    {% if user.race_length %}
+    <p>Training for: <strong>{{ user.race_length }}</strong> on <strong>{{ user.race_date }}</strong>{% if user.race_goal_time %} (Goal: {{ user.race_goal_time }}){% endif %}</p>
+    {% endif %}
+</div>
+
+{% if not user.strava_athlete_id %}
+<div class="glass-panel" style="text-align: center; padding: 3rem;">
+    <h2>Strava connection pending!</h2>
+    <p>We need to sync with Strava to build your stats.</p>
+    <a href="/strava-auth" class="btn btn-strava">Connect Strava Now</a>
+</div>
+{% else %}
+
+<div class="dashboard-grid">
+    <aside class="sidebar">
+        <div class="glass-panel">
+            <h3 style="margin-bottom: 1rem;">Fitness Metrics</h3>
+            <div id="stats-loading">Loading metrics...</div>
+            <div id="stats-content" style="display: none; display: flex; flex-direction: column; gap: 1rem;">
+                <div class="stat-box">
+                    <h3 id="fitness-val">--</h3>
+                    <p>Fitness (CTL)</p>
+                </div>
+                <div class="stat-box">
+                    <h3 id="fatigue-val">--</h3>
+                    <p>Fatigue (ATL)</p>
+                </div>
+                <div class="stat-box">
+                    <h3 id="form-val" style="background: linear-gradient(135deg, #3b82f6 0%, #93c5fd 100%); -webkit-background-clip: text;">--</h3>
+                    <p>Form (TSB)</p>
+                </div>
+                <div class="stat-box">
+                    <h3 id="vo2-val" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%); -webkit-background-clip: text;">--</h3>
+                    <p>VO2 Max Est.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-panel race-module">
+            <div class="card-header">
+                <h3 style="margin: 0; color: #3b82f6;">Coach AI Insight</h3>
+            </div>
+            <div id="ai-insight" class="insight-text">
+                <div class="loader" style="display: inline-block; width: 20px; height: 20px; border: 2px solid #fff; border-bottom-color: transparent; border-radius: 50%; animation: rotation 1s linear infinite;"></div> Analyzing recent training...
+            </div>
+        </div>
+    </aside>
+
+    <div class="main-content">
+        <div class="glass-panel">
+            <div class="card-header">
+                <h3>Form (TSB) History</h3>
+            </div>
+            <div class="chart-container">
+                <canvas id="formChart"></canvas>
+            </div>
+        </div>
+
+        <div class="glass-panel">
+            <div class="card-header">
+                <h3 style="background: linear-gradient(to right, #10b981, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Your Customized Race Schedule</h3>
+                <button class="btn" onclick="fetchSchedule()" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Refresh Plan</button>
+            </div>
+            <div id="schedule-loading">Drafting your perfect plan with AI... <br><br></div>
+            
+            <div id="schedule-content" style="display: none;">
+                <p id="schedule-blurb" style="font-style: italic; color: #bae6fd;"></p>
+                <p id="schedule-goal" style="font-weight: 600;"></p>
+
+                <div class="timeline" id="schedule-timeline">
+                    <!-- Timeline items injected here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+@keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+</style>
+
+<script>
+const athleteId = {{ user.strava_athlete_id }};
+const raceDate = "{{ user.race_date|default('2026-05-02') }}";
+const raceType = "{{ user.race_length|default('half marathon') }}";
+const goalTime = "{{ user.race_goal_time|default('') }}";
+
+async function fetchStats() {
+    try {
+        const res = await fetch(`/status/${athleteId}`);
+        if(res.ok) {
+            const data = await res.json();
+            document.getElementById('stats-loading').style.display = 'none';
+            document.getElementById('stats-content').style.display = 'flex';
+            
+            document.getElementById('fitness-val').innerText = Math.round(data.fitness_ctl);
+            document.getElementById('fatigue-val').innerText = Math.round(data.fatigue_atl);
+            document.getElementById('form-val').innerText = Math.round(data.form_tsb);
+            if(data.latest_vo2_max) document.getElementById('vo2-val').innerText = data.latest_vo2_max;
+            
+            if(data.ai_insight) {
+                document.getElementById('ai-insight').innerHTML = data.ai_insight.replace(/\ng/g, '<br>');
+            } else {
+                document.getElementById('ai-insight').innerHTML = "No insight generated.";
+            }
+
+            // Draw Chart
+            const history = data.history;
+            if(history && history.length > 0) {
+                const labels = history.map(h => h.date.substring(5)); // MM-DD
+                const tsbData = history.map(h => h.form);
+                
+                const ctx = document.getElementById('formChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Form (TSB)',
+                            data: tsbData,
+                            borderColor: '#f9a8d4',
+                            backgroundColor: 'rgba(249, 168, 212, 0.2)',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 3,
+                            pointBackgroundColor: '#f43f5e',
+                            pointBorderColor: '#fff',
+                            pointRadius: 5
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#94a3b8' } },
+                            x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+                        }
+                    }
+                });
+            }
+        } else {
+            console.warn("Strava pipeline hasn't processed data yet.");
+            document.getElementById('stats-loading').innerText = "Data processing... check back later.";
+            document.getElementById('ai-insight').innerHTML = "No context available yet.";
+        }
+    } catch(err) {
+        console.error(err);
+    }
+}
+
+async function fetchSchedule() {
+    document.getElementById('schedule-content').style.display = 'none';
+    document.getElementById('schedule-loading').style.display = 'block';
+    try {
+        let url = `/schedule/${athleteId}?race_date=${encodeURIComponent(raceDate)}&race_type=${encodeURIComponent(raceType)}`;
+        if(goalTime) url += `&goal_time=${encodeURIComponent(goalTime)}`;
+        
+        const res = await fetch(url);
+        if(res.ok) {
+            const data = await res.json();
+            const sched = data.schedule;
+            
+            document.getElementById('schedule-loading').style.display = 'none';
+            document.getElementById('schedule-content').style.display = 'block';
+            
+            if(sched.error) {
+                document.getElementById('schedule-blurb').innerText = "Hold on! Ensure you start the AI model or provide a Groq API key to generate schedules.";
+                return;
+            }
+            
+            document.getElementById('schedule-blurb').innerText = sched.blurb || "Here is your plan:";
+            if(sched.recommended_goal_time) {
+                document.getElementById('schedule-goal').innerText = "Recommended Goal Time: " + sched.recommended_goal_time;
+            }
+            
+            const timeline = document.getElementById('schedule-timeline');
+            timeline.innerHTML = '';
+            
+            if(sched.plan) {
+                Object.keys(sched.plan).sort().forEach(date => {
+                    const d = new Date(date);
+                    const dayStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                    const p = sched.plan[date];
+                    
+                    const div = document.createElement('div');
+                    div.className = 'timeline-item';
+                    div.innerHTML = `
+                        <h4 style="color: var(--primary); margin-bottom: 0.2rem;">${dayStr} 
+                            <span style="color: var(--text-main); float: right; font-size: 0.9rem;">${p.type_of_workout}</span>
+                        </h4>
+                        <p style="margin-bottom: 0.3rem;"><strong style="color: #94a3b8">${p.approximate_distance || 'Time/Dist'} • ${p.training_focus || 'Focus'}</strong></p>
+                        <p style="font-size: 0.95rem;">${p.description}</p>
+                    `;
+                    timeline.appendChild(div);
+                });
+            }
+        } else {
+            document.getElementById('schedule-loading').innerText = "Failed to load schedule. Data may still be processing.";
+        }
+    } catch(err) {
+        console.error(err);
+        document.getElementById('schedule-loading').innerText = "Network Error.";
+    }
+}
+
+fetchStats();
+fetchSchedule();
+</script>
+
+{% endif %}
+{% endblock %}
