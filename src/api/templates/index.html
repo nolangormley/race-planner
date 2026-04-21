@@ -18,6 +18,7 @@
             <h2>Strava Warehouse</h2>
         </div>
         <div>
+            <a href="/dashboard" class="btn" style="margin-right: 0.5rem;">← Dashboard</a>
             <span class="tag">Local DuckDB</span>
         </div>
     </header>
@@ -249,6 +250,12 @@
             try {
                 const res = await fetch('/api/workouts');
                 const data = await res.json();
+
+                // Guard: API may return an error object instead of an array
+                if (!Array.isArray(data)) {
+                    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger)">Error: ${data.detail || data.error || 'Unknown error loading workouts'}</td></tr>`;
+                    return;
+                }
                 
                 tbody.innerHTML = '';
                 if (data.length === 0) {
