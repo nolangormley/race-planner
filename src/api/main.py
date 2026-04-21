@@ -4,16 +4,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import duckdb
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import random
 import requests
 from dotenv import load_dotenv
-from typing import Optional
+from sklearn.linear_model import LinearRegression
 
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -82,6 +82,13 @@ def dashboard(request: Request):
 @app.get("/workout_streams/{activity_id}")
 def view_workout_streams(request: Request, activity_id: int):
     return templates.TemplateResponse("streams.html", {"request": request, "activity_id": activity_id})
+
+@app.get("/warehouse")
+def view_warehouse(request: Request):
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse("index.html", {"request": request})
 
 # ==========================================
 # CRUD FOR ACTIVITIES (Read, Delete)
@@ -341,7 +348,7 @@ def calculate_training_status_logic(user_id: int):
             weight_lbs = None
             sex = None
 
-        history_df = merged.tail(7)
+        history_df = merged.tail(90)
         history_list = []
         for _, row in history_df.iterrows():
             history_list.append({
@@ -352,6 +359,31 @@ def calculate_training_status_logic(user_id: int):
                 "daily_ef": clean_val(row['daily_ef'], 2),
                 "daily_decoup": clean_val(row['daily_decoup'], 1)
             })
+
+        # --- 14-day Linear Regression CTL Forecast ---
+        forecast_list = []
+        try:
+            ctl_series = merged['CTL'].values
+            n = len(ctl_series)
+            # Use last 42 days (the CTL decay constant) as the training window
+            window = min(42, n)
+            X_train = np.arange(window).reshape(-1, 1).astype(float)
+            y_train = ctl_series[-window:]
+            valid_mask = ~np.isnan(y_train)
+            if valid_mask.sum() >= 5:
+                reg = LinearRegression()
+                reg.fit(X_train[valid_mask], y_train[valid_mask])
+                last_date = merged.iloc[-1]['date']
+                for i in range(1, 15):
+                    proj_x = np.array([[window - 1 + i]]).astype(float)
+                    proj_ctl = float(reg.predict(proj_x)[0])
+                    proj_date = (pd.Timestamp(last_date) + timedelta(days=i)).date()
+                    forecast_list.append({
+                        "date": str(proj_date),
+                        "projected_ctl": round(proj_ctl, 2)
+                    })
+        except Exception as fe:
+            print(f"Forecast error: {fe}")
 
         return {
             "date": str(today_stats['date']),
@@ -365,7 +397,8 @@ def calculate_training_status_logic(user_id: int):
             "latest_daily_ef": clean_val(today_stats.get('latest_ef'), 2),
             "latest_daily_decoup": clean_val(today_stats.get('latest_decoup'), 1),
             "latest_vo2_max": latest_vo2_max,
-            "history": history_list
+            "history": history_list,
+            "forecast": forecast_list
         }
     finally:
         con.close()
@@ -384,7 +417,9 @@ def get_ai_insight(stats, context="status", workout=None):
                 f"- Estimated VO2 Max: {stats.get('latest_vo2_max', 'N/A')}\n"
                 f"- 7-Day Efficiency Factor: {stats.get('efficiency_factor_7d')}\n"
                 f"- 7-Day Aerobic Decoupling: {stats.get('aerobic_decoupling_7d')}%\n\n"
-                f"Give a short assessment of their readiness. Mention their ACWR: the sweet spot for injury prevention is 0.8-1.3, while over 1.5 is the danger zone. Give actionable advice."
+                f"Give a HIGH-LEVEL EXECUTIVE SUMMARY of their readiness. "
+                f"Structure your response with clear HTML formatting including <ul>, <li>, and <strong> tags. Focus on what action they need to take today. "
+                f"Mention their ACWR (sweet spot 0.8-1.3). No fluff, no raw token dumps. Keep it professional and scannable."
             )
         elif context == "workout":
             prompt = (
@@ -403,7 +438,26 @@ def get_ai_insight(stats, context="status", workout=None):
         if sex_str == 'M': sex_str = 'male'
         elif sex_str == 'F': sex_str = 'female'
         
-        system_prompt = f"You are an expert running coach and one of your athletes is training for a half marathon that is on May 2nd 2026. The athlete is 28, is 5'11, {sex_str}, and {weight_str}. Their goal is to run a sub 2 hour half marathon. Explain what the metrics mean in a concise way and give actionable advice. Allow a bit of overtraining, they are very committed and love to push themselves. Don't be too conservative with the advice."
+        user_race_type = stats.get('race_type')
+        user_race_date = stats.get('race_date')
+        user_goal_time = stats.get('goal_time')
+
+        race_info = ""
+        if user_race_type and user_race_date:
+            race_info = f"training for a {user_race_type} on {user_race_date}"
+            if user_goal_time:
+                race_info += f" with a goal time of {user_goal_time}"
+            race_info += "."
+
+        system_prompt = (
+            f"You are an expert running coach and one of your athletes is {race_info} The athlete is {sex_str}, and {weight_str}. "
+            f"Explain what the metrics mean using these rigid scientific benchmarks: "
+            f"(CTL < 30 = Beginner, 50-80 = Intermediate, >100 = Advanced). "
+            f"Provide actionable advice as concise bullet points. "
+            f"CRITICIAL CONSTRAINTS: "
+            f"1) You are permitted to recommend a MAXIMUM of ONE training action for the current day. Do not prescribe multiple workouts. "
+            f"2) Do not hallucinate pseudo-science. Running depletes energy. Rest restores it."
+        )
 
         if llm_provider == "groq":
             groq_api_key = os.getenv("GROQ_API_KEY")
@@ -464,7 +518,15 @@ def get_ai_insight(stats, context="status", workout=None):
 def get_status(user_id: int):
     status = calculate_training_status_logic(user_id)
     if not status:
-        raise HTTPException(status_code=404, detail="No training data found for user (Did you run analyze_effectiveness.py?)")
+        raise HTTPException(status_code=404, detail="No training data found for user")
+        
+    db = SessionLocal()
+    user = db.query(User).filter(User.strava_athlete_id == user_id).first()
+    if user:
+        status['race_type'] = user.race_length
+        status['race_date'] = str(user.race_date) if user.race_date else None
+        status['goal_time'] = user.race_goal_time
+    db.close()
     
     status['ai_insight'] = get_ai_insight(status, context="status")
     return status
@@ -812,4 +874,137 @@ def get_pace_zones(user_id: int):
     if not zones:
         raise HTTPException(status_code=404, detail="No stream data found to calculate Pace Zones for this user.")
     return zones
+
+@app.get("/analytics/{user_id}")
+def get_analytics(user_id: int):
+    con = get_db_connection()
+    try:
+        # Derive HR max from athlete's recorded data (fallback 190)
+        try:
+            hr_max_row = con.execute(
+                "SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id = ? AND max_heartrate > 100",
+                [user_id]
+            ).fetchone()
+            hr_max = float(hr_max_row[0]) if hr_max_row and hr_max_row[0] else 190.0
+        except Exception:
+            hr_max = 190.0
+
+        hr_query = """
+        SELECT 
+            CASE 
+                WHEN value < ? * 0.60 THEN 'Zone 1 (Recovery)'
+                WHEN value < ? * 0.70 THEN 'Zone 2 (Aerobic)'
+                WHEN value < ? * 0.80 THEN 'Zone 3 (Tempo)'
+                WHEN value < ? * 0.90 THEN 'Zone 4 (Threshold)'
+                ELSE 'Zone 5 (Anaerobic)'
+            END as zone,
+            COUNT(*) as secs
+        FROM stream_heartrate h
+        JOIN dim_activity a ON h.activity_id = a.activity_id
+        WHERE a.athlete_id = ?
+        GROUP BY 1 ORDER BY 1
+        """
+        hr_data = con.execute(hr_query, [hr_max, hr_max, hr_max, hr_max, user_id]).fetchall()
+        
+        load_query = """
+        SELECT type, SUM(distance) as total_dist
+        FROM dim_activity
+        WHERE athlete_id = ? AND start_date_local >= current_date - interval '30 days'
+        GROUP BY type
+        """
+        load_data = con.execute(load_query, [user_id]).fetchall()
+        
+        return {
+            "hr_zones": [{"zone": row[0], "time_seconds": row[1]} for row in hr_data],
+            "load_dist": [{"type": row[0], "distance": row[1]} for row in load_data]
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        con.close()
+
+class SettingsUpdate(BaseModel):
+    race_length: str
+    race_date: str
+    race_goal_time: str
+
+@app.post("/settings/{user_id}")
+def update_settings(user_id: int, settings: SettingsUpdate):
+    db = SessionLocal()
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        db.close()
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    try:
+        if settings.race_date:
+            user.race_date = datetime.strptime(settings.race_date, '%Y-%m-%d').date()
+        user.race_length = settings.race_length
+        user.race_goal_time = settings.race_goal_time
+        db.commit()
+        return {"message": "Settings updated"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+
+# ==========================================
+# PROFILE PAGE
+# ==========================================
+
+@app.get("/profile")
+def profile_page(request: Request):
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+    db = SessionLocal()
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    db.close()
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse("profile.html", {"request": request, "user": user})
+
+
+class ProfileUpdate(BaseModel):
+    name: str
+    email: str
+    date_of_birth: Optional[str] = None
+    gender: Optional[str] = None
+    height: Optional[float] = None  # stored in meters
+    weight: Optional[float] = None  # stored in kg
+
+@app.post("/profile/{user_id}")
+def update_profile(user_id: int, profile: ProfileUpdate):
+    db = SessionLocal()
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        db.close()
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        # Check email uniqueness
+        if profile.email != user.email:
+            existing = db.query(User).filter(User.email == profile.email).first()
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already in use by another account.")
+        user.name = profile.name
+        user.email = profile.email
+        if profile.date_of_birth:
+            user.date_of_birth = datetime.strptime(profile.date_of_birth, '%Y-%m-%d').date()
+        if profile.gender:
+            user.gender = profile.gender
+        if profile.height is not None:
+            user.height = profile.height
+        if profile.weight is not None:
+            user.weight = profile.weight
+        db.commit()
+        return {"message": "Profile updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
 

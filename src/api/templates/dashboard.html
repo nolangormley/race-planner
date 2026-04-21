@@ -2,109 +2,237 @@
 
 {% block split_styles %}
 <style>
-.dashboard-grid {
+/* Theme Variables */
+:root {
+    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.4);
+    --panel-bg: rgba(15, 23, 42, 0.6);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --input-bg: rgba(0,0,0,0.3);
+    --body-bg: #0f172a;
+}
+
+[data-theme="light"] {
+    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.2);
+    --panel-bg: rgba(255, 255, 255, 0.9);
+    --panel-border: rgba(0, 0, 0, 0.1);
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --input-bg: rgba(255,255,255,0.8);
+    --body-bg: #f8fafc;
+}
+
+body {
+    background-color: var(--body-bg);
+    color: var(--text-primary);
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.dashboard-container {
     display: grid;
-    grid-template-columns: 1fr 3fr;
+    grid-template-columns: 320px 1fr;
     gap: 1.5rem;
     margin-top: 2rem;
-}
-@media(max-width: 900px) {
-    .dashboard-grid { grid-template-columns: 1fr; }
+    padding-bottom: 3rem;
+    transition: all 0.3s ease;
 }
 
-.sidebar {
+.dashboard-container.layout-compact {
+    grid-template-columns: 1fr;
+}
+
+@media(max-width: 1024px) {
+    .dashboard-container { grid-template-columns: 1fr; }
+}
+
+/* Sidebar & Settings */
+.modern-sidebar {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
 }
 
-.main-content {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-}
-
-.stat-box {
-    text-align: center;
-    padding: 1rem;
-    background: rgba(0,0,0,0.1);
-    border-radius: 12px;
+.settings-card {
+    background: var(--panel-bg);
     border: 1px solid var(--panel-border);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 1.5rem;
+    box-shadow: var(--accent-glow);
+    color: var(--text-primary);
 }
 
-.stat-box h3 {
-    margin: 0;
-    font-size: 2.5rem;
-    background: linear-gradient(135deg, var(--primary) 0%, #f9a8d4 100%);
+.settings-card h3 {
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+    font-size: 1.25rem;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
-.stat-box p {
-    margin: 0;
+.form-group { margin-bottom: 1rem; }
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
     font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 1px;
 }
-
-.card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-    border-bottom: 1px solid var(--panel-border);
-    padding-bottom: 0.5rem;
-}
-
-.chart-container {
-    position: relative;
-    height: 300px;
+.form-group input, .form-group select {
     width: 100%;
+    padding: 0.75rem;
+    background: var(--input-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: all 0.2s;
 }
 
-.insight-text {
-    font-size: 1rem;
-    line-height: 1.8;
+.btn-update {
+    width: 100%;
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.race-module {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(147, 197, 253, 0.05) 100%);
-    border: 1px solid rgba(59, 130, 246, 0.2);
+/* Skeletons */
+.pulsing-skeleton {
+    background: linear-gradient(90deg, rgba(148, 163, 184, 0.1) 25%, rgba(148, 163, 184, 0.2) 50%, rgba(148, 163, 184, 0.1) 75%);
+    background-size: 200% 100%;
+    animation: pulse-skele 1.5s infinite;
+    border-radius: 8px;
 }
 
-.timeline {
-    border-left: 2px solid var(--primary);
-    padding-left: 1.5rem;
-    margin-left: 1rem;
-    margin-top: 1.5rem;
+@keyframes pulse-skele {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
 }
 
-.timeline-item {
+.sk-text { height: 1rem; margin-bottom: 0.5rem; width: 100%; }
+.sk-text.w-80 { width: 80%; }
+.sk-text.w-60 { width: 60%; }
+.sk-box { width: 100%; height: 100%; min-height: 40px; }
+
+/* AI Insight */
+.ai-module {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.insight-text { font-size: 0.95rem; line-height: 1.6; color: var(--text-primary); }
+.insight-text ul { padding-left: 1.2rem; margin-top: 0.5rem; }
+.insight-text li { margin-bottom: 0.5rem; }
+
+/* Main Content Area */
+.main-charts { display: flex; flex-direction: column; gap: 1.5rem; }
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+@media(max-width: 768px) { .chart-grid { grid-template-columns: 1fr; } }
+
+.chart-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 1.5rem;
     position: relative;
-    margin-bottom: 1.5rem;
+    color: var(--text-primary);
 }
 
-.timeline-item::before {
-    content: '';
-    position: absolute;
-    left: -1.8rem;
-    top: 0.25rem;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: var(--primary);
-    border: 2px solid var(--bg-color);
+.chart-card h3 {
+    margin-top: 0; color: var(--text-primary); font-size: 1.1rem; margin-bottom: 1.5rem;
 }
+
+.chart-container-large { height: 350px; width: 100%; position: relative; }
+.chart-container-small { height: 280px; width: 100%; position: relative; }
+
+/* Stats Row */
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+.stat-metric {
+    background: rgba(0,0,0,0.1);
+    border: 1px solid var(--panel-border);
+    padding: 1.2rem;
+    border-radius: 12px;
+    text-align: center;
+    min-height: 100px;
+}
+.stat-metric h4 {
+    font-size: 2rem; margin: 0;
+    min-height: 38px;
+}
+.stat-metric p { margin: 0; font-size: 0.8rem; text-transform: uppercase; color: var(--text-secondary); margin-top: 0.5rem; }
+
+/* Calendar */
+.calendar-view {
+    background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 16px; padding: 1.5rem;
+}
+.calendar-grid { display: grid; gap: 1rem; }
+
+.workout-card {
+    background: var(--input-bg);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-left: 4px solid #3b82f6;
+    border-radius: 8px;
+    padding: 1rem;
+    cursor: grab;
+    transition: all 0.2s;
+    color: var(--text-primary);
+}
+.workout-card.drag-over { border: 2px dashed #10b981; }
+
+.workout-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
+.workout-date { font-weight: bold; color: #60a5fa; }
+.workout-type { font-size: 0.85rem; background: rgba(59, 130, 246, 0.2); padding: 0.2rem 0.5rem; border-radius: 4px; color: #3b82f6; }
+.workout-desc { font-size: 0.9rem; color: var(--text-secondary); }
+
+/* Empty State Illustration */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    position: absolute;
+    top: 0; left: 0;
+    background: var(--panel-bg);
+    border-radius: 12px;
+    z-index: 10;
+}
+.empty-illustration svg { width: 120px; height: 120px; opacity: 0.8; margin-bottom: 1rem; }
+.empty-state h4 { color: var(--text-primary); font-size: 1.25rem; margin-bottom: 0.25rem; }
+.empty-state p { color: var(--text-secondary); font-size: 0.9rem; text-align: center; max-width: 80%; }
+.empty-state button { margin-top: 1rem; padding: 0.5rem 1rem; border-radius: 6px; border: none; background: #3b82f6; color: white; cursor: pointer; }
+
 </style>
+<script>
+    // Initialize theme immediately to prevent flashing
+    const savedThemeInit = localStorage.getItem('theme');
+    if (savedThemeInit === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+    }
+</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
 {% block content %}
-<div class="dashboard-header">
-    <h1 style="font-size: 2.5rem;">Your Race Planner Dashboard</h1>
-    {% if user.race_length %}
-    <p>Training for: <strong>{{ user.race_length }}</strong> on <strong>{{ user.race_date }}</strong>{% if user.race_goal_time %} (Goal: {{ user.race_goal_time }}){% endif %}</p>
-    {% endif %}
+<div class="dashboard-header" style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: flex-end;">
+    <div>
+        <h1 style="font-size: 2.5rem; margin-bottom: 0.5rem;">Athlete Dashboard</h1>
+        <p style="color: var(--text-secondary);" id="header-subtitle"><span class="pulsing-skeleton sk-text w-60" style="display:inline-block"></span></p>
+    </div>
 </div>
 
 {% if not user.strava_athlete_id %}
@@ -115,202 +243,479 @@
 </div>
 {% else %}
 
-<div class="dashboard-grid">
-    <aside class="sidebar">
-        <div class="glass-panel">
-            <h3 style="margin-bottom: 1rem;">Fitness Metrics</h3>
-            <div id="stats-loading">Loading metrics...</div>
-            <div id="stats-content" style="display: none; display: flex; flex-direction: column; gap: 1rem;">
-                <div class="stat-box">
-                    <h3 id="fitness-val">--</h3>
-                    <p>Fitness (CTL)</p>
+<div class="dashboard-container" id="dashboard-main">
+    <!-- Sidebar -->
+    <aside class="modern-sidebar">
+        <div class="settings-card">
+            <h3>Race Profile <i class="fas fa-cog"></i></h3>
+            <form id="settingsForm" onsubmit="updateSettings(event)">
+                <div class="form-group">
+                    <label>Race Distance</label>
+                    <select id="raceLength">
+                        <option value="5k" {% if user.race_length == '5k' %}selected{% endif %}>5K</option>
+                        <option value="5 mile" {% if user.race_length == '5 mile' %}selected{% endif %}>5 Mile</option>
+                        <option value="10k" {% if user.race_length == '10k' %}selected{% endif %}>10K</option>
+                        <option value="10 mile" {% if user.race_length == '10 mile' %}selected{% endif %}>10 Mile</option>
+                        <option value="half marathon" {% if user.race_length == 'half marathon' %}selected{% endif %}>Half Marathon</option>
+                        <option value="marathon" {% if user.race_length == 'marathon' %}selected{% endif %}>Marathon</option>
+                    </select>
                 </div>
-                <div class="stat-box">
-                    <h3 id="fatigue-val">--</h3>
-                    <p>Fatigue (ATL)</p>
+                <div class="form-group">
+                    <label>Race Date</label>
+                    <input type="date" id="raceDate" value="{{ user.race_date }}">
                 </div>
-                <div class="stat-box">
-                    <h3 id="form-val" style="background: linear-gradient(135deg, #3b82f6 0%, #93c5fd 100%); -webkit-background-clip: text;">--</h3>
-                    <p>Form (TSB)</p>
+                <div class="form-group">
+                    <label>Goal Time</label>
+                    <input type="text" id="goalTime" placeholder="e.g. 1:45:00" value="{{ user.race_goal_time }}">
                 </div>
-                <div class="stat-box">
-                    <h3 id="vo2-val" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%); -webkit-background-clip: text;">--</h3>
-                    <p>VO2 Max Est.</p>
-                </div>
+                <button type="submit" class="btn-update">Update Profile</button>
+            </form>
+        </div>
+
+        <div class="settings-card">
+            <h3>Navigation</h3>
+            <a href="/warehouse" class="btn btn-strava" style="display: block; text-align: center; text-decoration: none; margin-bottom: 0.5rem; border-radius: 6px; padding: 0.5rem;">Data Warehouse CRUD</a>
+        </div>
+
+        <div class="settings-card">
+            <h3>Customization</h3>
+            <div class="form-group">
+                <label>Units</label>
+                <select id="unitToggle" onchange="toggleUnits()">
+                    <option value="imperial" selected>Imperial (Miles/lbs)</option>
+                    <option value="metric">Metric (KM/kg)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Theme</label>
+                <select id="themeToggle" onchange="toggleTheme()">
+                    <option value="dark" selected>Dark Mode</option>
+                    <option value="light">Light Mode</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Layout</label>
+                <select id="layoutToggle" onchange="toggleLayout()">
+                    <option value="default" selected>Default (Grid)</option>
+                    <option value="compact">Compact (Stack)</option>
+                </select>
             </div>
         </div>
 
-        <div class="glass-panel race-module">
-            <div class="card-header">
-                <h3 style="margin: 0; color: #3b82f6;">Coach AI Insight</h3>
-            </div>
+        <div class="settings-card ai-module">
+            <h3 style="color: #c084fc;">AI Executive Summary</h3>
             <div id="ai-insight" class="insight-text">
-                <div class="loader" style="display: inline-block; width: 20px; height: 20px; border: 2px solid #fff; border-bottom-color: transparent; border-radius: 50%; animation: rotation 1s linear infinite;"></div> Analyzing recent training...
+                <div class="pulsing-skeleton sk-text"></div>
+                <div class="pulsing-skeleton sk-text"></div>
+                <div class="pulsing-skeleton sk-text w-80"></div>
+                <div class="pulsing-skeleton sk-text w-60"></div>
             </div>
         </div>
     </aside>
 
-    <div class="main-content">
-        <div class="glass-panel">
-            <div class="card-header">
-                <h3>Form (TSB) History</h3>
+    <!-- Main Content -->
+    <main class="main-charts">
+        <div class="stats-row" id="top-stats">
+            <div class="stat-metric"><h4 id="fitness-val" style="background: linear-gradient(135deg, #3b82f6, #93c5fd); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4><p>Fitness (CTL)</p></div>
+            <div class="stat-metric"><h4 id="fatigue-val" style="background: linear-gradient(135deg, #f43f5e, #fb7185); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4><p>Fatigue (ATL)</p></div>
+            <div class="stat-metric"><h4 id="form-val" style="background: linear-gradient(135deg, #10b981, #34d399); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4><p>Form (TSB)</p></div>
+            <div class="stat-metric"><h4 id="vo2-val" style="background: linear-gradient(135deg, #a855f7, #d8b4fe); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4><p>VO2 Max Est.</p></div>
+        </div>
+
+        <div class="chart-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0;">Performance Management Chart</h3>
+                <div id="pmc-window-toggle" style="display: flex; gap: 0.25rem;">
+                    <button class="pmc-win-btn" data-days="7" onclick="setPmcWindow(7)" style="padding: 0.3rem 0.75rem; border-radius: 6px; border: 1px solid var(--panel-border); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 0.8rem;">7d</button>
+                    <button class="pmc-win-btn active-win" data-days="42" onclick="setPmcWindow(42)" style="padding: 0.3rem 0.75rem; border-radius: 6px; border: 1px solid #3b82f6; background: rgba(59,130,246,0.15); color: #60a5fa; cursor: pointer; font-size: 0.8rem;">42d</button>
+                    <button class="pmc-win-btn" data-days="90" onclick="setPmcWindow(90)" style="padding: 0.3rem 0.75rem; border-radius: 6px; border: 1px solid var(--panel-border); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 0.8rem;">90d</button>
+                </div>
             </div>
-            <div class="chart-container">
-                <canvas id="formChart"></canvas>
+            <div class="chart-container-large" id="pmc-container">
+                <div class="pulsing-skeleton" style="width:100%; height:100%; position:absolute; z-index:1;" id="pmc-skeleton"></div>
+                <canvas id="pmcChart"></canvas>
             </div>
         </div>
 
-        <div class="glass-panel">
-            <div class="card-header">
-                <h3 style="background: linear-gradient(to right, #10b981, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Your Customized Race Schedule</h3>
-                <button class="btn" onclick="fetchSchedule()" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Refresh Plan</button>
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h3>Heart Rate Zones</h3>
+                <div class="chart-container-small" id="hr-container">
+                    <div class="pulsing-skeleton" style="width:100%; height:100%; position:absolute; z-index:1;" id="hr-skeleton"></div>
+                    <canvas id="hrChart"></canvas>
+                </div>
             </div>
-            <div id="schedule-loading">Drafting your perfect plan with AI... <br><br></div>
-            
-            <div id="schedule-content" style="display: none;">
-                <p id="schedule-blurb" style="font-style: italic; color: #bae6fd;"></p>
-                <p id="schedule-goal" style="font-weight: 600;"></p>
-
-                <div class="timeline" id="schedule-timeline">
-                    <!-- Timeline items injected here -->
+            <div class="chart-card">
+                <h3>30-Day Training Load</h3>
+                <div class="chart-container-small" id="load-container">
+                    <div class="pulsing-skeleton" style="width:100%; height:100%; position:absolute; z-index:1;" id="load-skeleton"></div>
+                    <canvas id="loadChart"></canvas>
                 </div>
             </div>
         </div>
-    </div>
+
+        <div class="calendar-view">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0; font-size: 1.25rem;">Interactive Training Calendar</h3>
+                <button class="btn btn-update" style="width: auto; margin: 0;" onclick="fetchSchedule()">Refresh AI Plan</button>
+            </div>
+            <p id="schedule-blurb" style="color: var(--text-secondary); font-style: italic; margin-bottom: 1rem;"></p>
+            
+            <div id="schedule-loading">
+                <div class="pulsing-skeleton sk-text" style="height: 60px;"></div>
+                <div class="pulsing-skeleton sk-text" style="height: 60px;"></div>
+                <div class="pulsing-skeleton sk-text" style="height: 60px;"></div>
+            </div>
+
+            <div class="calendar-grid" id="calendar-grid" style="display: none;"></div>
+        </div>
+    </main>
 </div>
 
-<style>
-@keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-</style>
-
 <script>
+const userId = {{ user.id }};
 const athleteId = {{ user.strava_athlete_id }};
-const raceDate = "{{ user.race_date|default('2026-05-02') }}";
-const raceType = "{{ user.race_length|default('half marathon') }}";
-const goalTime = "{{ user.race_goal_time|default('') }}";
+let isMetric = localStorage.getItem('units') === 'metric';
+let pmcChartInst, hrChartInst, loadChartInst;
+let allHistory = [];   // full 90-day history from API
+let allForecast = [];  // 14-day forecast from API
+let pmcWindow = parseInt(localStorage.getItem('pmcWindow') || '42');
+
+function setPmcWindow(days) {
+    pmcWindow = days;
+    localStorage.setItem('pmcWindow', days);
+    document.querySelectorAll('.pmc-win-btn').forEach(btn => {
+        const active = parseInt(btn.dataset.days) === days;
+        btn.style.background = active ? 'rgba(59,130,246,0.15)' : 'transparent';
+        btn.style.color = active ? '#60a5fa' : 'var(--text-secondary)';
+        btn.style.borderColor = active ? '#3b82f6' : 'var(--panel-border)';
+    });
+    if (allHistory.length > 0) renderPmcChart();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    const savedUnits = localStorage.getItem('units') || 'imperial';
+    const savedLayout = localStorage.getItem('layout') || 'default';
+    
+    document.getElementById('themeToggle').value = savedTheme;
+    document.getElementById('unitToggle').value = savedUnits;
+    document.getElementById('layoutToggle').value = savedLayout;
+
+    // Apply saved theme (inline script handles the initial set, but also set here for safety)
+    if (savedTheme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+
+    // Apply saved layout
+    if(savedLayout === 'compact') {
+        document.getElementById('dashboard-main').classList.add('layout-compact');
+    }
+
+    // Apply saved PMC window button active state
+    setPmcWindow(pmcWindow);
+});
+
+function toggleUnits() {
+    isMetric = document.getElementById('unitToggle').value === 'metric';
+    localStorage.setItem('units', isMetric ? 'metric' : 'imperial');
+    fetchSchedule();
+}
+
+function toggleTheme() {
+    const val = document.getElementById('themeToggle').value;
+    if(val === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('theme', val);
+}
+
+function toggleLayout() {
+    const val = document.getElementById('layoutToggle').value;
+    localStorage.setItem('layout', val);
+    if(val === 'compact') document.getElementById('dashboard-main').classList.add('layout-compact');
+    else document.getElementById('dashboard-main').classList.remove('layout-compact');
+}
+
+function showEmptyState(containerId, title, message) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = `
+        <div class="empty-state">
+            <div class="empty-illustration">
+                <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M50 20C40 20 30 30 30 45C30 65 50 80 50 80C50 80 70 65 70 45C70 30 60 20 50 20Z" stroke="#3b82f6" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+                    <path d="M45 40L55 50M55 40L45 50" stroke="#f43f5e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <h4>${title}</h4>
+            <p>${message}</p>
+            <button onclick="window.location.href='/strava-auth'">Sync Strava Now</button>
+        </div>
+    `;
+}
+
+async function updateSettings(e) {
+    e.preventDefault();
+    const rt = document.getElementById('raceLength').value;
+    const rd = document.getElementById('raceDate').value;
+    const rg = document.getElementById('goalTime').value;
+
+    const res = await fetch(`/settings/${userId}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ race_length: rt, race_date: rd, race_goal_time: rg })
+    });
+
+    if(res.ok) {
+        document.getElementById('header-subtitle').innerText = `Training for: ${rt.toUpperCase()} on ${rd}`;
+        
+        // Reload all data to ensure AI picks up new context
+        document.getElementById('ai-insight').innerHTML = `
+            <div class="pulsing-skeleton sk-text"></div>
+            <div class="pulsing-skeleton sk-text"></div>
+            <div class="pulsing-skeleton sk-text w-80"></div>`;
+        
+        fetchStats();
+        fetchSchedule();
+    }
+}
+
+async function fetchAnalytics() {
+    try {
+        const res = await fetch(`/analytics/${athleteId}`);
+        if(res.ok) {
+            const data = await res.json();
+            
+            const hrSkele = document.getElementById('hr-skeleton');
+            if(hrSkele) hrSkele.style.display = 'none';
+            const loadSkele = document.getElementById('load-skeleton');
+            if(loadSkele) loadSkele.style.display = 'none';
+
+            if(data.hr_zones && data.hr_zones.length > 0) {
+                const totalSecs = data.hr_zones.reduce((acc, z) => acc + z.time_seconds, 0);
+                if (totalSecs === 0) {
+                    showEmptyState('hr-container', 'No Heart Rate Data', 'Wear a heart rate monitor on your next activity.');
+                } else {
+                    const ctxHr = document.getElementById('hrChart').getContext('2d');
+                    if(hrChartInst) hrChartInst.destroy();
+                    hrChartInst = new Chart(ctxHr, {
+                        type: 'bar',
+                        data: {
+                            labels: data.hr_zones.map(z => z.zone),
+                            datasets: [{
+                                label: '% Time in Zone',
+                                data: data.hr_zones.map(z => ((z.time_seconds / totalSecs) * 100).toFixed(1)),
+                                backgroundColor: ['rgba(156, 163, 175, 0.6)', 'rgba(59, 130, 246, 0.6)', 'rgba(16, 185, 129, 0.6)', 'rgba(245, 158, 11, 0.6)', 'rgba(239, 68, 68, 0.6)'],
+                                borderColor: ['#9ca3af', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'],
+                                borderWidth: 1
+                            }]
+                        },
+                        options: { 
+                            responsive: true, maintainAspectRatio: false, 
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                y: { max: 100, ticks: { callback: function(val) { return val + '%'; } } }
+                            }
+                        }
+                    });
+                }
+            } else {
+                showEmptyState('hr-container', 'No Heart Rate Data', 'Wear a heart rate monitor on your next activity.');
+            }
+
+            if(data.load_dist && data.load_dist.length > 0) {
+                const ctxLoad = document.getElementById('loadChart').getContext('2d');
+                if(loadChartInst) loadChartInst.destroy();
+                loadChartInst = new Chart(ctxLoad, {
+                    type: 'doughnut',
+                    data: {
+                        labels: data.load_dist.map(l => l.type),
+                        datasets: [{
+                            data: data.load_dist.map(l => l.distance),
+                            backgroundColor: ['#8b5cf6', '#3b82f6', '#ec4899', '#10b981'], borderWidth: 0
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, cutout: '70%' }
+                });
+            } else {
+                showEmptyState('load-container', 'No Training Load', 'Log some activities to see your load distribution.');
+            }
+        }
+    } catch(e) { console.error(e); }
+}
+
+function renderPmcChart() {
+    const history = allHistory.slice(-pmcWindow);
+    const labels = history.map(h => h.date.substring(5));
+
+    // Forecast: only include points after the last history date
+    const lastHistDate = history.length > 0 ? history[history.length - 1].date : null;
+    const forecastSlice = allForecast.filter(f => f.date > lastHistDate);
+    // Pad history length with nulls so forecast aligns on the chart
+    const forecastPadded = new Array(history.length).fill(null).concat(forecastSlice.map(f => f.projected_ctl));
+    const allLabels = labels.concat(forecastSlice.map(f => f.date.substring(5)));
+
+    const ctx = document.getElementById('pmcChart').getContext('2d');
+    if (pmcChartInst) pmcChartInst.destroy();
+    pmcChartInst = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: allLabels,
+            datasets: [
+                {
+                    label: 'Fitness (CTL)',
+                    data: history.map(h => h.fitness).concat(new Array(forecastSlice.length).fill(null)),
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.4, fill: true, pointRadius: 0, type: 'line', order: 1
+                },
+                {
+                    label: 'Projected CTL',
+                    data: forecastPadded,
+                    borderColor: 'rgba(147, 197, 253, 0.7)',
+                    backgroundColor: 'transparent',
+                    borderDash: [6, 3], tension: 0.4, pointRadius: 0, type: 'line', order: 2, borderWidth: 2
+                },
+                {
+                    label: 'Fatigue (ATL)',
+                    data: history.map(h => h.fatigue).concat(new Array(forecastSlice.length).fill(null)),
+                    borderColor: '#ec4899',
+                    tension: 0.4, borderDash: [5, 5], pointRadius: 0, type: 'line', order: 3
+                },
+                {
+                    label: 'Form (TSB)',
+                    data: history.map(h => h.form).concat(new Array(forecastSlice.length).fill(null)),
+                    backgroundColor: history.map(h => (h.form >= 0 ? 'rgba(16, 185, 129, 0.5)' : 'rgba(244, 63, 94, 0.4)')),
+                    borderColor: 'transparent',
+                    type: 'bar', order: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: true, labels: { color: 'var(--text-secondary)', boxWidth: 12, font: { size: 11 } } },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    titleColor: '#94a3b8',
+                    bodyColor: '#f8fafc',
+                    borderColor: 'rgba(255,255,255,0.08)',
+                    borderWidth: 1,
+                    padding: 12,
+                    callbacks: {
+                        afterBody: function(items) {
+                            const tsbItem = items.find(i => i.dataset.label === 'Form (TSB)');
+                            if (!tsbItem) return '';
+                            const tsb = tsbItem.raw;
+                            if (tsb === null) return '';
+                            if (tsb > 10) return '\u2705 Rested — ready to perform';
+                            if (tsb > -10) return '\u26AA Balanced — maintain training';
+                            if (tsb > -30) return '\u26A0\uFE0F Fatigued — training stress building';
+                            return '\uD83D\uDD34 Overreached — consider recovery';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { maxTicksLimit: 10, color: 'var(--text-secondary)' } },
+                y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: 'var(--text-secondary)' } }
+            }
+        }
+    });
+}
 
 async function fetchStats() {
     try {
         const res = await fetch(`/status/${athleteId}`);
         if(res.ok) {
             const data = await res.json();
-            document.getElementById('stats-loading').style.display = 'none';
-            document.getElementById('stats-content').style.display = 'flex';
             
             document.getElementById('fitness-val').innerText = Math.round(data.fitness_ctl);
             document.getElementById('fatigue-val').innerText = Math.round(data.fatigue_atl);
             document.getElementById('form-val').innerText = Math.round(data.form_tsb);
             if(data.latest_vo2_max) document.getElementById('vo2-val').innerText = data.latest_vo2_max;
-            
+
             if(data.ai_insight) {
-                document.getElementById('ai-insight').innerHTML = data.ai_insight.replace(/\ng/g, '<br>');
-            } else {
-                document.getElementById('ai-insight').innerHTML = "No insight generated.";
+                document.getElementById('ai-insight').innerHTML = data.ai_insight;
             }
 
-            // Draw Chart
-            const history = data.history;
-            if(history && history.length > 0) {
-                const labels = history.map(h => h.date.substring(5)); // MM-DD
-                const tsbData = history.map(h => h.form);
-                
-                const ctx = document.getElementById('formChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Form (TSB)',
-                            data: tsbData,
-                            borderColor: '#f9a8d4',
-                            backgroundColor: 'rgba(249, 168, 212, 0.2)',
-                            fill: true,
-                            tension: 0.4,
-                            borderWidth: 3,
-                            pointBackgroundColor: '#f43f5e',
-                            pointBorderColor: '#fff',
-                            pointRadius: 5
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            y: { grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#94a3b8' } },
-                            x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
-                        }
-                    }
-                });
+            const pmcSkele = document.getElementById('pmc-skeleton');
+            if(pmcSkele) pmcSkele.style.display = 'none';
+
+            allHistory = data.history || [];
+            allForecast = data.forecast || [];
+
+            if(allHistory.length > 0) {
+                renderPmcChart();
+            } else {
+                showEmptyState('pmc-container', 'No Activity History', 'Hit the road and upload some runs!');
             }
-        } else {
-            console.warn("Strava pipeline hasn't processed data yet.");
-            document.getElementById('stats-loading').innerText = "Data processing... check back later.";
-            document.getElementById('ai-insight').innerHTML = "No context available yet.";
         }
-    } catch(err) {
-        console.error(err);
-    }
+    } catch(err) { console.error(err); }
 }
 
 async function fetchSchedule() {
-    document.getElementById('schedule-content').style.display = 'none';
+    document.getElementById('calendar-grid').style.display = 'none';
     document.getElementById('schedule-loading').style.display = 'block';
     try {
-        let url = `/schedule/${athleteId}?race_date=${encodeURIComponent(raceDate)}&race_type=${encodeURIComponent(raceType)}`;
-        if(goalTime) url += `&goal_time=${encodeURIComponent(goalTime)}`;
-        
+        const url = `/schedule/${athleteId}?race_date=${encodeURIComponent(document.getElementById('raceDate').value)}&race_type=${encodeURIComponent(document.getElementById('raceLength').value)}&goal_time=${encodeURIComponent(document.getElementById('goalTime').value)}`;
         const res = await fetch(url);
         if(res.ok) {
             const data = await res.json();
             const sched = data.schedule;
             
             document.getElementById('schedule-loading').style.display = 'none';
-            document.getElementById('schedule-content').style.display = 'block';
+            document.getElementById('calendar-grid').style.display = 'grid';
             
-            if(sched.error) {
-                document.getElementById('schedule-blurb').innerText = "Hold on! Ensure you start the AI model or provide a Groq API key to generate schedules.";
+            if(sched.error || !sched.plan) {
+                document.getElementById('schedule-blurb').innerText = "Failed to load plan. Check LLM setup.";
                 return;
             }
             
-            document.getElementById('schedule-blurb').innerText = sched.blurb || "Here is your plan:";
-            if(sched.recommended_goal_time) {
-                document.getElementById('schedule-goal').innerText = "Recommended Goal Time: " + sched.recommended_goal_time;
-            }
+            document.getElementById('schedule-blurb').innerText = sched.blurb || "Here is your customized plan:";
             
-            const timeline = document.getElementById('schedule-timeline');
-            timeline.innerHTML = '';
+            const grid = document.getElementById('calendar-grid');
+            grid.innerHTML = '';
             
-            if(sched.plan) {
-                Object.keys(sched.plan).sort().forEach(date => {
-                    const d = new Date(date);
-                    const dayStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                    const p = sched.plan[date];
-                    
-                    const div = document.createElement('div');
-                    div.className = 'timeline-item';
-                    div.innerHTML = `
-                        <h4 style="color: var(--primary); margin-bottom: 0.2rem;">${dayStr} 
-                            <span style="color: var(--text-main); float: right; font-size: 0.9rem;">${p.type_of_workout}</span>
-                        </h4>
-                        <p style="margin-bottom: 0.3rem;"><strong style="color: #94a3b8">${p.approximate_distance || 'Time/Dist'} • ${p.training_focus || 'Focus'}</strong></p>
-                        <p style="font-size: 0.95rem;">${p.description}</p>
-                    `;
-                    timeline.appendChild(div);
-                });
-            }
-        } else {
-            document.getElementById('schedule-loading').innerText = "Failed to load schedule. Data may still be processing.";
+            Object.keys(sched.plan).sort().forEach((date, i) => {
+                const d = new Date(date);
+                const dayStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                const p = sched.plan[date];
+                
+                let dist = p.approximate_distance || '';
+                if(isMetric && dist.toLowerCase().includes('mile')) {
+                    const miles = parseFloat(dist);
+                    if(!isNaN(miles)) dist = (miles * 1.60934).toFixed(1) + ' km';
+                }
+
+                const card = document.createElement('div');
+                card.className = 'workout-card';
+                card.draggable = true;
+                
+                card.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', i); card.style.opacity = '0.5'; });
+                card.addEventListener('dragend', () => card.style.opacity = '1');
+                card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drag-over'); });
+                card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+                card.addEventListener('drop', (e) => { e.preventDefault(); card.classList.remove('drag-over'); card.style.borderColor = '#10b981'; });
+
+                card.innerHTML = `
+                    <div class="workout-header">
+                        <span class="workout-date"><i class="fas fa-calendar-alt"></i> ${dayStr}</span>
+                        <span class="workout-type">${p.type_of_workout}</span>
+                    </div>
+                    <div class="workout-desc">
+                        <strong style="color: var(--text-primary);">${dist} • ${p.training_focus || 'Focus'}</strong><br>
+                        ${p.description}
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
         }
-    } catch(err) {
-        console.error(err);
-        document.getElementById('schedule-loading').innerText = "Network Error.";
-    }
+    } catch(err) { console.error(err); }
 }
 
+document.getElementById('header-subtitle').innerText = `Training for: ${document.getElementById('raceLength').value.toUpperCase()} on ${document.getElementById('raceDate').value}`;
 fetchStats();
+fetchAnalytics();
 fetchSchedule();
 </script>
-
 {% endif %}
 {% endblock %}

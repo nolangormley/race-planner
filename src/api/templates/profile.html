@@ -1,0 +1,555 @@
+{% extends "base.html" %}
+
+{% block split_styles %}
+<style>
+:root {
+    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.4);
+    --panel-bg: rgba(15, 23, 42, 0.6);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --input-bg: rgba(0,0,0,0.3);
+    --body-bg: #0f172a;
+}
+[data-theme="light"] {
+    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.2);
+    --panel-bg: rgba(255, 255, 255, 0.9);
+    --panel-border: rgba(0, 0, 0, 0.1);
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --input-bg: rgba(255,255,255,0.8);
+    --body-bg: #f8fafc;
+}
+body { background-color: var(--body-bg); color: var(--text-primary); }
+
+.profile-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-top: 2rem;
+    padding-bottom: 3rem;
+}
+@media (max-width: 900px) { .profile-grid { grid-template-columns: 1fr; } }
+
+.profile-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 1.75rem;
+    box-shadow: var(--accent-glow);
+}
+.profile-card.full-width { grid-column: 1 / -1; }
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+.card-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 0;
+}
+
+/* Field display rows */
+.field-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--panel-border);
+}
+.field-row:last-child { border-bottom: none; }
+.field-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+}
+.field-value { font-weight: 600; color: var(--text-primary); }
+
+/* Editable form */
+.edit-form { display: none; }
+.edit-form.visible { display: block; }
+.view-mode.hidden { display: none; }
+
+.form-group { margin-bottom: 1rem; }
+.form-group label {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+}
+.form-group input, .form-group select {
+    width: 100%;
+    padding: 0.65rem 0.75rem;
+    background: var(--input-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    box-sizing: border-box;
+}
+
+.unit-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+.unit-pill {
+    padding: 0.25rem 0.65rem;
+    border-radius: 20px;
+    border: 1px solid var(--panel-border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+}
+.unit-pill.active {
+    background: rgba(59,130,246,0.15);
+    border-color: #3b82f6;
+    color: #60a5fa;
+}
+
+.btn-save {
+    padding: 0.6rem 1.5rem;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    border: none; border-radius: 8px;
+    color: white; font-weight: 600;
+    cursor: pointer; transition: opacity 0.2s;
+}
+.btn-save:hover { opacity: 0.85; }
+.btn-edit {
+    padding: 0.4rem 1rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer; font-size: 0.85rem;
+    transition: all 0.2s;
+}
+.btn-edit:hover { border-color: #60a5fa; color: #60a5fa; }
+
+/* Stats row */
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+}
+@media (max-width: 600px) { .stats-row { grid-template-columns: 1fr 1fr; } }
+.stat-item { text-align: center; }
+.stat-num {
+    font-size: 2rem; font-weight: 700;
+    background: linear-gradient(135deg, #3b82f6, #a78bfa);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.stat-lbl { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin-top: 0.25rem; }
+
+/* Strava badge */
+.strava-badge {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.strava-connected { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+.strava-disconnected { background: rgba(244,63,94,0.1); color: #f43f5e; border: 1px solid rgba(244,63,94,0.3); }
+
+/* Danger zone */
+.danger-zone { border-color: rgba(244,63,94,0.25); }
+.danger-zone .card-title { background: linear-gradient(135deg, #f43f5e, #fb7185); }
+.btn-danger-soft {
+    padding: 0.6rem 1.5rem;
+    border: 1px solid rgba(244,63,94,0.4);
+    border-radius: 8px;
+    background: transparent;
+    color: #f43f5e;
+    cursor: not-allowed;
+    font-size: 0.9rem;
+    opacity: 0.5;
+}
+</style>
+<script>
+    const savedThemeInit = localStorage.getItem('theme');
+    if (savedThemeInit === 'light') document.documentElement.setAttribute('data-theme', 'light');
+</script>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 0.5rem;">
+    <h1 style="font-size: 2.2rem; margin-bottom: 0.25rem;">Your Profile</h1>
+    <p style="color: var(--text-secondary);">Manage your account, race goal, and preferences.</p>
+</div>
+
+<div class="profile-grid">
+
+    <!-- ===== SECTION 1: ATHLETE IDENTITY ===== -->
+    <div class="profile-card">
+        <div class="card-header">
+            <h3 class="card-title">Athlete Identity</h3>
+            <button class="btn-edit" id="edit-identity-btn" onclick="toggleEditIdentity()">Edit</button>
+        </div>
+
+        <!-- View mode -->
+        <div id="identity-view" class="view-mode">
+            <div class="field-row"><span class="field-label">Name</span><span class="field-value" id="view-name">{{ user.name }}</span></div>
+            <div class="field-row"><span class="field-label">Email</span><span class="field-value" id="view-email">{{ user.email }}</span></div>
+            <div class="field-row"><span class="field-label">Date of Birth</span><span class="field-value" id="view-dob">{{ user.date_of_birth }}</span></div>
+            <div class="field-row"><span class="field-label">Gender</span><span class="field-value">{{ user.gender or '—' }}</span></div>
+            <div class="field-row"><span class="field-label">Height</span><span class="field-value" id="view-height">—</span></div>
+            <div class="field-row"><span class="field-label">Weight</span><span class="field-value" id="view-weight">—</span></div>
+        </div>
+
+        <!-- Edit mode -->
+        <div id="identity-edit" class="edit-form">
+            <div class="unit-toggle-row">
+                Units:
+                <button class="unit-pill active" id="pill-imperial" onclick="setProfileUnit('imperial')">Imperial</button>
+                <button class="unit-pill" id="pill-metric" onclick="setProfileUnit('metric')">Metric</button>
+            </div>
+
+            <div class="form-group">
+                <label>Full Name</label>
+                <input type="text" id="edit-name" value="{{ user.name }}">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="edit-email" value="{{ user.email }}">
+            </div>
+            <div class="form-group">
+                <label>Date of Birth</label>
+                <input type="date" id="edit-dob" value="{{ user.date_of_birth }}">
+            </div>
+            <div class="form-group">
+                <label>Gender</label>
+                <select id="edit-gender">
+                    <option value="M" {% if user.gender == 'M' %}selected{% endif %}>Male</option>
+                    <option value="F" {% if user.gender == 'F' %}selected{% endif %}>Female</option>
+                    <option value="Other" {% if user.gender == 'Other' %}selected{% endif %}>Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label id="height-label">Height (ft / in)</label>
+                <div style="display: flex; gap: 0.5rem;">
+                    <input type="number" id="edit-height-ft" placeholder="ft" style="width: 50%;" min="0">
+                    <input type="number" id="edit-height-in" placeholder="in" style="width: 50%;" min="0" max="11">
+                </div>
+                <input type="number" id="edit-height-cm" placeholder="cm" style="display:none;">
+            </div>
+            <div class="form-group">
+                <label id="weight-label">Weight (lbs)</label>
+                <input type="number" id="edit-weight" placeholder="e.g. 165" min="0">
+            </div>
+            <div style="display: flex; gap: 0.75rem; margin-top: 1rem;">
+                <button class="btn-save" onclick="saveIdentity()">Save Changes</button>
+                <button class="btn-edit" onclick="toggleEditIdentity()">Cancel</button>
+            </div>
+            <p id="identity-msg" style="margin-top: 0.75rem; font-size: 0.85rem;"></p>
+        </div>
+    </div>
+
+    <!-- ===== SECTION 2: RACE GOAL ===== -->
+    <div class="profile-card">
+        <div class="card-header">
+            <h3 class="card-title">Race Goal</h3>
+        </div>
+
+        {% set race_date = user.race_date %}
+        <div class="field-row">
+            <span class="field-label">Race Distance</span>
+            <span class="field-value">{{ user.race_length or '—' }}</span>
+        </div>
+        <div class="field-row">
+            <span class="field-label">Race Date</span>
+            <span class="field-value" id="race-date-display">
+                {% if user.race_date %}{{ user.race_date }}{% else %}—{% endif %}
+            </span>
+        </div>
+        <div class="field-row">
+            <span class="field-label">Goal Time</span>
+            <span class="field-value">{{ user.race_goal_time or '—' }}</span>
+        </div>
+
+        <form style="margin-top: 1.5rem;" onsubmit="saveRaceGoal(event)">
+            <div class="form-group">
+                <label>Race Distance</label>
+                <select id="prof-race-length">
+                    <option value="5k" {% if user.race_length == '5k' %}selected{% endif %}>5K</option>
+                    <option value="5 mile" {% if user.race_length == '5 mile' %}selected{% endif %}>5 Mile</option>
+                    <option value="10k" {% if user.race_length == '10k' %}selected{% endif %}>10K</option>
+                    <option value="10 mile" {% if user.race_length == '10 mile' %}selected{% endif %}>10 Mile</option>
+                    <option value="half marathon" {% if user.race_length == 'half marathon' %}selected{% endif %}>Half Marathon</option>
+                    <option value="marathon" {% if user.race_length == 'marathon' %}selected{% endif %}>Marathon</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Race Date</label>
+                <input type="date" id="prof-race-date" value="{{ user.race_date }}">
+            </div>
+            <div class="form-group">
+                <label>Goal Time (HH:MM:SS)</label>
+                <input type="text" id="prof-goal-time" placeholder="e.g. 1:45:00" value="{{ user.race_goal_time or '' }}">
+            </div>
+            <button type="submit" class="btn-save">Update Race Goal</button>
+            <p id="race-msg" style="margin-top: 0.75rem; font-size: 0.85rem;"></p>
+        </form>
+    </div>
+
+    <!-- ===== SECTION 3: STRAVA CONNECTION ===== -->
+    <div class="profile-card">
+        <div class="card-header">
+            <h3 class="card-title">Strava Connection</h3>
+        </div>
+        {% if user.strava_athlete_id %}
+            <div class="strava-badge strava-connected" style="margin-bottom: 1rem;">
+                ✅ Connected
+            </div>
+            <div class="field-row"><span class="field-label">Athlete ID</span><span class="field-value">{{ user.strava_athlete_id }}</span></div>
+            <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
+                <a href="/strava-auth" class="btn-save" style="text-decoration: none; display: inline-block; text-align: center;">Re-authorize Strava</a>
+            </div>
+        {% else %}
+            <div class="strava-badge strava-disconnected" style="margin-bottom: 1.5rem;">
+                ❌ Not Connected
+            </div>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.25rem;">Connect your Strava account to sync your training data and unlock all dashboard features.</p>
+            <a href="/strava-auth" class="btn-save" style="text-decoration: none; display: inline-block; text-align: center;">Connect Strava Now</a>
+        {% endif %}
+    </div>
+
+    <!-- ===== SECTION 4: ACCOUNT STATS ===== -->
+    <div class="profile-card">
+        <div class="card-header">
+            <h3 class="card-title">Account Stats</h3>
+        </div>
+        <div class="stats-row">
+            <div class="stat-item">
+                <div class="stat-num" id="stat-total-runs">—</div>
+                <div class="stat-lbl">Runs Logged</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-num" id="stat-total-dist">—</div>
+                <div class="stat-lbl">Total Miles</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-num" id="stat-earliest">—</div>
+                <div class="stat-lbl">First Activity</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-num" style="font-size: 1.1rem;">{{ user.id }}</div>
+                <div class="stat-lbl">Account ID</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== SECTION 5: DANGER ZONE ===== -->
+    <div class="profile-card danger-zone full-width">
+        <div class="card-header">
+            <h3 class="card-title">Danger Zone</h3>
+        </div>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+            <a href="/logout" class="btn-save" style="text-decoration: none; text-align: center; background: linear-gradient(135deg, #475569, #334155);">Logout</a>
+            <button class="btn-danger-soft" title="Contact support to delete your account" disabled>Delete Account</button>
+            <span style="color: var(--text-secondary); font-size: 0.8rem;">To delete your account, contact support.</span>
+        </div>
+    </div>
+
+</div>
+
+<script>
+const userId = {{ user.id }};
+
+// ---- Unit toggle ----
+let profileUnit = localStorage.getItem('profileUnit') || 'imperial';
+const rawHeightM = {{ user.height or 'null' }};
+const rawWeightKg = {{ user.weight or 'null' }};
+
+function setProfileUnit(u) {
+    profileUnit = u;
+    localStorage.setItem('profileUnit', u);
+    document.getElementById('pill-imperial').classList.toggle('active', u === 'imperial');
+    document.getElementById('pill-metric').classList.toggle('active', u === 'metric');
+
+    const heightLabel = document.getElementById('height-label');
+    const weightLabel = document.getElementById('weight-label');
+    const ftInputs = document.querySelector('div[style*="display: flex; gap: 0.5rem"]'); // ft/in pair
+    const cmInput = document.getElementById('edit-height-cm');
+
+    if (u === 'imperial') {
+        heightLabel.textContent = 'Height (ft / in)';
+        weightLabel.textContent = 'Weight (lbs)';
+        ftInputs.style.display = 'flex';
+        cmInput.style.display = 'none';
+        if (rawWeightKg) document.getElementById('edit-weight').value = Math.round(rawWeightKg * 2.20462);
+        if (rawHeightM) {
+            const totalIn = rawHeightM * 39.3701;
+            document.getElementById('edit-height-ft').value = Math.floor(totalIn / 12);
+            document.getElementById('edit-height-in').value = Math.round(totalIn % 12);
+        }
+    } else {
+        heightLabel.textContent = 'Height (cm)';
+        weightLabel.textContent = 'Weight (kg)';
+        ftInputs.style.display = 'none';
+        cmInput.style.display = 'block';
+        if (rawWeightKg) document.getElementById('edit-weight').value = Math.round(rawWeightKg);
+        if (rawHeightM) document.getElementById('edit-height-cm').value = Math.round(rawHeightM * 100);
+    }
+}
+
+function toggleEditIdentity() {
+    const view = document.getElementById('identity-view');
+    const edit = document.getElementById('identity-edit');
+    const btn = document.getElementById('edit-identity-btn');
+    const isEditing = edit.classList.contains('visible');
+    edit.classList.toggle('visible', !isEditing);
+    view.classList.toggle('hidden', !isEditing);
+    btn.textContent = isEditing ? 'Edit' : 'Cancel';
+    if (!isEditing) setProfileUnit(profileUnit);
+}
+
+async function saveIdentity() {
+    let heightM = null, weightKg = null;
+    if (profileUnit === 'imperial') {
+        const ft = parseFloat(document.getElementById('edit-height-ft').value) || 0;
+        const inches = parseFloat(document.getElementById('edit-height-in').value) || 0;
+        heightM = ((ft * 12) + inches) / 39.3701;
+        const lbs = parseFloat(document.getElementById('edit-weight').value);
+        if (!isNaN(lbs)) weightKg = lbs / 2.20462;
+    } else {
+        const cm = parseFloat(document.getElementById('edit-height-cm').value);
+        if (!isNaN(cm)) heightM = cm / 100;
+        const kg = parseFloat(document.getElementById('edit-weight').value);
+        if (!isNaN(kg)) weightKg = kg;
+    }
+
+    const payload = {
+        name: document.getElementById('edit-name').value,
+        email: document.getElementById('edit-email').value,
+        date_of_birth: document.getElementById('edit-dob').value,
+        gender: document.getElementById('edit-gender').value,
+        height: heightM || null,
+        weight: weightKg || null
+    };
+
+    const msg = document.getElementById('identity-msg');
+    try {
+        const res = await fetch(`/profile/${userId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+            msg.style.color = '#10b981';
+            msg.textContent = '✅ Profile updated.';
+            document.getElementById('view-name').textContent = payload.name;
+            document.getElementById('view-email').textContent = payload.email;
+            document.getElementById('view-dob').textContent = payload.date_of_birth;
+            setTimeout(toggleEditIdentity, 1000);
+        } else {
+            msg.style.color = '#f43f5e';
+            msg.textContent = '❌ ' + (data.detail || 'Save failed.');
+        }
+    } catch (e) {
+        msg.style.color = '#f43f5e';
+        msg.textContent = '❌ Connection error.';
+    }
+}
+
+async function saveRaceGoal(e) {
+    e.preventDefault();
+    const payload = {
+        race_length: document.getElementById('prof-race-length').value,
+        race_date: document.getElementById('prof-race-date').value,
+        race_goal_time: document.getElementById('prof-goal-time').value
+    };
+    const msg = document.getElementById('race-msg');
+    try {
+        const res = await fetch(`/settings/${userId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+            msg.style.color = '#10b981';
+            msg.textContent = '✅ Race goal updated.';
+        } else {
+            const data = await res.json();
+            msg.style.color = '#f43f5e';
+            msg.textContent = '❌ ' + (data.detail || 'Save failed.');
+        }
+    } catch (e) {
+        msg.style.color = '#f43f5e'; msg.textContent = '❌ Connection error.';
+    }
+}
+
+// ---- Render height/weight in view mode ----
+function renderViewStats() {
+    const unit = localStorage.getItem('profileUnit') || 'imperial';
+    if (rawHeightM) {
+        const hEl = document.getElementById('view-height');
+        if (unit === 'imperial') {
+            const totalIn = rawHeightM * 39.3701;
+            hEl.textContent = `${Math.floor(totalIn / 12)}' ${Math.round(totalIn % 12)}"`;
+        } else {
+            hEl.textContent = `${Math.round(rawHeightM * 100)} cm`;
+        }
+    }
+    if (rawWeightKg) {
+        const wEl = document.getElementById('view-weight');
+        wEl.textContent = unit === 'imperial' ? `${Math.round(rawWeightKg * 2.20462)} lbs` : `${Math.round(rawWeightKg)} kg`;
+    }
+}
+
+// ---- Race date "days away" ----
+function formatRaceDateDisplay() {
+    const el = document.getElementById('race-date-display');
+    const raw = el.textContent.trim();
+    if (!raw || raw === '—') return;
+    const raceDate = new Date(raw + 'T00:00:00');
+    const today = new Date(); today.setHours(0,0,0,0);
+    const diff = Math.round((raceDate - today) / 86400000);
+    const options = { year: 'numeric', month: 'long', day: 'numeric' };
+    const formatted = raceDate.toLocaleDateString('en-US', options);
+    el.textContent = diff > 0 ? `${formatted} — ${diff} days away` : (diff === 0 ? `${formatted} — Today! 🏁` : `${formatted} — ${Math.abs(diff)} days ago`);
+}
+
+// ---- Account stats from activities API ----
+async function loadAccountStats() {
+    try {
+        const res = await fetch('/api/activities');
+        if (!res.ok) return;
+        const acts = await res.json();
+        if (!Array.isArray(acts) || acts.length === 0) return;
+
+        const totalRuns = acts.filter(a => a.type === 'Run').length;
+        const totalDist = acts.reduce((s, a) => s + (a.distance || 0), 0);
+        const totalMiles = (totalDist * 0.000621371).toFixed(0);
+
+        const dates = acts.map(a => a.start_date_local).filter(Boolean).sort();
+        const earliest = dates.length > 0 ? new Date(dates[0]).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '—';
+
+        document.getElementById('stat-total-runs').textContent = totalRuns;
+        document.getElementById('stat-total-dist').textContent = totalMiles;
+        document.getElementById('stat-earliest').textContent = earliest;
+    } catch (e) { /* silent */ }
+}
+
+// Boot
+renderViewStats();
+formatRaceDateDisplay();
+loadAccountStats();
+</script>
+{% endblock %}

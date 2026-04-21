@@ -20,7 +20,7 @@
         </div>
         <div>
             {% if user %}
-                <span style="margin-right: 15px; color: var(--text-muted)">Welcome, {{ user.name }}</span>
+                <a href="/profile" style="margin-right: 15px; color: var(--text-secondary); text-decoration: none; font-weight: 600; transition: color 0.2s;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='var(--text-secondary)'">{{ user.name }}</a>
                 <a href="/logout" class="btn" style="padding: 0.5rem 1rem; border: 1px solid var(--panel-border)">Logout</a>
             {% else %}
                 <a href="/login" class="link">Login</a>
