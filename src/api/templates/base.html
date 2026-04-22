@@ -10,16 +10,17 @@
 </head>
 <body>
     <header>
-        <div class="logo-container">
+        <a href="/dashboard" class="logo-container" style="text-decoration: none; color: inherit; display: flex; align-items: center; gap: 12px; transition: transform 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
             <div class="logo-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
                 </svg>
             </div>
-            <h2>Race Planner</h2>
-        </div>
+            <h2 style="margin: 0; font-size: 1.25rem; font-weight: 800; letter-spacing: -0.02em;">Race Planner</h2>
+        </a>
         <div>
             {% if user %}
+                <a href="/warehouse" style="margin-right: 15px; color: var(--text-secondary); text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: color 0.2s;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='var(--text-secondary)'">Activities</a>
                 <a href="/profile" style="margin-right: 15px; color: var(--text-secondary); text-decoration: none; font-weight: 600; transition: color 0.2s;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='var(--text-secondary)'">{{ user.name }}</a>
                 <a href="/logout" class="btn" style="padding: 0.5rem 1rem; border: 1px solid var(--panel-border)">Logout</a>
             {% else %}

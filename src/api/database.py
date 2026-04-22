@@ -1,6 +1,6 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Date, Float
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine, Column, Integer, String, Date, Float, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/raceplanner")
 
@@ -29,5 +29,19 @@ class User(Base):
     strava_access_token = Column(String, nullable=True)
     strava_refresh_token = Column(String, nullable=True)
     strava_athlete_id = Column(Integer, nullable=True)
+
+    races = relationship("Race", back_populates="user", cascade="all, delete-orphan")
+
+class Race(Base):
+    __tablename__ = "races"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    name = Column(String, nullable=True) # E.g., 'Boston Marathon'
+    race_length = Column(String)
+    race_date = Column(Date)
+    goal_time = Column(String, nullable=True)
+
+    user = relationship("User", back_populates="races")
 
 Base.metadata.create_all(bind=engine)

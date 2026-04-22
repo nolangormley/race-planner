@@ -248,3 +248,44 @@ tr:hover { background: rgba(255, 255, 255, 0.02); }
 .toast.show { bottom: 30px; }
 .toast.success { background: #10b981; color: white; }
 .toast.error { background: #ef4444; color: white; }
+
+/* Tooltips */
+.stat-metric { position: relative; }
+.info-icon {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    cursor: help;
+    margin-left: 4px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    vertical-align: middle;
+}
+.info-icon:hover { opacity: 1; color: var(--secondary); }
+
+.metric-tooltip {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    width: 260px;
+    background: #1a1b26;
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 1rem;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    z-index: 100;
+    pointer-events: none;
+    opacity: 0;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    text-align: left;
+}
+.stat-metric:hover .metric-tooltip {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+.tooltip-title { font-weight: 700; color: white; margin-bottom: 0.5rem; display: block; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.25rem; }
+.tooltip-standing { display: block; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(255,255,255,0.1); font-weight: 600; }
+.standing-label { color: var(--secondary); }
+

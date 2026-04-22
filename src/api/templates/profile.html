@@ -260,49 +260,47 @@ body { background-color: var(--body-bg); color: var(--text-primary); }
         </div>
     </div>
 
-    <!-- ===== SECTION 2: RACE GOAL ===== -->
+    <!-- ===== SECTION 2: RACE CALENDAR ===== -->
     <div class="profile-card">
         <div class="card-header">
-            <h3 class="card-title">Race Goal</h3>
+            <h3 class="card-title">Race Calendar</h3>
+            <button class="btn-edit" onclick="document.getElementById('add-race-form').style.display = 'block';">➕ Add Race</button>
         </div>
 
-        {% set race_date = user.race_date %}
-        <div class="field-row">
-            <span class="field-label">Race Distance</span>
-            <span class="field-value">{{ user.race_length or '—' }}</span>
-        </div>
-        <div class="field-row">
-            <span class="field-label">Race Date</span>
-            <span class="field-value" id="race-date-display">
-                {% if user.race_date %}{{ user.race_date }}{% else %}—{% endif %}
-            </span>
-        </div>
-        <div class="field-row">
-            <span class="field-label">Goal Time</span>
-            <span class="field-value">{{ user.race_goal_time or '—' }}</span>
+        <div id="race-calendar-list" style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem;">
+            <!-- Races populated by JS -->
+            <div style="color: var(--text-secondary); font-size: 0.9rem;">Loading calendar...</div>
         </div>
 
-        <form style="margin-top: 1.5rem;" onsubmit="saveRaceGoal(event)">
+        <form id="add-race-form" style="display: none; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--panel-border);" onsubmit="addRace(event)">
+            <h4 style="margin-top: 0; margin-bottom: 1rem; font-size: 0.95rem;">Add New Race</h4>
+            <div class="form-group">
+                <label>Race Name (Optional)</label>
+                <input type="text" id="prof-race-name" placeholder="e.g. Boston Marathon">
+            </div>
             <div class="form-group">
                 <label>Race Distance</label>
-                <select id="prof-race-length">
-                    <option value="5k" {% if user.race_length == '5k' %}selected{% endif %}>5K</option>
-                    <option value="5 mile" {% if user.race_length == '5 mile' %}selected{% endif %}>5 Mile</option>
-                    <option value="10k" {% if user.race_length == '10k' %}selected{% endif %}>10K</option>
-                    <option value="10 mile" {% if user.race_length == '10 mile' %}selected{% endif %}>10 Mile</option>
-                    <option value="half marathon" {% if user.race_length == 'half marathon' %}selected{% endif %}>Half Marathon</option>
-                    <option value="marathon" {% if user.race_length == 'marathon' %}selected{% endif %}>Marathon</option>
+                <select id="prof-race-length" required>
+                    <option value="5k">5K</option>
+                    <option value="5 mile">5 Mile</option>
+                    <option value="10k">10K</option>
+                    <option value="10 mile">10 Mile</option>
+                    <option value="half marathon">Half Marathon</option>
+                    <option value="marathon">Marathon</option>
                 </select>
             </div>
             <div class="form-group">
                 <label>Race Date</label>
-                <input type="date" id="prof-race-date" value="{{ user.race_date }}">
+                <input type="date" id="prof-race-date" required>
             </div>
             <div class="form-group">
-                <label>Goal Time (HH:MM:SS)</label>
-                <input type="text" id="prof-goal-time" placeholder="e.g. 1:45:00" value="{{ user.race_goal_time or '' }}">
+                <label>Goal Time (HH:MM:SS) (Optional)</label>
+                <input type="text" id="prof-goal-time" placeholder="e.g. 1:45:00">
             </div>
-            <button type="submit" class="btn-save">Update Race Goal</button>
+            <div style="display: flex; gap: 0.75rem;">
+                <button type="submit" class="btn-save">Save Race</button>
+                <button type="button" class="btn-edit" onclick="document.getElementById('add-race-form').style.display = 'none';">Cancel</button>
+            </div>
             <p id="race-msg" style="margin-top: 0.75rem; font-size: 0.85rem;"></p>
         </form>
     </div>
@@ -354,7 +352,28 @@ body { background-color: var(--body-bg); color: var(--text-primary); }
         </div>
     </div>
 
-    <!-- ===== SECTION 5: DANGER ZONE ===== -->
+    <!-- ===== SECTION 5: APP PREFERENCES ===== -->
+    <div class="profile-card">
+        <div class="card-header">
+            <h3 class="card-title">App Preferences</h3>
+        </div>
+        <div class="field-row" style="border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem;">
+            <span class="field-label" style="display: flex; align-items: center;">Theme</span>
+            <select id="themeToggle" class="form-control" style="width: 50%;" onchange="toggleTheme()">
+                <option value="dark">Dark Mode</option>
+                <option value="light">Light Mode</option>
+            </select>
+        </div>
+        <div class="field-row" style="border-bottom: none; padding-top: 1rem;">
+            <span class="field-label" style="display: flex; align-items: center;">Dashboard Layout</span>
+            <select id="layoutToggle" class="form-control" style="width: 50%;" onchange="toggleLayout()">
+                <option value="default">Default (Grid)</option>
+                <option value="compact">Compact (Stack)</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- ===== SECTION 6: DANGER ZONE ===== -->
     <div class="profile-card danger-zone full-width">
         <div class="card-header">
             <h3 class="card-title">Danger Zone</h3>
@@ -372,13 +391,14 @@ body { background-color: var(--body-bg); color: var(--text-primary); }
 const userId = {{ user.id }};
 
 // ---- Unit toggle ----
-let profileUnit = localStorage.getItem('profileUnit') || 'imperial';
+// Use global 'units' from localStorage so it syncs with dashboard
+let globalUnit = localStorage.getItem('units') || 'imperial';
 const rawHeightM = {{ user.height or 'null' }};
 const rawWeightKg = {{ user.weight or 'null' }};
 
 function setProfileUnit(u) {
-    profileUnit = u;
-    localStorage.setItem('profileUnit', u);
+    globalUnit = u;
+    localStorage.setItem('units', u);
     document.getElementById('pill-imperial').classList.toggle('active', u === 'imperial');
     document.getElementById('pill-metric').classList.toggle('active', u === 'metric');
 
@@ -416,12 +436,12 @@ function toggleEditIdentity() {
     edit.classList.toggle('visible', !isEditing);
     view.classList.toggle('hidden', !isEditing);
     btn.textContent = isEditing ? 'Edit' : 'Cancel';
-    if (!isEditing) setProfileUnit(profileUnit);
+    if (!isEditing) setProfileUnit(globalUnit);
 }
 
 async function saveIdentity() {
     let heightM = null, weightKg = null;
-    if (profileUnit === 'imperial') {
+    if (globalUnit === 'imperial') {
         const ft = parseFloat(document.getElementById('edit-height-ft').value) || 0;
         const inches = parseFloat(document.getElementById('edit-height-in').value) || 0;
         heightM = ((ft * 12) + inches) / 39.3701;
@@ -468,36 +488,105 @@ async function saveIdentity() {
     }
 }
 
-async function saveRaceGoal(e) {
+// ---- Race Calendar ----
+async function fetchRaces() {
+    const list = document.getElementById('race-calendar-list');
+    try {
+        const res = await fetch(`/api/races/${userId}`);
+        if (!res.ok) throw new Error();
+        const races = await res.json();
+        
+        if (races.length === 0) {
+            list.innerHTML = '<div style="color: var(--text-secondary); font-size: 0.9rem;">No upcoming races. Add one to build your training plan!</div>';
+            return;
+        }
+
+        const today = new Date();
+        today.setHours(0,0,0,0);
+
+        list.innerHTML = races.map(r => {
+            const rd = new Date(r.race_date + 'T00:00:00');
+            const diff = Math.round((rd - today) / 86400000);
+            const dateStr = rd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            
+            let countdown = '';
+            if (diff > 0) countdown = `<span style="color: #60a5fa; font-size: 0.85rem; background: rgba(59,130,246,0.1); padding: 0.15rem 0.5rem; border-radius: 4px;">In ${diff} days</span>`;
+            else if (diff === 0) countdown = `<span style="color: #10b981; font-size: 0.85rem; background: rgba(16,185,129,0.1); padding: 0.15rem 0.5rem; border-radius: 4px;">Today! 🏁</span>`;
+            else countdown = `<span style="color: var(--text-secondary); font-size: 0.85rem;">${Math.abs(diff)} days ago</span>`;
+
+            return `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.85rem; background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: 8px;">
+                    <div>
+                        <div style="font-weight: 600; margin-bottom: 0.15rem;">
+                            ${r.name ? r.name + ' (' + r.race_length + ')' : r.race_length.toUpperCase()}
+                        </div>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary); display: flex; gap: 0.5rem; align-items: center;">
+                            📅 ${dateStr}
+                            ${r.goal_time ? '• ⏱️ ' + r.goal_time : ''}
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        ${countdown}
+                        <button class="btn-edit" style="color: #f43f5e; border-color: rgba(244,63,94,0.3); padding: 0.3rem 0.6rem;" onclick="deleteRace(${r.id})" title="Delete Race">✕</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        list.innerHTML = '<div style="color: #f43f5e; font-size: 0.9rem;">Failed to load races.</div>';
+    }
+}
+
+async function addRace(e) {
     e.preventDefault();
     const payload = {
+        name: document.getElementById('prof-race-name').value || null,
         race_length: document.getElementById('prof-race-length').value,
         race_date: document.getElementById('prof-race-date').value,
-        race_goal_time: document.getElementById('prof-goal-time').value
+        goal_time: document.getElementById('prof-goal-time').value || null
     };
+    
     const msg = document.getElementById('race-msg');
+    msg.textContent = 'Saving...';
+    msg.style.color = 'var(--text-secondary)';
+    
     try {
-        const res = await fetch(`/settings/${userId}`, {
+        const res = await fetch(`/api/races/${userId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
         if (res.ok) {
-            msg.style.color = '#10b981';
-            msg.textContent = '✅ Race goal updated.';
+            msg.textContent = '';
+            document.getElementById('add-race-form').reset();
+            document.getElementById('add-race-form').style.display = 'none';
+            fetchRaces();
         } else {
             const data = await res.json();
             msg.style.color = '#f43f5e';
-            msg.textContent = '❌ ' + (data.detail || 'Save failed.');
+            msg.textContent = '❌ ' + (data.detail || 'Failed to save.');
         }
     } catch (e) {
-        msg.style.color = '#f43f5e'; msg.textContent = '❌ Connection error.';
+        msg.style.color = '#f43f5e'; 
+        msg.textContent = '❌ Connection error.';
+    }
+}
+
+async function deleteRace(raceId) {
+    if(!confirm("Are you sure you want to remove this race from your calendar?")) return;
+    try {
+        const res = await fetch(`/api/races/${raceId}`, { method: 'DELETE' });
+        if (res.ok) {
+            fetchRaces();
+        }
+    } catch (e) {
+        console.error("Failed to delete race", e);
     }
 }
 
 // ---- Render height/weight in view mode ----
 function renderViewStats() {
-    const unit = localStorage.getItem('profileUnit') || 'imperial';
+    const unit = localStorage.getItem('units') || 'imperial';
     if (rawHeightM) {
         const hEl = document.getElementById('view-height');
         if (unit === 'imperial') {
@@ -513,18 +602,7 @@ function renderViewStats() {
     }
 }
 
-// ---- Race date "days away" ----
-function formatRaceDateDisplay() {
-    const el = document.getElementById('race-date-display');
-    const raw = el.textContent.trim();
-    if (!raw || raw === '—') return;
-    const raceDate = new Date(raw + 'T00:00:00');
-    const today = new Date(); today.setHours(0,0,0,0);
-    const diff = Math.round((raceDate - today) / 86400000);
-    const options = { year: 'numeric', month: 'long', day: 'numeric' };
-    const formatted = raceDate.toLocaleDateString('en-US', options);
-    el.textContent = diff > 0 ? `${formatted} — ${diff} days away` : (diff === 0 ? `${formatted} — Today! 🏁` : `${formatted} — ${Math.abs(diff)} days ago`);
-}
+
 
 // ---- Account stats from activities API ----
 async function loadAccountStats() {
@@ -547,9 +625,31 @@ async function loadAccountStats() {
     } catch (e) { /* silent */ }
 }
 
+// ---- App Preferences Toggles ----
+function toggleTheme() {
+    const val = document.getElementById('themeToggle').value;
+    if(val === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('theme', val);
+}
+
+function toggleLayout() {
+    const val = document.getElementById('layoutToggle').value;
+    localStorage.setItem('layout', val);
+}
+
+function loadPreferences() {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    const savedLayout = localStorage.getItem('layout') || 'default';
+    
+    document.getElementById('themeToggle').value = savedTheme;
+    document.getElementById('layoutToggle').value = savedLayout;
+}
+
 // Boot
+loadPreferences();
 renderViewStats();
-formatRaceDateDisplay();
+fetchRaces();
 loadAccountStats();
 </script>
 {% endblock %}
