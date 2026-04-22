@@ -19,7 +19,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category, calculate_vo2max_from_df, clean_val, calculate_acwr
 from src.api.auth_routes import router as auth_router
-from src.api.database import SessionLocal, User
+from src.api.database import SessionLocal, User, Race
 from sqlalchemy.orm import Session
 
 load_dotenv()
@@ -273,26 +273,65 @@ def get_users():
 def calculate_training_status_logic(user_id: int):
     con = get_db_connection()
     try:
-        # 1. Get Daily TRIMP Sums for this user
+        # --- Get athlete sex for TRIMP Banister sex coefficient ---
         try:
-            df = con.execute("""
-                SELECT 
+            athlete_row = con.execute(
+                "SELECT sex, weight FROM dim_athlete WHERE athlete_id = ?", [user_id]
+            ).fetchone()
+            sex = athlete_row[0] if athlete_row else 'M'
+            weight_kg = athlete_row[1] if athlete_row else None
+        except Exception:
+            sex = 'M'
+            weight_kg = None
+
+        # TRIMP Banister sex coefficient: 1.92 for males, 1.67 for females
+        sex_coeff = 1.67 if sex == 'F' else 1.92
+        hr_rest = 60  # assumed resting heart rate
+
+        # --- Compute daily TRIMP + EF directly from dim_activity (no separate table needed) ---
+        # TRIMP Banister = duration_min * hr_ratio * 0.64 * exp(sex_coeff * hr_ratio)
+        # Efficiency Factor (EF) = avg_speed / avg_heartrate  (proxy: m/s per bpm)
+        try:
+            df = con.execute(f"""
+                SELECT
                     da.start_date_local::DATE as activity_date,
-                    SUM(ae.trimp_banister) as daily_load,
-                    AVG(ae.efficiency_factor) as daily_ef,
-                    AVG(ae.aerobic_decoupling) as daily_decoup
-                FROM activity_effectiveness ae
-                JOIN dim_activity da ON ae.activity_id = da.activity_id
+                    SUM(
+                        CASE
+                            WHEN da.average_heartrate IS NOT NULL
+                              AND da.max_heartrate IS NOT NULL
+                              AND da.max_heartrate > da.average_heartrate
+                              AND da.max_heartrate > {hr_rest}
+                            THEN
+                                (da.moving_time / 60.0)
+                                * GREATEST(0.0, (da.average_heartrate - {hr_rest}) / (da.max_heartrate - {hr_rest}))
+                                * 0.64
+                                * EXP({sex_coeff} * GREATEST(0.0, (da.average_heartrate - {hr_rest}) / (da.max_heartrate - {hr_rest})))
+                            ELSE 0
+                        END
+                    ) as daily_load,
+                    AVG(
+                        CASE
+                            WHEN da.average_heartrate IS NOT NULL AND da.average_heartrate > 0
+                                 AND da.average_speed IS NOT NULL AND da.average_speed > 0
+                            THEN da.average_speed / da.average_heartrate
+                            ELSE NULL
+                        END
+                    ) as daily_ef,
+                    CAST(NULL AS DOUBLE) as daily_decoup
+                FROM dim_activity da
                 WHERE da.athlete_id = ?
+                  AND da.type = 'Run'
+                  AND da.moving_time > 0
                 GROUP BY 1
                 ORDER BY 1
             """, [user_id]).fetchdf()
         except Exception as e:
-            print(f"Error querying effectiveness: {e}")
+            print(f"Error computing TRIMP from dim_activity: {e}")
             return None
-        
+
         if df.empty:
             return None
+
 
         # 2. Reindex
         start_date = df['activity_date'].min()
@@ -338,15 +377,8 @@ def calculate_training_status_logic(user_id: int):
         vo2max_data = calculate_vo2max(user_id)
         latest_vo2_max = vo2max_data.get('latest_vo2_max') if vo2max_data else None
         
-        # Get Athlete Info
-        try:
-            athlete_data = con.execute("SELECT weight, sex FROM dim_athlete WHERE athlete_id = ?", [user_id]).fetchone()
-            weight_kg = athlete_data[0] if athlete_data else None
-            weight_lbs = round(weight_kg * 2.20462) if weight_kg else None
-            sex = athlete_data[1] if athlete_data else None
-        except:
-            weight_lbs = None
-            sex = None
+        # weight_kg and sex already fetched at top of function; derive weight_lbs here
+        weight_lbs = round(weight_kg * 2.20462) if weight_kg else None
 
         history_df = merged.tail(90)
         history_list = []
@@ -403,22 +435,58 @@ def calculate_training_status_logic(user_id: int):
     finally:
         con.close()
 
+def get_performance_standing(stats):
+    ctl = stats.get('fitness_ctl') or 0
+    tsb = stats.get('form_tsb') or 0
+    vo2 = stats.get('latest_vo2_max') or 0
+    gender = (stats.get('sex') or 'M').upper()
+    
+    # CTL Standing
+    ctl_lbl = 'Developing'
+    if ctl > 100: ctl_lbl = 'Elite Pro'
+    elif ctl > 70: ctl_lbl = 'Advanced Enthusiast'
+    elif ctl > 40: ctl_lbl = 'Consistent Runner'
+    
+    # TSB Standing
+    tsb_lbl = 'Balanced'
+    if tsb > 15: tsb_lbl = 'Fresh (Peaking)'
+    elif tsb < -30: tsb_lbl = 'High Overload'
+    elif tsb < -10: tsb_lbl = 'Optimal Training'
+
+    # VO2 Max (Simplified Table for Prompt Context)
+    vo2_lbl = 'Average'
+    if vo2 > 0:
+        if gender == 'M':
+            if vo2 > 52: vo2_lbl = 'Excellent/Superior'
+            elif vo2 > 45: vo2_lbl = 'Good'
+        else:
+            if vo2 > 46: vo2_lbl = 'Excellent/Superior'
+            elif vo2 > 39: vo2_lbl = 'Good'
+
+    return {
+        "ctl_standing": ctl_lbl,
+        "tsb_standing": tsb_lbl,
+        "vo2_standing": vo2_lbl
+    }
+
 def get_ai_insight(stats, context="status", workout=None):
     try:
         history_str = "\n".join([f"  - {h['date']}: Form (TSB): {h['form']}, Load (ATL): {h['fatigue']}" for h in stats.get('history', [])])
 
+        standings = get_performance_standing(stats)
+        
         if context == "status":
             prompt = (
-                f"Explain the user's current training status based on these metrics:\n"
-                f"- Fitness (CTL): {stats.get('fitness_ctl')}\n"
+                f"Explain the user's current training status based on these metrics and standings:\n"
+                f"- Fitness (CTL): {stats.get('fitness_ctl')} (Standing: {standings['ctl_standing']})\n"
                 f"- Fatigue (ATL): {stats.get('fatigue_atl')}\n"
-                f"- Form (TSB): {stats.get('form_tsb')} (Target: {stats.get('target_category')})\n"
+                f"- Form (TSB): {stats.get('form_tsb')} (Standing: {standings['tsb_standing']})\n"
+                f"- Estimated VO2 Max: {stats.get('latest_vo2_max', 'N/A')} (Standing: {standings['vo2_standing']})\n"
                 f"- Acute-to-Chronic Workload Ratio (ACWR): {stats.get('acwr')}\n"
-                f"- Estimated VO2 Max: {stats.get('latest_vo2_max', 'N/A')}\n"
                 f"- 7-Day Efficiency Factor: {stats.get('efficiency_factor_7d')}\n"
                 f"- 7-Day Aerobic Decoupling: {stats.get('aerobic_decoupling_7d')}%\n\n"
                 f"Give a HIGH-LEVEL EXECUTIVE SUMMARY of their readiness. "
-                f"Structure your response with clear HTML formatting including <ul>, <li>, and <strong> tags. Focus on what action they need to take today. "
+                f"Focus on what action they need to take today. "
                 f"Mention their ACWR (sweet spot 0.8-1.3). No fluff, no raw token dumps. Keep it professional and scannable."
             )
         elif context == "workout":
@@ -451,12 +519,15 @@ def get_ai_insight(stats, context="status", workout=None):
 
         system_prompt = (
             f"You are an expert running coach and one of your athletes is {race_info} The athlete is {sex_str}, and {weight_str}. "
-            f"Explain what the metrics mean using these rigid scientific benchmarks: "
-            f"(CTL < 30 = Beginner, 50-80 = Intermediate, >100 = Advanced). "
-            f"Provide actionable advice as concise bullet points. "
-            f"CRITICIAL CONSTRAINTS: "
-            f"1) You are permitted to recommend a MAXIMUM of ONE training action for the current day. Do not prescribe multiple workouts. "
-            f"2) Do not hallucinate pseudo-science. Running depletes energy. Rest restores it."
+            f"Use these rigid scientific benchmarks for context:\n"
+            f"- CTL: <40 Developing, 40-70 Consistent, 70-100 Advanced, >100 Elite Pro.\n"
+            f"- TSB: >15 Fresh (Peaking), -30 to -10 Optimal Training, <-30 High Overload.\n"
+            f"Provide actionable advice as concise bullet points. NEVER contradict the user's current 'Standing' provided in the prompt. "
+            f"CRITICAL CONSTRAINTS: "
+            f"1) Recommending a MAXIMUM of ONE training action for the current day. "
+            f"2) Do not hallucinate pseudo-science. Running depletes energy. Rest restores it. "
+            f"3) Output plain text only. Do NOT use markdown or HTML tags. Use only simple hyphens (-) for bullet points. "
+            f"4) KEEP IT EXTREMELY BRIEF. Provide exactly 1 short introductory sentence, followed by 2-3 short bullet points."
         )
 
         if llm_provider == "groq":
@@ -946,6 +1017,67 @@ def update_settings(user_id: int, settings: SettingsUpdate):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+# ---- RACE CALENDAR ENDPOINTS ----
+
+class RaceCreate(BaseModel):
+    name: Optional[str] = None
+    race_length: str
+    race_date: str
+    goal_time: Optional[str] = None
+
+@app.get("/api/races/{user_id}")
+def get_user_races(user_id: int):
+    db = SessionLocal()
+    try:
+        races = db.query(Race).filter(Race.user_id == user_id).order_by(Race.race_date.asc()).all()
+        return [
+            {
+                "id": r.id,
+                "name": r.name,
+                "race_length": r.race_length,
+                "race_date": str(r.race_date),
+                "goal_time": r.goal_time
+            }
+            for r in races
+        ]
+    finally:
+        db.close()
+
+@app.post("/api/races/{user_id}")
+def create_user_race(user_id: int, race_data: RaceCreate):
+    db = SessionLocal()
+    try:
+        r_date = datetime.strptime(race_data.race_date, '%Y-%m-%d').date()
+        new_race = Race(
+            user_id=user_id,
+            name=race_data.name,
+            race_length=race_data.race_length,
+            race_date=r_date,
+            goal_time=race_data.goal_time
+        )
+        db.add(new_race)
+        db.commit()
+        db.refresh(new_race)
+        return {"message": "Race created", "id": new_race.id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+@app.delete("/api/races/{race_id}")
+def delete_race(race_id: int):
+    db = SessionLocal()
+    try:
+        race = db.query(Race).filter(Race.id == race_id).first()
+        if not race:
+            raise HTTPException(status_code=404, detail="Race not found")
+        db.delete(race)
+        db.commit()
+        return {"message": "Race deleted"}
     finally:
         db.close()
 

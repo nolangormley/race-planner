@@ -120,25 +120,32 @@
         const activityId = "{{ activity_id }}";
 
         // Globals for Charts
-        Chart.defaults.color = '#8b949e';
+        Chart.defaults.color = '#c9d1d9';
         Chart.defaults.font.family = 'Inter';
 
         function formatDistance(meters) {
             return (meters * 0.000621371).toFixed(2) + ' mi';
         }
 
+        // Read user's unit preference
+        const isMetric = localStorage.getItem('units') === 'metric';
+        const paceUnit = isMetric ? 'min/km' : 'min/mi';
+        // Conversion factor: m/s → decimal minutes per unit distance
+        // min/mile = 26.8224 / v   |   min/km = 16.6667 / v
+        const paceConvFactor = isMetric ? (1000 / 60) : (1609.34 / 60);
+
         function formatPaceStr(meters_per_sec) {
             if (!meters_per_sec || meters_per_sec === 0) return '--';
-            const mins_per_mile = 26.8224 / meters_per_sec;
-            const m = Math.floor(mins_per_mile);
-            const s = Math.floor((mins_per_mile - m) * 60).toString().padStart(2, '0');
-            return `${m}:${s}/mi`;
+            const minsPerUnit = paceConvFactor / meters_per_sec;
+            const m = Math.floor(minsPerUnit);
+            const s = Math.floor((minsPerUnit - m) * 60).toString().padStart(2, '0');
+            return `${m}:${s} ${paceUnit}`;
         }
 
-        // Return decimal minutes per mile for charting (e.g. 8.5 for 8:30 min/mi)
-        function formatPaceDecimal(meters_per_sec) {
+        // Returns decimal minutes per unit (for chart Y axis)
+        function paceToDecimal(meters_per_sec) {
             if (!meters_per_sec || meters_per_sec === 0) return null;
-            return 26.8224 / meters_per_sec;
+            return paceConvFactor / meters_per_sec;
         }
 
         function formatTimeMinSec(seconds) {
@@ -188,7 +195,7 @@
         function renderCharts(data) {
             const labels = data.map(d => formatTimeMinSec(d.time_offset));
             const hrData = data.map(d => d.heartrate);
-            const paceData = data.map(d => formatPaceDecimal(d.velocity));
+            const paceData = data.map(d => paceToDecimal(d.velocity));
             const elevData = data.map(d => d.altitude ? d.altitude * 3.28084 : null);
 
             // Heart Rate Chart
@@ -219,31 +226,57 @@
             const validPaceData = paceData.filter(v => v !== null && v > 0);
             if (validPaceData.length > 0) {
                 const ctxPace = document.getElementById('paceChart').getContext('2d');
-                const paceGradient = ctxPace.createLinearGradient(0, 0, 0, 400);
-                paceGradient.addColorStop(0, 'rgba(88, 166, 255, 0.5)');
-                paceGradient.addColorStop(1, 'rgba(88, 166, 255, 0.0)');
-
-                // Compute a sane Y-axis range from the real pace values
                 const paceMin = Math.min(...validPaceData);
                 const paceMax = Math.max(...validPaceData);
 
+                // Custom plugin: manually draw gradient fill BELOW the pace line.
+                // Chart.js built-in fill is unreliable on reversed Y-axes, so we
+                // trace the polyline, close a polygon to the chart bottom, and fill it.
+                const paceFillPlugin = {
+                    id: 'paceFill',
+                    afterDatasetsDraw(chart) {
+                        const { ctx, chartArea } = chart;
+                        const meta = chart.getDatasetMeta(0);
+                        const pts = meta.data.filter(p => !isNaN(p.y) && p.y !== null);
+                        if (pts.length < 2) return;
+
+                        const bottom = chartArea.bottom;
+
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.moveTo(pts[0].x, bottom);          // start at bottom-left
+                        pts.forEach(p => ctx.lineTo(p.x, p.y)); // trace the line
+                        ctx.lineTo(pts[pts.length - 1].x, bottom); // close to bottom-right
+                        ctx.closePath();
+
+                        // Gradient: transparent near the line (chartArea.top), blue at bottom
+                        const grad = ctx.createLinearGradient(0, chartArea.top, 0, bottom);
+                        grad.addColorStop(0, 'rgba(88, 166, 255, 0.0)');
+                        grad.addColorStop(1, 'rgba(88, 166, 255, 0.40)');
+                        ctx.fillStyle = grad;
+                        ctx.fill();
+                        ctx.restore();
+                    }
+                };
+
                 new Chart(ctxPace, {
                     type: 'line',
+                    plugins: [paceFillPlugin],
                     data: {
                         labels: labels,
                         datasets: [{
-                            label: 'Pace (min/mi)',
+                            label: `Pace (${paceUnit})`,
                             data: paceData,
                             borderColor: '#58a6ff',
-                            backgroundColor: paceGradient,
+                            backgroundColor: 'transparent',
                             borderWidth: 2,
                             pointRadius: 0,
-                            fill: true,
+                            fill: false,    // manual fill via plugin above
                             tension: 0.4,
                             spanGaps: true
                         }]
                     },
-                    options: getCommonOptions('Pace (min/mi)', true, paceMin * 0.98, paceMax * 1.02)
+                    options: getCommonOptions(`Pace (${paceUnit})`, true, paceMin * 0.98, paceMax * 1.02)
                 });
             } else {
                 document.getElementById('paceChart').parentElement.innerHTML =
@@ -316,7 +349,7 @@
                                 if (title.includes('Pace') && val) {
                                     const m = Math.floor(val);
                                     const s = Math.floor((val - m) * 60).toString().padStart(2, '0');
-                                    return `${m}:${s} /mi`;
+                                    return `${m}:${s} ${paceUnit}`;
                                 }
                                 return `${Math.round(val)}`;
                             }

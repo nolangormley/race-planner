@@ -247,60 +247,19 @@ body {
     <!-- Sidebar -->
     <aside class="modern-sidebar">
         <div class="settings-card">
-            <h3>Race Profile <i class="fas fa-cog"></i></h3>
-            <form id="settingsForm" onsubmit="updateSettings(event)">
-                <div class="form-group">
-                    <label>Race Distance</label>
-                    <select id="raceLength">
-                        <option value="5k" {% if user.race_length == '5k' %}selected{% endif %}>5K</option>
-                        <option value="5 mile" {% if user.race_length == '5 mile' %}selected{% endif %}>5 Mile</option>
-                        <option value="10k" {% if user.race_length == '10k' %}selected{% endif %}>10K</option>
-                        <option value="10 mile" {% if user.race_length == '10 mile' %}selected{% endif %}>10 Mile</option>
-                        <option value="half marathon" {% if user.race_length == 'half marathon' %}selected{% endif %}>Half Marathon</option>
-                        <option value="marathon" {% if user.race_length == 'marathon' %}selected{% endif %}>Marathon</option>
-                    </select>
+            <h3>Target Race <i class="fas fa-flag-checkered" style="color:var(--text-secondary);"></i></h3>
+            <div class="form-group" style="margin-top: 1rem; margin-bottom: 0.5rem;">
+                <label>Select a race from your calendar for the AI to build a schedule towards:</label>
+                <select id="targetRaceSelect" class="form-control" onchange="fetchSchedule()" style="margin-top: 0.5rem;">
+                    <option value="">Loading your races...</option>
+                </select>
+                <div id="no-races-msg" style="display: none; margin-top: 0.5rem; font-size: 0.85rem; color: #f43f5e;">
+                    No upcoming races found. <a href="/profile" style="color: #60a5fa;">Add one in your profile</a>.
                 </div>
-                <div class="form-group">
-                    <label>Race Date</label>
-                    <input type="date" id="raceDate" value="{{ user.race_date }}">
-                </div>
-                <div class="form-group">
-                    <label>Goal Time</label>
-                    <input type="text" id="goalTime" placeholder="e.g. 1:45:00" value="{{ user.race_goal_time }}">
-                </div>
-                <button type="submit" class="btn-update">Update Profile</button>
-            </form>
+            </div>
         </div>
 
-        <div class="settings-card">
-            <h3>Navigation</h3>
-            <a href="/warehouse" class="btn btn-strava" style="display: block; text-align: center; text-decoration: none; margin-bottom: 0.5rem; border-radius: 6px; padding: 0.5rem;">Data Warehouse CRUD</a>
-        </div>
 
-        <div class="settings-card">
-            <h3>Customization</h3>
-            <div class="form-group">
-                <label>Units</label>
-                <select id="unitToggle" onchange="toggleUnits()">
-                    <option value="imperial" selected>Imperial (Miles/lbs)</option>
-                    <option value="metric">Metric (KM/kg)</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Theme</label>
-                <select id="themeToggle" onchange="toggleTheme()">
-                    <option value="dark" selected>Dark Mode</option>
-                    <option value="light">Light Mode</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Layout</label>
-                <select id="layoutToggle" onchange="toggleLayout()">
-                    <option value="default" selected>Default (Grid)</option>
-                    <option value="compact">Compact (Stack)</option>
-                </select>
-            </div>
-        </div>
 
         <div class="settings-card ai-module">
             <h3 style="color: #c084fc;">AI Executive Summary</h3>
@@ -316,10 +275,42 @@ body {
     <!-- Main Content -->
     <main class="main-charts">
         <div class="stats-row" id="top-stats">
-            <div class="stat-metric"><h4 id="fitness-val" style="background: linear-gradient(135deg, #3b82f6, #93c5fd); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4><p>Fitness (CTL)</p></div>
-            <div class="stat-metric"><h4 id="fatigue-val" style="background: linear-gradient(135deg, #f43f5e, #fb7185); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4><p>Fatigue (ATL)</p></div>
-            <div class="stat-metric"><h4 id="form-val" style="background: linear-gradient(135deg, #10b981, #34d399); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4><p>Form (TSB)</p></div>
-            <div class="stat-metric"><h4 id="vo2-val" style="background: linear-gradient(135deg, #a855f7, #d8b4fe); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4><p>VO2 Max Est.</p></div>
+            <div class="stat-metric" id="stat-ctl">
+                <h4 id="fitness-val" style="background: linear-gradient(135deg, #3b82f6, #93c5fd); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
+                <p>Fitness (CTL) <span class="info-icon">ⓘ</span></p>
+                <div class="metric-tooltip">
+                    <span class="tooltip-title">Chronic Training Load</span>
+                    <span class="tooltip-desc">A 42-day rolling average of your daily training stress. Represents your overall aerobic engine and capacity.</span>
+                    <span class="tooltip-standing">Standing: <span class="standing-label" id="standing-ctl">Calculating...</span></span>
+                </div>
+            </div>
+            <div class="stat-metric" id="stat-atl">
+                <h4 id="fatigue-val" style="background: linear-gradient(135deg, #f43f5e, #fb7185); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
+                <p>Fatigue (ATL) <span class="info-icon">ⓘ</span></p>
+                <div class="metric-tooltip">
+                    <span class="tooltip-title">Acute Training Load</span>
+                    <span class="tooltip-desc">A 7-day average of training stress. High ATL relative to CTL indicates significant recent strain.</span>
+                    <span class="tooltip-standing">Standing: <span class="standing-label" id="standing-atl">Calculating...</span></span>
+                </div>
+            </div>
+            <div class="stat-metric" id="stat-tsb">
+                <h4 id="form-val" style="background: linear-gradient(135deg, #10b981, #34d399); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
+                <p>Form (TSB) <span class="info-icon">ⓘ</span></p>
+                <div class="metric-tooltip">
+                    <span class="tooltip-title">Training Stress Balance</span>
+                    <span class="tooltip-desc">Your Fitness (CTL) minus Fatigue (ATL). Used to time 'peaks' for race day.</span>
+                    <span class="tooltip-standing">Standing: <span class="standing-label" id="standing-tsb">Calculating...</span></span>
+                </div>
+            </div>
+            <div class="stat-metric" id="stat-vo2">
+                <h4 id="vo2-val" style="background: linear-gradient(135deg, #a855f7, #d8b4fe); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
+                <p>VO2 Max Est. <span class="info-icon">ⓘ</span></p>
+                <div class="metric-tooltip">
+                    <span class="tooltip-title">Maximal Oxygen Uptake</span>
+                    <span class="tooltip-desc">Estimate of the maximum volume of oxygen you can utilize during intense exercise.</span>
+                    <span class="tooltip-standing">Standing: <span class="standing-label" id="standing-vo2">Calculating...</span></span>
+                </div>
+            </div>
         </div>
 
         <div class="chart-card">
@@ -352,6 +343,20 @@ body {
                     <canvas id="loadChart"></canvas>
                 </div>
             </div>
+            <!-- Pace Zones Card -->
+            <div class="chart-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="margin: 0;">Pace Zones</h3>
+                    <span class="tag">Min/Mile</span>
+                </div>
+                <div class="table-container" style="margin-top: 0;">
+                    <table style="font-size: 0.9rem; border-collapse: separate; border-spacing: 0 0.5rem;">
+                        <tbody id="pace-zones-body">
+                            <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading Pace Zones...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
 
         <div class="calendar-view">
@@ -373,8 +378,56 @@ body {
 </div>
 
 <script>
+// Set Chart.js global defaults so all charts inherit white text in dark mode
+Chart.defaults.color = '#c9d1d9';
+Chart.defaults.font.family = 'Inter, sans-serif';
+Chart.defaults.font.size = 12;
+
+// Lightweight markdown → HTML converter for AI insight output
+function mdToHtml(text) {
+    if (!text) return '';
+    // Optional fallback if the LLM forcefully returns HTML tags
+    if (text.trim().startsWith('<')) return text;
+
+    const lines = text.split('\n');
+    let html = '';
+    let inList = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        // Strip out any asterisks or hashes just in case the LLM ignored the prompt
+        const cleanLine = line.replace(/[*#]/g, '').trim();
+
+        const bulletMatch = cleanLine.match(/^[-]\s+(.+)/);
+        if (bulletMatch) {
+            if (!inList) {
+                html += '<ul style="margin-top: 0.5rem; padding-left: 1.5rem;">';
+                inList = true;
+            }
+            html += `<li style="margin-bottom: 0.25rem;">${bulletMatch[1]}</li>`;
+        } else {
+            if (inList) {
+                html += '</ul>';
+                inList = false;
+            }
+            // If it's a paragraph, add some bottom margin
+            html += `<p style="margin-bottom: 0.5rem;">${cleanLine}</p>`;
+        }
+    }
+    
+    if (inList) html += '</ul>';
+    return html;
+}
+
 const userId = {{ user.id }};
-const athleteId = {{ user.strava_athlete_id }};
+const athleteId = {{ user.strava_athlete_id or 'null' }};
+const userDOB = "{{ user.date_of_birth }}";
+const userSex = "{{ user.gender }}";
+const userWeight = {{ user.weight or 0 }};
+const userHeight = {{ user.height or 0 }};
+
 let isMetric = localStorage.getItem('units') === 'metric';
 let pmcChartInst, hrChartInst, loadChartInst;
 let allHistory = [];   // full 90-day history from API
@@ -393,14 +446,35 @@ function setPmcWindow(days) {
     if (allHistory.length > 0) renderPmcChart();
 }
 
+async function fetchPaceZones() {
+    try {
+        const res = await fetch(`/pace_zones/${athleteId}`);
+        if(res.ok) {
+            const data = await res.json();
+            const zones = data.pace_zones_min_per_mile;
+            const body = document.getElementById('pace-zones-body');
+            body.innerHTML = '';
+            
+            const zoneOrder = ["Recovery", "Aerobic Endurance", "Aerobic Power", "Threshold", "Anaerobic Endurance", "Anaerobic Power"];
+            const colors = ["#94a3b8", "#10b981", "#3b82f6", "#f59e0b", "#f43f5e", "#a855f7"];
+
+            zoneOrder.forEach((z, i) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td style="width: 10px; padding: 0;"><div style="width: 4px; height: 30px; background: ${colors[i]}; border-radius: 2px;"></div></td>
+                    <td style="font-weight: 600; color: var(--text-main);">${z}</td>
+                    <td style="text-align: right; font-family: 'Monaco', monospace; color: var(--text-secondary);">${zones[z]}</td>
+                `;
+                body.appendChild(row);
+            });
+        }
+    } catch(err) { console.error(err); }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const savedTheme = localStorage.getItem('theme') || 'dark';
     const savedUnits = localStorage.getItem('units') || 'imperial';
     const savedLayout = localStorage.getItem('layout') || 'default';
-    
-    document.getElementById('themeToggle').value = savedTheme;
-    document.getElementById('unitToggle').value = savedUnits;
-    document.getElementById('layoutToggle').value = savedLayout;
 
     // Apply saved theme (inline script handles the initial set, but also set here for safety)
     if (savedTheme === 'light') document.documentElement.setAttribute('data-theme', 'light');
@@ -413,27 +487,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Apply saved PMC window button active state
     setPmcWindow(pmcWindow);
+    
+    fetchStats();
+    fetchDashboardRaces();
+    fetchPaceZones();
 });
 
-function toggleUnits() {
-    isMetric = document.getElementById('unitToggle').value === 'metric';
-    localStorage.setItem('units', isMetric ? 'metric' : 'imperial');
-    fetchSchedule();
-}
 
-function toggleTheme() {
-    const val = document.getElementById('themeToggle').value;
-    if(val === 'light') document.documentElement.setAttribute('data-theme', 'light');
-    else document.documentElement.removeAttribute('data-theme');
-    localStorage.setItem('theme', val);
-}
-
-function toggleLayout() {
-    const val = document.getElementById('layoutToggle').value;
-    localStorage.setItem('layout', val);
-    if(val === 'compact') document.getElementById('dashboard-main').classList.add('layout-compact');
-    else document.getElementById('dashboard-main').classList.remove('layout-compact');
-}
 
 function showEmptyState(containerId, title, message) {
     const container = document.getElementById(containerId);
@@ -452,28 +512,40 @@ function showEmptyState(containerId, title, message) {
     `;
 }
 
-async function updateSettings(e) {
-    e.preventDefault();
-    const rt = document.getElementById('raceLength').value;
-    const rd = document.getElementById('raceDate').value;
-    const rg = document.getElementById('goalTime').value;
-
-    const res = await fetch(`/settings/${userId}`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ race_length: rt, race_date: rd, race_goal_time: rg })
-    });
-
-    if(res.ok) {
-        document.getElementById('header-subtitle').innerText = `Training for: ${rt.toUpperCase()} on ${rd}`;
+async function fetchDashboardRaces() {
+    try {
+        const res = await fetch(`/api/races/${userId}`);
+        const sel = document.getElementById('targetRaceSelect');
+        const noRaceMsg = document.getElementById('no-races-msg');
         
-        // Reload all data to ensure AI picks up new context
-        document.getElementById('ai-insight').innerHTML = `
-            <div class="pulsing-skeleton sk-text"></div>
-            <div class="pulsing-skeleton sk-text"></div>
-            <div class="pulsing-skeleton sk-text w-80"></div>`;
+        if (!res.ok) return;
+        const races = await res.json();
+        sel.innerHTML = '';
         
-        fetchStats();
+        if (races.length === 0) {
+            sel.style.display = 'none';
+            noRaceMsg.style.display = 'block';
+            document.getElementById('schedule-blurb').innerText = "Add a race to your calendar to generate an AI training schedule.";
+            document.getElementById('calendar-grid').style.display = 'none';
+            document.getElementById('schedule-loading').style.display = 'none';
+            return;
+        }
+
+        sel.style.display = 'block';
+        noRaceMsg.style.display = 'none';
+        
+        races.forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = encodeURIComponent(JSON.stringify(r));
+            const dateStr = new Date(r.race_date + 'T00:00:00').toLocaleDateString();
+            opt.textContent = `${r.name ? r.name + ' - ' : ''}${r.race_length.toUpperCase()} on ${dateStr}`;
+            sel.appendChild(opt);
+        });
+
+        // Trigger the schedule fetch for the first available race
         fetchSchedule();
+    } catch(err) {
+        console.error(err);
     }
 }
 
@@ -592,7 +664,7 @@ function renderPmcChart() {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: { display: true, labels: { color: 'var(--text-secondary)', boxWidth: 12, font: { size: 11 } } },
+                legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 12, font: { size: 11 } } },
                 tooltip: {
                     backgroundColor: 'rgba(15, 23, 42, 0.95)',
                     titleColor: '#94a3b8',
@@ -615,8 +687,8 @@ function renderPmcChart() {
                 }
             },
             scales: {
-                x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { maxTicksLimit: 10, color: 'var(--text-secondary)' } },
-                y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: 'var(--text-secondary)' } }
+                x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { maxTicksLimit: 10, color: '#c9d1d9' } },
+                y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#c9d1d9' } }
             }
         }
     });
@@ -634,7 +706,7 @@ async function fetchStats() {
             if(data.latest_vo2_max) document.getElementById('vo2-val').innerText = data.latest_vo2_max;
 
             if(data.ai_insight) {
-                document.getElementById('ai-insight').innerHTML = data.ai_insight;
+                document.getElementById('ai-insight').innerHTML = mdToHtml(data.ai_insight);
             }
 
             const pmcSkele = document.getElementById('pmc-skeleton');
@@ -643,20 +715,76 @@ async function fetchStats() {
             allHistory = data.history || [];
             allForecast = data.forecast || [];
 
-            if(allHistory.length > 0) {
+            if(data.history.length > 0) {
                 renderPmcChart();
             } else {
                 showEmptyState('pmc-container', 'No Activity History', 'Hit the road and upload some runs!');
             }
+
+            updateMetricStandings(data);
         }
     } catch(err) { console.error(err); }
 }
 
+function updateMetricStandings(data) {
+    const ctl = data.fitness_ctl || 0;
+    const atl = data.fatigue_atl || 0;
+    const tsb = data.form_tsb || 0;
+    const vo2 = data.latest_vo2_max || 0;
+
+    // CTL Standings
+    let ctlLbl = 'Developing';
+    if (ctl > 100) ctlLbl = 'Elite Pro';
+    else if (ctl > 70) ctlLbl = 'Advanced Enthusiast';
+    else if (ctl > 40) ctlLbl = 'Consistent Runner';
+    document.getElementById('standing-ctl').innerText = ctlLbl;
+
+    // ATL Standings
+    document.getElementById('standing-atl').innerText = atl > ctl * 1.5 ? 'High Fatigue' : 'Sustainable';
+
+    // TSB Standings
+    let tsbLbl = 'Balanced';
+    if (tsb > 15) tsbLbl = 'Fresh (Peaking)';
+    else if (tsb < -30) tsbLbl = 'High Overload';
+    else if (tsb < -10) tsbLbl = 'Optimal Training';
+    document.getElementById('standing-tsb').innerText = tsbLbl;
+
+    // VO2 Max Standings (Age/Gender Adjusted)
+    let vo2Lbl = 'Average';
+    const age = userDOB ? (new Date().getFullYear() - new Date(userDOB).getFullYear()) : 35;
+    const isMale = userSex.toLowerCase() === 'male';
+
+    if (vo2 > 0) {
+        if (isMale) {
+            if (vo2 > 60) vo2Lbl = 'Superior';
+            else if (vo2 > 52) vo2Lbl = 'Excellent';
+            else if (vo2 > 45) vo2Lbl = 'Good';
+        } else {
+            if (vo2 > 54) vo2Lbl = 'Superior';
+            else if (vo2 > 46) vo2Lbl = 'Excellent';
+            else if (vo2 > 39) vo2Lbl = 'Good';
+        }
+        // Age adjustment penalty
+        if (age > 50 && vo2 > 40) vo2Lbl = 'Superior for Age';
+    }
+    document.getElementById('standing-vo2').innerText = vo2Lbl;
+}
+
 async function fetchSchedule() {
+    const sel = document.getElementById('targetRaceSelect');
+    if (!sel || !sel.value || sel.style.display === 'none') {
+        return;
+    }
+    
     document.getElementById('calendar-grid').style.display = 'none';
     document.getElementById('schedule-loading').style.display = 'block';
+    
     try {
-        const url = `/schedule/${athleteId}?race_date=${encodeURIComponent(document.getElementById('raceDate').value)}&race_type=${encodeURIComponent(document.getElementById('raceLength').value)}&goal_time=${encodeURIComponent(document.getElementById('goalTime').value)}`;
+        const race = JSON.parse(decodeURIComponent(sel.value));
+        const dateStr = new Date(race.race_date + 'T00:00:00').toLocaleDateString();
+        document.getElementById('header-subtitle').innerText = `Training for: ${race.race_length.toUpperCase()} on ${dateStr}`;
+        
+        const url = `/schedule/${athleteId}?race_date=${encodeURIComponent(race.race_date)}&race_type=${encodeURIComponent(race.race_length)}&goal_time=${encodeURIComponent(race.goal_time || '')}`;
         const res = await fetch(url);
         if(res.ok) {
             const data = await res.json();
@@ -711,11 +839,7 @@ async function fetchSchedule() {
         }
     } catch(err) { console.error(err); }
 }
-
-document.getElementById('header-subtitle').innerText = `Training for: ${document.getElementById('raceLength').value.toUpperCase()} on ${document.getElementById('raceDate').value}`;
-fetchStats();
 fetchAnalytics();
-fetchSchedule();
 </script>
 {% endif %}
 {% endblock %}
