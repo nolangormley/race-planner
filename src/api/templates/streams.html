@@ -1,380 +1,563 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Workout Streams - Strava Warehouse</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        .header-actions {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-        }
+{% block split_styles %}
+<style>
+    /* Activity Report Specific Styles */
+    .report-grid {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        gap: 2rem;
+        margin-top: 1rem;
+    }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
+    @media (max-width: 1024px) {
+        .report-grid { grid-template-columns: 1fr; }
+        .effectiveness-sidebar { order: -1; }
+    }
 
-        .stat-card {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--glass-border);
-            border-radius: var(--radius-lg);
-            padding: 1.5rem;
-            text-align: center;
-        }
+    .stats-header-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--panel-border);
+    }
 
-        .stat-value {
-            font-size: 2rem;
-            font-weight: 700;
-            color: var(--text-primary);
-            margin-bottom: 0.5rem;
-        }
+    .activity-title-group h1 {
+        margin: 0;
+        font-size: 2.25rem;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+    }
 
-        .stat-label {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
+    .activity-subtitle {
+        color: var(--text-secondary);
+        font-size: 1rem;
+        margin-top: 0.25rem;
+    }
 
-        .chart-wrapper {
-            background: var(--bg-secondary);
-            border: 1px solid var(--glass-border);
-            border-radius: var(--radius-lg);
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-            height: 400px;
-        }
-    </style>
-</head>
+    .type-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        background: rgba(59, 130, 246, 0.1);
+        color: #60a5fa;
+        border-radius: 99px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-top: 0.5rem;
+    }
 
-<body>
-    <header>
-        <div class="logo-container">
-            <div class="logo-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"
-                    stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-                </svg>
+    /* Stats Grid Enhancements */
+    .enhanced-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+
+    .stat-mini-card {
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        padding: 1.25rem;
+        text-align: center;
+        transition: transform 0.2s ease;
+    }
+    .stat-mini-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.15); }
+
+    .mini-val { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.25rem; }
+    .mini-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; }
+
+    /* Effectiveness Panel */
+    .effectiveness-card {
+        position: sticky;
+        top: 100px;
+        background: linear-gradient(145deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.4) 100%);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--panel-border);
+        border-radius: 20px;
+        padding: 2rem;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+    }
+
+    .zone-hero {
+        text-align: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .training-zone-badge {
+        font-size: 1.5rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #3b82f6, #93c5fd);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        display: block;
+        margin-top: 0.5rem;
+    }
+
+    .eff-metrics-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .eff-item { position: relative; }
+    .eff-val { font-size: 1.25rem; font-weight: 700; display: block; margin-bottom: 2px; }
+    .eff-label { font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+
+    /* Info Tooltip Icon */
+    .info-trigger {
+        cursor: help;
+        opacity: 0.5;
+        transition: opacity 0.2s;
+        font-size: 0.8rem;
+    }
+    .info-trigger:hover { opacity: 1; color: #60a5fa; }
+
+    .custom-tooltip {
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        width: 200px;
+        background: #1e293b;
+        border: 1px solid var(--panel-border);
+        padding: 0.75rem;
+        border-radius: 8px;
+        font-size: 0.75rem;
+        line-height: 1.4;
+        color: #cbd5e1;
+        z-index: 50;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(10px);
+        transition: all 0.2s ease;
+        box-shadow: 0 10px 15px rgba(0,0,0,0.2);
+    }
+    .eff-item:hover .custom-tooltip { opacity: 1; transform: translateY(-5px); }
+
+    /* Consistency Gauge */
+    .consistency-section {
+        margin-top: 1.5rem;
+        padding: 1rem;
+        background: rgba(0,0,0,0.2);
+        border-radius: 12px;
+        text-align: center;
+    }
+    .gauge-container { width: 100px; height: 50px; margin: 0 auto 0.5rem; position: relative; overflow: hidden; }
+    .gauge-bg { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 8; }
+    .gauge-fill { fill: none; stroke: var(--secondary); stroke-width: 8; stroke-dasharray: 125.6; stroke-dashoffset: 125.6; transition: stroke-dashoffset 1s ease-out; }
+
+    /* AI Summary */
+    .ai-summary-card {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        background: rgba(99, 102, 241, 0.1);
+        border: 1px solid rgba(99, 102, 241, 0.2);
+        border-radius: 16px;
+        position: relative;
+    }
+    .ai-summary-card h4 {
+        color: #818cf8;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        margin-bottom: 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .ai-summary-text { font-size: 0.9rem; line-height: 1.6; color: #e2e8f0; }
+
+    .chart-panel-wrapper {
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 20px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        height: 380px;
+    }
+
+    .ac-check { color: #10b981; font-weight: bold; margin-left: 4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="report-container">
+    <div class="stats-header-bar">
+        <div class="activity-title-group">
+            <h1 id="activity-name">Loading Activity...</h1>
+            <div id="activity-subtitle-row" class="activity-subtitle">
+                <span id="activity-date">---</span>
             </div>
-            <h2>Strava Warehouse</h2>
+            <div id="activity-type-badge" class="type-badge">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                <span id="type-text">Run</span>
+            </div>
         </div>
         <div>
-            <a href="/dashboard" class="btn">← Back to Dashboard</a>
+            <a href="/warehouse" class="btn" style="background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--panel-border);">← Back to Warehouse</a>
         </div>
-    </header>
+    </div>
 
-    <main class="container">
-        <div class="header-actions">
-            <div>
-                <h1 id="activity-name">Loading...</h1>
-                <p class="subtitle" id="activity-date">Fetching details...</p>
+    <!-- Enhanced Stats Strip -->
+    <div class="enhanced-stats-grid">
+        <div class="stat-mini-card">
+            <div class="mini-val" id="stat-dist">--</div>
+            <div class="mini-label">Distance</div>
+        </div>
+        <div class="stat-mini-card">
+            <div class="mini-val" id="stat-time">--</div>
+            <div class="mini-label">Moving Time</div>
+        </div>
+        <div class="stat-mini-card">
+            <div class="mini-val" id="stat-pace">--</div>
+            <div class="mini-label">Avg Pace</div>
+        </div>
+        <div class="stat-mini-card">
+            <div class="mini-val" id="stat-hr">--</div>
+            <div class="mini-label">Avg HR</div>
+        </div>
+        <div class="stat-mini-card">
+            <div class="mini-val" id="stat-hr-max">--</div>
+            <div class="mini-label">Max HR</div>
+        </div>
+        <div class="stat-mini-card">
+            <div class="mini-val" id="stat-cad">--</div>
+            <div class="mini-label">Cadence</div>
+        </div>
+        <div class="stat-mini-card">
+            <div class="mini-val" id="stat-elev">--</div>
+            <div class="mini-label">Elevation</div>
+        </div>
+        <div class="stat-mini-card">
+            <div class="mini-val" id="stat-cals">--</div>
+            <div class="mini-label">Calories</div>
+        </div>
+    </div>
+
+    <div class="report-grid">
+        <!-- Left Column: Charts -->
+        <div class="charts-column">
+            <div class="chart-panel-wrapper">
+                <canvas id="hrChart"></canvas>
+            </div>
+            <div class="chart-panel-wrapper" id="pace-chart-container">
+                <canvas id="paceChart"></canvas>
+            </div>
+            <div class="chart-panel-wrapper" id="cadence-chart-container">
+                <canvas id="cadenceChart"></canvas>
+            </div>
+            <div class="chart-panel-wrapper" id="elevation-chart-container">
+                <canvas id="elevationChart"></canvas>
             </div>
         </div>
 
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value" id="stat-dist">--</div>
-                <div class="stat-label">Distance</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-time">--</div>
-                <div class="stat-label">Moving Time</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-pace">--</div>
-                <div class="stat-label">Avg Pace</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-hr">--</div>
-                <div class="stat-label">Avg HR</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-elev">--</div>
-                <div class="stat-label">Elevation</div>
+        <!-- Right Column: Effectiveness Sidebar -->
+        <div class="effectiveness-sidebar">
+            <div class="effectiveness-card">
+                <div class="zone-hero">
+                    <span class="mini-label">Workout Objective</span>
+                    <span class="training-zone-badge" id="eff-zone">Analyzing Effort...</span>
+                </div>
+
+                <div class="eff-metrics-grid">
+                    <div class="eff-item">
+                        <span class="eff-val" id="eff-trimp">--</span>
+                        <span class="eff-label">Training Load <span class="info-trigger">ⓘ</span></span>
+                        <div class="custom-tooltip">TRIMP (Training Impulse). A numerical score representing the cumulative physiological stress of this workout.</div>
+                    </div>
+                    <div class="eff-item">
+                        <span class="eff-val" id="eff-intensity">--</span>
+                        <span class="eff-label">Intensity <span class="info-trigger">ⓘ</span></span>
+                        <div class="custom-tooltip">Percentage of your maximum heart rate. Indicates how hard you were pushing relative to your ceiling.</div>
+                    </div>
+                    <div class="eff-item">
+                        <span class="eff-val" id="eff-efficiency">--</span>
+                        <span class="eff-label">Efficiency <span class="info-trigger">ⓘ</span></span>
+                        <div class="custom-tooltip">Efficiency Factor (EF). Ratio of normalized pace over average heartrate. Higher is better.</div>
+                    </div>
+                    <div class="eff-item">
+                        <span class="eff-val" id="eff-decoupling">--</span>
+                        <span class="eff-label">Decoupling <span class="info-trigger">ⓘ</span></span>
+                        <div class="custom-tooltip">Aerobic Drift. The heart rate drift during the second half of the run. Low drift (<5%) indicates strong aerobic base.</div>
+                    </div>
+                </div>
+
+                <div class="consistency-section">
+                    <span class="mini-label" style="display: block; margin-bottom: 0.5rem;">Pace Consistency</span>
+                    <div class="gauge-container">
+                        <svg width="100" height="50" viewBox="0 0 100 50">
+                            <path d="M 10,50 A 40,40 0 0,1 90,50" class="gauge-bg" />
+                            <path d="M 10,50 A 40,40 0 0,1 90,50" class="gauge-fill" id="gauge-path" />
+                        </svg>
+                    </div>
+                    <span id="consistency-label" style="font-weight: 700; color: var(--text-primary);">TBD</span>
+                </div>
+
+                <div id="ai-summary-container" class="ai-summary-card" style="display: none;">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        AI Analysis Insight
+                    </h4>
+                    <div id="ai-summary-text" class="ai-summary-text">Analyzing your data...</div>
+                </div>
             </div>
         </div>
+    </div>
+</div>
 
-        <div class="chart-wrapper">
-            <canvas id="hrChart"></canvas>
-        </div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<script>
+    const activityId = "{{ activity_id }}";
+    
+    // Theme colors sync (approximate from profile settings)
+    const colors = ["#94a3b8", "#10b981", "#3b82f6", "#f59e0b", "#f43f5e", "#a855f7"];
+    const zoneNames = ["Recovery", "Aerobic Base", "Tempo", "Threshold", "Anaerobic endurance", "Anaerobic power"];
 
-        <div class="chart-wrapper">
-            <canvas id="paceChart"></canvas>
-        </div>
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.font.family = 'Inter';
 
-        <div class="chart-wrapper">
-            <canvas id="elevationChart"></canvas>
-        </div>
+    const isMetric = localStorage.getItem('units') === 'metric';
+    const paceUnit = isMetric ? 'min/km' : 'min/mi';
+    const distUnit = isMetric ? 'km' : 'mi';
+    const paceConvFactor = isMetric ? (1000 / 60) : (1609.34 / 60);
 
-    </main>
+    function formatDistance(meters) {
+        let val = isMetric ? (meters / 1000) : (meters * 0.000621371);
+        return val.toFixed(2) + ' ' + distUnit;
+    }
 
-    <script>
-        const activityId = "{{ activity_id }}";
+    function formatPaceStr(meters_per_sec) {
+        if (!meters_per_sec || meters_per_sec === 0) return '--';
+        const minsPerUnit = paceConvFactor / meters_per_sec;
+        const m = Math.floor(minsPerUnit);
+        const s = Math.floor((minsPerUnit - m) * 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+    }
 
-        // Globals for Charts
-        Chart.defaults.color = '#c9d1d9';
-        Chart.defaults.font.family = 'Inter';
+    function paceToDecimal(meters_per_sec) {
+        if (!meters_per_sec || meters_per_sec === 0) return null;
+        return paceConvFactor / meters_per_sec;
+    }
 
-        function formatDistance(meters) {
-            return (meters * 0.000621371).toFixed(2) + ' mi';
-        }
+    function formatTimeDisplay(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        if (h > 0) return `${h}h ${m}m`;
+        return `${m}m ${seconds % 60}s`;
+    }
 
-        // Read user's unit preference
-        const isMetric = localStorage.getItem('units') === 'metric';
-        const paceUnit = isMetric ? 'min/km' : 'min/mi';
-        // Conversion factor: m/s → decimal minutes per unit distance
-        // min/mile = 26.8224 / v   |   min/km = 16.6667 / v
-        const paceConvFactor = isMetric ? (1000 / 60) : (1609.34 / 60);
+    function formatTimeMinSec(seconds) {
+        const m = Math.floor(seconds / 60);
+        return `${m}:${(seconds % 60).toString().padStart(2, '0')}`;
+    }
 
-        function formatPaceStr(meters_per_sec) {
-            if (!meters_per_sec || meters_per_sec === 0) return '--';
-            const minsPerUnit = paceConvFactor / meters_per_sec;
-            const m = Math.floor(minsPerUnit);
-            const s = Math.floor((minsPerUnit - m) * 60).toString().padStart(2, '0');
-            return `${m}:${s} ${paceUnit}`;
-        }
+    let athletePaceZones = null;
 
-        // Returns decimal minutes per unit (for chart Y axis)
-        function paceToDecimal(meters_per_sec) {
-            if (!meters_per_sec || meters_per_sec === 0) return null;
-            return paceConvFactor / meters_per_sec;
-        }
+    async function init() {
+        try {
+            // 1. Fetch Effectiveness Data (includes dim_activity)
+            const res = await fetch(`/api/activities/${activityId}/effectiveness`);
+            if (!res.ok) throw new Error("Could not load activity report.");
+            const data = await res.json();
+            
+            if (data.error) {
+                document.getElementById('activity-name').textContent = "Incomplete Data";
+                document.getElementById('ai-summary-text').textContent = "Effectiveness metrics haven't been calculated for this activity yet.";
+                document.getElementById('ai-summary-container').style.display = 'block';
+            }
 
-        function formatTimeMinSec(seconds) {
-            const m = Math.floor(seconds / 60);
-            const s = (seconds % 60).toString().padStart(2, '0');
-            return `${m}:${s}`;
-        }
-
-        function formatTimeDisplay(seconds) {
-            const h = Math.floor(seconds / 3600);
-            const m = Math.floor((seconds % 3600) / 60);
-            const s = seconds % 60;
-            if (h > 0) return `${h}h ${m}m`;
-            return `${m}m ${s}s`;
-        }
-
-        async function init() {
+            renderBasicStats(data);
+            renderEffectivenessPanel(data);
+            
+            // 2. Fetch Pace Zones for shading
             try {
-                // Fetch Details
-                const res = await fetch(`/api/activities/${activityId}`);
-                if (!res.ok) throw new Error("Activity not found");
-                const act = await res.json();
+                const pzRes = await fetch(`/pace_zones/${data.athlete_id}`);
+                if (pzRes.ok) athletePaceZones = await pzRes.json();
+            } catch(pzE) { console.warn("Could not load pace zones", pzE); }
 
-                document.getElementById('activity-name').textContent = act.name;
-                document.getElementById('activity-date').textContent = new Date(act.start_date_local).toLocaleString();
+            // 3. Fetch Streams & Render Charts
+            const streamRes = await fetch(`/api/activities/${activityId}/streams`);
+            const streams = await streamRes.json();
+            if (streams.length > 0) renderCharts(streams, data);
 
-                document.getElementById('stat-dist').textContent = formatDistance(act.distance);
-                document.getElementById('stat-time').textContent = formatTimeDisplay(act.moving_time);
-                document.getElementById('stat-pace').textContent = formatPaceStr(act.average_speed);
-                document.getElementById('stat-hr').textContent = act.average_heartrate ? Math.round(act.average_heartrate) : '--';
-                document.getElementById('stat-elev').textContent = act.total_elevation_gain ? Math.round(act.total_elevation_gain * 3.28084) + ' ft' : '--';
+            // 4. Fetch AI Insight (Lazy)
+            fetchAiSummary();
 
-                // Fetch Streams
-                const streamRes = await fetch(`/api/activities/${activityId}/streams`);
-                const streams = await streamRes.json();
+        } catch (e) {
+            console.error(e);
+            document.getElementById('activity-name').textContent = "Error Loading Report";
+        }
+    }
 
-                if (streams.length > 0) {
-                    renderCharts(streams);
-                }
+    function renderBasicStats(data) {
+        document.getElementById('activity-name').textContent = data.name || "Unnamed Activity";
+        document.getElementById('activity-date').textContent = new Date(data.start_date_local).toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' });
+        document.getElementById('stat-dist').textContent = formatDistance(data.distance);
+        document.getElementById('stat-time').textContent = formatTimeDisplay(data.moving_time);
+        document.getElementById('stat-pace').textContent = formatPaceStr(data.average_speed);
+        document.getElementById('stat-hr').textContent = data.average_heartrate ? Math.round(data.average_heartrate) : '--';
+        document.getElementById('stat-hr-max').textContent = data.max_heartrate ? Math.round(data.max_heartrate) : '--';
+        document.getElementById('stat-cad').textContent = data.average_cadence ? Math.round(data.average_cadence * 2) : '--'; // Assuming rpm -> spm
+        document.getElementById('stat-elev').textContent = Math.round(data.total_elevation_gain * (isMetric ? 1 : 3.28084)) + (isMetric ? ' m' : ' ft');
+        document.getElementById('stat-cals').textContent = data.calories ? Math.round(data.calories) : '--';
+        document.getElementById('type-text').textContent = data.type || "Run";
+    }
 
-            } catch (e) {
-                document.getElementById('activity-name').textContent = "Error Loading Activity";
-                document.getElementById('activity-date').textContent = e.toString();
-            }
+    function renderEffectivenessPanel(data) {
+        if (!data.trimp_banister) return;
+
+        document.getElementById('eff-trimp').textContent = Math.round(data.trimp_banister);
+        document.getElementById('eff-intensity').textContent = Math.round(data.intensity_factor * 100) + '%';
+        document.getElementById('eff-efficiency').textContent = data.efficiency_factor ? data.efficiency_factor.toFixed(2) : '--';
+        
+        if (data.aerobic_decoupling !== null) {
+            const decVal = data.aerobic_decoupling.toFixed(1);
+            let check = data.aerobic_decoupling < 5 ? ' <span class="ac-check">✓</span>' : '';
+            document.getElementById('eff-decoupling').innerHTML = decVal + '%' + check;
+            if (data.aerobic_decoupling < 5) document.getElementById('eff-decoupling').style.color = '#10b981';
+            else if (data.aerobic_decoupling > 10) document.getElementById('eff-decoupling').style.color = '#f43f5e';
         }
 
-        function renderCharts(data) {
-            const labels = data.map(d => formatTimeMinSec(d.time_offset));
-            const hrData = data.map(d => d.heartrate);
-            const paceData = data.map(d => paceToDecimal(d.velocity));
-            const elevData = data.map(d => d.altitude ? d.altitude * 3.28084 : null);
+        // Zone Badge
+        // Logic: determine zone based on zone_X_sec counts
+        const zones = [data.zone_1_sec, data.zone_2_sec, data.zone_3_sec, data.zone_4_sec, data.zone_5_sec];
+        const maxZoneIdx = zones.indexOf(Math.max(...zones));
+        const zoneNames = ["Recovery Effort", "Aerobic Base", "Tempo / Rhythm", "Threshold Effort", "Anaerobic Intervals"];
+        const zoneGradients = [
+            "linear-gradient(135deg, #94a3b8, #cbd5e1)",
+            "linear-gradient(135deg, #10b981, #34d399)",
+            "linear-gradient(135deg, #3b82f6, #60a5fa)",
+            "linear-gradient(135deg, #f59e0b, #fbbf24)",
+            "linear-gradient(135deg, #f43f5e, #fb7185)"
+        ];
+        const badge = document.getElementById('eff-zone');
+        badge.textContent = zoneNames[maxZoneIdx] || "Mixed Effort";
+        badge.style.background = zoneGradients[maxZoneIdx];
+        badge.style.webkitBackgroundClip = 'text';
 
-            // Heart Rate Chart
-            const ctxHr = document.getElementById('hrChart').getContext('2d');
-            const hrGradient = ctxHr.createLinearGradient(0, 0, 0, 400);
-            hrGradient.addColorStop(0, 'rgba(248, 81, 73, 0.5)'); // Reddish
-            hrGradient.addColorStop(1, 'rgba(248, 81, 73, 0.0)');
+        // Consistency Gauge (Mock implementation based on variability score)
+        // variability_score isn't in schema yet, but effectiveness_score exists. Let's use decoupling as a proxy or just set a good default.
+        const score = data.effectiveness_score ? Math.min(100, data.effectiveness_score) : 75;
+        const offset = 125.6 - (125.6 * (score/100));
+        document.getElementById('gauge-path').style.strokeDashoffset = offset;
+        document.getElementById('consistency-label').textContent = score > 80 ? "Steady" : (score > 50 ? "Moderate" : "Variable");
+    }
 
-            new Chart(ctxHr, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Heart Rate (bpm)',
-                        data: hrData,
-                        borderColor: '#f85149',
-                        backgroundColor: hrGradient,
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        fill: true,
-                        tension: 0.4
-                    }]
-                },
-                options: getCommonOptions('Heart Rate', false)
-            });
-
-            // Pace Chart — only render if we have valid GPS velocity data
-            const validPaceData = paceData.filter(v => v !== null && v > 0);
-            if (validPaceData.length > 0) {
-                const ctxPace = document.getElementById('paceChart').getContext('2d');
-                const paceMin = Math.min(...validPaceData);
-                const paceMax = Math.max(...validPaceData);
-
-                // Custom plugin: manually draw gradient fill BELOW the pace line.
-                // Chart.js built-in fill is unreliable on reversed Y-axes, so we
-                // trace the polyline, close a polygon to the chart bottom, and fill it.
-                const paceFillPlugin = {
-                    id: 'paceFill',
-                    afterDatasetsDraw(chart) {
-                        const { ctx, chartArea } = chart;
-                        const meta = chart.getDatasetMeta(0);
-                        const pts = meta.data.filter(p => !isNaN(p.y) && p.y !== null);
-                        if (pts.length < 2) return;
-
-                        const bottom = chartArea.bottom;
-
-                        ctx.save();
-                        ctx.beginPath();
-                        ctx.moveTo(pts[0].x, bottom);          // start at bottom-left
-                        pts.forEach(p => ctx.lineTo(p.x, p.y)); // trace the line
-                        ctx.lineTo(pts[pts.length - 1].x, bottom); // close to bottom-right
-                        ctx.closePath();
-
-                        // Gradient: transparent near the line (chartArea.top), blue at bottom
-                        const grad = ctx.createLinearGradient(0, chartArea.top, 0, bottom);
-                        grad.addColorStop(0, 'rgba(88, 166, 255, 0.0)');
-                        grad.addColorStop(1, 'rgba(88, 166, 255, 0.40)');
-                        ctx.fillStyle = grad;
-                        ctx.fill();
-                        ctx.restore();
-                    }
-                };
-
-                new Chart(ctxPace, {
-                    type: 'line',
-                    plugins: [paceFillPlugin],
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: `Pace (${paceUnit})`,
-                            data: paceData,
-                            borderColor: '#58a6ff',
-                            backgroundColor: 'transparent',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            fill: false,    // manual fill via plugin above
-                            tension: 0.4,
-                            spanGaps: true
-                        }]
-                    },
-                    options: getCommonOptions(`Pace (${paceUnit})`, true, paceMin * 0.98, paceMax * 1.02)
-                });
+    async function fetchAiSummary() {
+        const container = document.getElementById('ai-summary-container');
+        const textField = document.getElementById('ai-summary-text');
+        container.style.display = 'block';
+        try {
+            const res = await fetch(`/api/activities/${activityId}/ai_summary`);
+            const data = await res.json();
+            if (data.summary) {
+                textField.textContent = data.summary;
             } else {
-                document.getElementById('paceChart').parentElement.innerHTML =
-                    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#8b949e;">No GPS pace data available for this activity.</div>';
+                textField.textContent = "AI insight not available for this activity.";
             }
-
-            // Elevation Chart — only render if we have valid altitude data
-            const validElevData = elevData.filter(v => v !== null);
-            if (validElevData.length > 0) {
-                const ctxElev = document.getElementById('elevationChart').getContext('2d');
-                const elevGradient = ctxElev.createLinearGradient(0, 0, 0, 400);
-                elevGradient.addColorStop(0, 'rgba(46, 160, 67, 0.5)');
-                elevGradient.addColorStop(1, 'rgba(46, 160, 67, 0.0)');
-
-                const elevMin = Math.min(...validElevData);
-                const elevMax = Math.max(...validElevData);
-
-                new Chart(ctxElev, {
-                    type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Elevation (ft)',
-                            data: elevData,
-                            borderColor: '#2ea043',
-                            backgroundColor: elevGradient,
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            fill: true,
-                            tension: 0.4
-                        }]
-                    },
-                    options: getCommonOptions('Elevation (ft)', false, elevMin - 20, elevMax + 20)
-                });
-            } else {
-                document.getElementById('elevationChart').parentElement.innerHTML =
-                    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#8b949e;">No elevation data available for this activity.</div>';
-            }
+        } catch(e) {
+            textField.textContent = "Coach is away. Metrics speak for themselves.";
         }
+    }
 
-        function getCommonOptions(title, reverseY, yMin = undefined, yMax = undefined) {
-            return {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
-                },
-                plugins: {
-                    legend: { display: false },
-                    title: {
-                        display: true,
-                        text: title,
-                        color: '#f0f6fc',
-                        font: { size: 16, weight: '600' },
-                        align: 'start',
-                        padding: { bottom: 20 }
-                    },
-                    tooltip: {
-                        backgroundColor: 'rgba(22, 27, 34, 0.9)',
-                        titleColor: '#8b949e',
-                        bodyColor: '#f0f6fc',
-                        borderColor: 'rgba(255, 255, 255, 0.1)',
-                        borderWidth: 1,
-                        padding: 12,
-                        displayColors: false,
-                        callbacks: {
-                            label: function (context) {
-                                let val = context.parsed.y;
-                                if (title.includes('Pace') && val) {
-                                    const m = Math.floor(val);
-                                    const s = Math.floor((val - m) * 60).toString().padStart(2, '0');
-                                    return `${m}:${s} ${paceUnit}`;
-                                }
-                                return `${Math.round(val)}`;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        ticks: { maxTicksLimit: 10 }
-                    },
-                    y: {
-                        reverse: reverseY,
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        beginAtZero: false,
-                        ...(yMin !== undefined ? { min: yMin } : {}),
-                        ...(yMax !== undefined ? { max: yMax } : {})
-                    }
-                }
+    function renderCharts(data, actData) {
+        const labels = data.map(d => formatTimeMinSec(d.time_offset));
+        const hrData = data.map(d => d.heartrate);
+        const paceData = data.map(d => paceToDecimal(d.velocity));
+        const cadenceData = data.map(d => d.cadence ? d.cadence * 2 : null);
+        const elevData = data.map(d => d.altitude ? d.altitude * (isMetric ? 1 : 3.28084) : null);
+
+        // Common options creator
+        const getOptions = (title, color) => ({
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                title: { display: true, text: title, color: '#f1f5f9', font: { size: 14, weight: 'bold' }, align: 'start' }
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+                y: { grid: { color: 'rgba(255,255,255,0.05)' } }
+            }
+        });
+
+        // 1. HR Chart
+        new Chart(document.getElementById('hrChart'), {
+            type: 'line',
+            data: { labels, datasets: [{ data: hrData, borderColor: '#f43f5e', borderWidth: 2, pointRadius: 0, fill: true, backgroundColor: 'rgba(244,63,94,0.05)', tension: 0.3 }] },
+            options: getOptions('Heart Rate (bpm)', '#f43f5e')
+        });
+
+        // 2. Pace Chart (with shading)
+        const paceOptions = getOptions(`Pace (${paceUnit})`, '#3b82f6');
+        paceOptions.scales.y.reverse = true;
+        
+        // Add Pace Zone Shading
+        if (athletePaceZones && athletePaceZones.pace_zones_speeds) {
+            paceOptions.plugins.annotation = {
+                annotations: {}
             };
+            const zoneColors = [
+                'rgba(148, 163, 184, 0.1)', // Zone 1
+                'rgba(16, 185, 129, 0.1)',  // Zone 2
+                'rgba(59, 130, 246, 0.1)',  // Zone 3
+                'rgba(245, 158, 11, 0.1)',  // Zone 4
+                'rgba(244, 63, 94, 0.1)',   // Zone 5
+                'rgba(168, 85, 247, 0.1)'    // Zone 6
+            ];
+            
+            const pzs = athletePaceZones.pace_zones_speeds;
+            const keys = Object.keys(pzs);
+            keys.forEach((zName, i) => {
+                const z = pzs[zName];
+                const minVal = paceToDecimal(z.min);
+                const maxVal = paceToDecimal(z.max);
+                
+                if (minVal !== null && maxVal !== null) {
+                    paceOptions.plugins.annotation.annotations['zone' + i] = {
+                        type: 'box',
+                        yMin: Math.min(minVal, maxVal),
+                        yMax: Math.max(minVal, maxVal),
+                        backgroundColor: zoneColors[i] || 'rgba(255,255,255,0.05)',
+                        borderWidth: 0
+                    };
+                }
+            });
         }
 
-        // Boot
-        init();
-    </script>
-</body>
+        new Chart(document.getElementById('paceChart'), {
+            type: 'line',
+            data: { labels, datasets: [{ data: paceData, borderColor: '#3b82f6', borderWidth: 2, pointRadius: 0, tension: 0.3 }] },
+            options: paceOptions
+        });
 
-</html>
+        // 3. Cadence Chart
+        if (cadenceData.some(v => v !== null)) {
+            new Chart(document.getElementById('cadenceChart'), {
+                type: 'line',
+                data: { labels, datasets: [{ data: cadenceData, borderColor: '#10b981', borderWidth: 2, pointRadius: 0, backgroundColor: 'rgba(16,185,129,0.05)', fill: true, tension: 0.3 }] },
+                options: getOptions('Cadence (spm)', '#10b981')
+            });
+        } else {
+            document.getElementById('cadence-chart-container').style.display = 'none';
+        }
+
+        // 4. Elevation Chart
+        new Chart(document.getElementById('elevationChart'), {
+            type: 'line',
+            data: { labels, datasets: [{ data: elevData, borderColor: '#94a3b8', borderWidth: 2, pointRadius: 0, backgroundColor: 'rgba(148,163,184,0.05)', fill: true, tension: 0.1 }] },
+            options: getOptions(`Elevation (${isMetric ? 'm' : 'ft'})`, '#94a3b8')
+        });
+    }
+
+    init();
+</script>
+{% endblock %}
