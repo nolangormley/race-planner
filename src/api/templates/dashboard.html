@@ -69,6 +69,7 @@ body {
     font-size: 1.25rem;
     background: linear-gradient(135deg, #60a5fa, #a78bfa);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     display: flex;
     justify-content: space-between;
@@ -247,14 +248,27 @@ body {
     <!-- Sidebar -->
     <aside class="modern-sidebar">
         <div class="settings-card">
-            <h3>Target Race <i class="fas fa-flag-checkered" style="color:var(--text-secondary);"></i></h3>
-            <div class="form-group" style="margin-top: 1rem; margin-bottom: 0.5rem;">
-                <label>Select a race from your calendar for the AI to build a schedule towards:</label>
-                <select id="targetRaceSelect" class="form-control" onchange="fetchSchedule()" style="margin-top: 0.5rem;">
-                    <option value="">Loading your races...</option>
-                </select>
-                <div id="no-races-msg" style="display: none; margin-top: 0.5rem; font-size: 0.85rem; color: #f43f5e;">
-                    No upcoming races found. <a href="/profile" style="color: #60a5fa;">Add one in your profile</a>.
+            <h3 style="margin-bottom: 1rem;">Target Race Goal <i class="fas fa-flag-checkered" style="color:var(--text-secondary); font-size: 0.9rem; opacity: 0.7;"></i></h3>
+            <div class="form-group" style="margin-bottom: 0;">
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.4;">Select a race from your calendar for the AI to build a customized training schedule.</p>
+                <div class="custom-select-wrapper">
+                    <select id="targetRaceSelect" onchange="fetchSchedule()" style="
+                        width: 100%; 
+                        padding: 1rem; 
+                        background: rgba(0,0,0,0.2); 
+                        border: 1px solid var(--panel-border); 
+                        border-radius: 12px; 
+                        color: var(--text-primary); 
+                        font-weight: 500; 
+                        appearance: none;
+                        cursor: pointer;
+                        text-overflow: ellipsis;
+                    ">
+                        <option value="">Loading your races...</option>
+                    </select>
+                </div>
+                <div id="no-races-msg" style="display: none; margin-top: 0.75rem; font-size: 0.85rem; color: #f43f5e; background: rgba(244, 63, 94, 0.1); padding: 0.75rem; border-radius: 8px;">
+                     No upcoming races found. <a href="/profile" style="color: #fb7185; font-weight: 600; text-decoration: none;">Add a race →</a>
                 </div>
             </div>
         </div>
@@ -285,7 +299,7 @@ body {
                 </div>
             </div>
             <div class="stat-metric" id="stat-atl">
-                <h4 id="fatigue-val" style="background: linear-gradient(135deg, #f43f5e, #fb7185); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
+                <h4 id="fatigue-val" style="background: linear-gradient(135deg, #f43f5e, #fb7185); -webkit-background-clip: text; background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
                 <p>Fatigue (ATL) <span class="info-icon">ⓘ</span></p>
                 <div class="metric-tooltip">
                     <span class="tooltip-title">Acute Training Load</span>
@@ -294,7 +308,7 @@ body {
                 </div>
             </div>
             <div class="stat-metric" id="stat-tsb">
-                <h4 id="form-val" style="background: linear-gradient(135deg, #10b981, #34d399); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
+                <h4 id="form-val" style="background: linear-gradient(135deg, #10b981, #34d399); -webkit-background-clip: text; background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
                 <p>Form (TSB) <span class="info-icon">ⓘ</span></p>
                 <div class="metric-tooltip">
                     <span class="tooltip-title">Training Stress Balance</span>
@@ -303,7 +317,7 @@ body {
                 </div>
             </div>
             <div class="stat-metric" id="stat-vo2">
-                <h4 id="vo2-val" style="background: linear-gradient(135deg, #a855f7, #d8b4fe); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
+                <h4 id="vo2-val" style="background: linear-gradient(135deg, #a855f7, #d8b4fe); -webkit-background-clip: text; background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
                 <p>VO2 Max Est. <span class="info-icon">ⓘ</span></p>
                 <div class="metric-tooltip">
                     <span class="tooltip-title">Maximal Oxygen Uptake</span>
@@ -347,12 +361,27 @@ body {
             <div class="chart-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                     <h3 style="margin: 0;">Pace Zones</h3>
-                    <span class="tag">Min/Mile</span>
+                    <span class="tag" id="pace-zones-unit">Min/Mile</span>
                 </div>
                 <div class="table-container" style="margin-top: 0;">
                     <table style="font-size: 0.9rem; border-collapse: separate; border-spacing: 0 0.5rem;">
                         <tbody id="pace-zones-body">
                             <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading Pace Zones...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Recent Activities Card -->
+            <div class="chart-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="margin: 0;">Recent Activities</h3>
+                    <a href="/warehouse" class="tag" style="text-decoration: none; cursor: pointer; color: #60a5fa; border-color: rgba(59,130,246,0.5);">View Warehouse →</a>
+                </div>
+                <div class="table-container" style="margin-top: 0; overflow-x: auto;">
+                    <table style="width: 100%; font-size: 0.85rem; border-collapse: separate; border-spacing: 0 0.5rem;">
+                        <tbody id="recent-activities-body">
+                            <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading activities...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -447,6 +476,7 @@ function setPmcWindow(days) {
 }
 
 async function fetchPaceZones() {
+    document.getElementById('pace-zones-unit').textContent = isMetric ? 'Min/KM' : 'Min/Mile';
     try {
         const res = await fetch(`/pace_zones/${athleteId}`);
         if(res.ok) {
@@ -537,8 +567,9 @@ async function fetchDashboardRaces() {
         races.forEach(r => {
             const opt = document.createElement('option');
             opt.value = encodeURIComponent(JSON.stringify(r));
-            const dateStr = new Date(r.race_date + 'T00:00:00').toLocaleDateString();
-            opt.textContent = `${r.name ? r.name + ' - ' : ''}${r.race_length.toUpperCase()} on ${dateStr}`;
+            const dateStr = new Date(r.race_date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            const raceType = r.race_length.charAt(0).toUpperCase() + r.race_length.slice(1);
+            opt.textContent = `${r.name ? r.name + ' (' + raceType + ')' : raceType} on ${dateStr}`;
             sel.appendChild(opt);
         });
 
@@ -781,8 +812,9 @@ async function fetchSchedule() {
     
     try {
         const race = JSON.parse(decodeURIComponent(sel.value));
-        const dateStr = new Date(race.race_date + 'T00:00:00').toLocaleDateString();
-        document.getElementById('header-subtitle').innerText = `Training for: ${race.race_length.toUpperCase()} on ${dateStr}`;
+        const dateStr = new Date(race.race_date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const raceTypeNormal = race.race_length.charAt(0).toUpperCase() + race.race_length.slice(1);
+        document.getElementById('header-subtitle').innerText = `Training for: ${race.name || raceTypeNormal} on ${dateStr}`;
         
         const url = `/schedule/${athleteId}?race_date=${encodeURIComponent(race.race_date)}&race_type=${encodeURIComponent(race.race_length)}&goal_time=${encodeURIComponent(race.goal_time || '')}`;
         const res = await fetch(url);
@@ -839,7 +871,63 @@ async function fetchSchedule() {
         }
     } catch(err) { console.error(err); }
 }
+async function fetchRecentActivities() {
+    try {
+        const res = await fetch(`/api/activities?limit=5`);
+        if(!res.ok) return;
+        const activities = await res.json();
+        const tbody = document.getElementById('recent-activities-body');
+        
+        if (!activities || activities.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No activities found. Sync Strava to begin.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '';
+        activities.forEach(act => {
+            const date = new Date(act.start_date_local).toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+            
+            // Format distance
+            let distStr = '';
+            if (isMetric) {
+                distStr = (act.distance / 1000).toFixed(1) + ' km';
+            } else {
+                distStr = (act.distance * 0.000621371).toFixed(1) + ' mi';
+            }
+
+            // Format pace
+            const paceConv = isMetric ? (1000 / 60) : (1609.34 / 60);
+            const minsPerUnit = paceConv / (act.average_speed || 1);
+            const m = Math.floor(minsPerUnit);
+            const s = Math.floor((minsPerUnit - m) * 60).toString().padStart(2, '0');
+            const unitLabel = isMetric ? '/km' : '/mi';
+            const paceStr = (act.average_speed > 0) ? `${m}:${s} ${unitLabel}` : '--';
+
+            const trimp = act.training_load ? Math.round(act.training_load) : '--';
+
+            const row = document.createElement('tr');
+            row.style.background = 'rgba(255,255,255,0.03)';
+            row.style.cursor = 'pointer';
+            row.onclick = () => window.location.href = `/workout_streams/${act.activity_id}`;
+            row.innerHTML = `
+                <td style="padding: 0.75rem; border-radius: 8px 0 0 8px;">
+                    <div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px;">${act.name}</div>
+                    <div style="font-size: 0.7rem; color: var(--text-secondary);">${date}</div>
+                </td>
+                <td style="padding: 0.75rem; text-align: center; color: var(--text-primary);">${distStr}</td>
+                <td style="padding: 0.75rem; text-align: center; color: var(--text-primary);">${paceStr}</td>
+                <td style="padding: 0.75rem; text-align: center; border-radius: 0 8px 8px 0;">
+                    <div style="font-weight: 700; color: #60a5fa;">${trimp}</div>
+                    <div style="font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;">TL</div>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch(err) { console.error(err); }
+}
+
 fetchAnalytics();
+fetchRecentActivities();
 </script>
 {% endif %}
 {% endblock %}

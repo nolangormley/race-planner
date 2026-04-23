@@ -81,7 +81,15 @@ def dashboard(request: Request):
 
 @app.get("/workout_streams/{activity_id}")
 def view_workout_streams(request: Request, activity_id: int):
-    return templates.TemplateResponse("streams.html", {"request": request, "activity_id": activity_id})
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+    db = SessionLocal()
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    db.close()
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse("streams.html", {"request": request, "activity_id": activity_id, "user": user})
 
 @app.get("/warehouse")
 def view_warehouse(request: Request):
@@ -95,10 +103,19 @@ def view_warehouse(request: Request):
 # ==========================================
 
 @app.get("/api/activities")
-def get_activities():
+def get_activities(limit: Optional[int] = 50):
     con = get_db_connection()
     try:
-        activities = con.execute("SELECT * FROM dim_activity ORDER BY start_date DESC").fetchall()
+        query = """
+        SELECT 
+            da.*, 
+            ae.trimp_banister as training_load
+        FROM dim_activity da
+        LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
+        ORDER BY da.start_date DESC
+        LIMIT ?
+        """
+        activities = con.execute(query, [limit]).fetchall()
         columns = [desc[0] for desc in con.description]
         return [dict(zip(columns, row)) for row in activities]
     except Exception as e:
@@ -155,6 +172,92 @@ def get_activity_streams(activity_id: int):
         return df.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        con.close()
+
+@app.get("/api/activities/{activity_id}/effectiveness")
+def get_activity_effectiveness(activity_id: int):
+    con = get_db_connection()
+    try:
+        # Check if table exists
+        table_exists = con.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'activity_effectiveness'").fetchone()
+        if not table_exists:
+            return {"error": "Activity effectiveness data not yet compiled."}
+
+        query = """
+        SELECT 
+            da.*,
+            ae.trimp_banister,
+            ae.trimp_edwards,
+            ae.efficiency_factor,
+            ae.intensity_factor,
+            ae.aerobic_decoupling,
+            ae.zone_1_sec,
+            ae.zone_2_sec,
+            ae.zone_3_sec,
+            ae.zone_4_sec,
+            ae.zone_5_sec,
+            ae.effectiveness_score
+        FROM dim_activity da
+        LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
+        WHERE da.activity_id = ?
+        """
+        row = con.execute(query, [activity_id]).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        
+        columns = [desc[0] for desc in con.description]
+        data = dict(zip(columns, row))
+        
+        # Cleanup: convert NaNs or similar if needed (tuple fetch doesn't usually have them but good to be safe)
+        return data
+    except Exception as e:
+        print(f"Effectiveness error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        con.close()
+
+@app.get("/api/activities/{activity_id}/ai_summary")
+def get_activity_ai_summary(activity_id: int):
+    # This endpoint provides a coaching summary for a SPECIFIC completed activity
+    con = get_db_connection()
+    try:
+        # Get activity and athlete details
+        query = """
+        SELECT 
+            da.*, 
+            ath.sex, 
+            ath.weight as weight_lbs,
+            ae.trimp_banister as trimp,
+            ae.efficiency_factor,
+            ae.aerobic_decoupling
+        FROM dim_activity da
+        JOIN dim_athlete ath ON da.athlete_id = ath.athlete_id
+        LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
+        WHERE da.activity_id = ?
+        """
+        row = con.execute(query, [activity_id]).fetchone()
+        if not row: raise HTTPException(status_code=404, detail="Activity not found")
+        cols = [desc[0] for desc in con.description]
+        stats = dict(zip(cols, row))
+        
+        # Get current training status (CTL/TSB) to give context
+        # Reuse logic from calculate_training_status_logic but for specific athlete
+        status = calculate_training_status_logic(stats['athlete_id'])
+        if status:
+            stats.update(status)
+            
+        mock_workout = {
+            "name": stats.get('name'),
+            "category": stats.get('type'),
+            "description": stats.get('description', 'A completed effort.')
+        }
+        
+        summary = get_ai_insight(stats, context="workout", workout=mock_workout)
+        return {"summary": summary}
+    except Exception as e:
+        print(f"AI summary error for activity {activity_id}: {e}")
+        return {"error": str(e)}
     finally:
         con.close()
 
@@ -933,10 +1036,22 @@ def calculate_pace_zones(user_id: int):
         "Anaerobic Power": f"<{format_pace(p085)}"
     }
 
+    # Internal values for shading charts (in m/s)
+    # v = 26.8224 / sec
+    speeds = {
+        "Recovery": {"min": 0, "max": 26.8224/p140 if p140 > 0 else 0},
+        "Aerobic Endurance": {"min": 26.8224/p140 if p140 > 0 else 0, "max": 26.8224/p119 if p119 > 0 else 0},
+        "Aerobic Power": {"min": 26.8224/p119 if p119 > 0 else 0, "max": 26.8224/p106 if p106 > 0 else 0},
+        "Threshold": {"min": 26.8224/p106 if p106 > 0 else 0, "max": 26.8224/p0945 if p0945 > 0 else 0},
+        "Anaerobic Endurance": {"min": 26.8224/p0945 if p0945 > 0 else 0, "max": 26.8224/p085 if p085 > 0 else 0},
+        "Anaerobic Power": {"min": 26.8224/p085 if p085 > 0 else 0, "max": 10.0}
+    }
+
     return {
         "user_id": user_id,
         "hr_max_used": hr_max,
-        "pace_zones_min_per_mile": result
+        "pace_zones_min_per_mile": result,
+        "pace_zones_speeds": speeds
     }
 
 @app.get("/pace_zones/{user_id}")
