@@ -1,64 +1,68 @@
-# Strava Workout Recommender
+# Race Planner & Activity Warehouse
 
-This project fetches your Strava activities, stores them in a local DuckDB database, analyzes your Training Stress Balance (Fitness/Fatigue/Form), and recommends a specific workout from the Coros training library.
+A professional-grade training analytics platform and AI coaching engine built on your Strava data. This tool transforms raw activity streams into actionable physiological insights and customized training programs.
 
-## Setup
+## 🚀 Key Features
+
+*   **Training Load Analytics**: Visualize your Fitness (CTL), Fatigue (ATL), and Form (TSB) using the Banister impulse-response model.
+*   **AI-Powered Race Coaching**: Select a target race from your calendar, and our AI (via Groq/Llama 3) builds a periodized training block tailored to your current fitness levels.
+*   **Deep Activity Analysis**:
+    *   **Efficiency Factor (EF)**: Tracking aerobic efficiency over time.
+    *   **Aerobic Decoupling (Pa:Hr)**: Measure how well your heart rate holds steady during endurance runs.
+    *   **Pace Zone Mapping**: Automatic calculation of physiological zones (Recovery to Anaerobic) based on your recent 6-week performance.
+*   **Performance Metrics Warehouse**: All data is stored locally in a high-performance **DuckDB** warehouse for lightning-fast queries and long-term history tracking.
+*   **Modern Web UI**: A glass-morphic, responsive dashboard with interactive charts (Chart.js) and real-time AI executive summaries.
+
+## 🛠 Setup
 
 1.  **Dependencies**:
     ```bash
     pip install -r requirements.txt
-    playwright install chromium
     ```
 
 2.  **Configuration**:
-    Create a `.env` file with your Strava API credentials:
+    Create a `.env` file in the root directory:
     ```env
     STRAVA_CLIENT_ID=your_id
     STRAVA_CLIENT_SECRET=your_secret
-    STRAVA_REFRESH_TOKEN=your_token (optional, script handles auth)
+    GROQ_API_KEY=your_key
     ```
 
-## Usage
+3.  **Authentication**:
+    Run the ingestion pipeline to authenticate with Strava and populate your warehouse:
+    ```bash
+    python src/pipeline.py
+    ```
 
-**Run everything:**
-```bash
-python run.py
-```
+## 📈 Usage
 
-This will:
-1.  Fetch latest Strava activities.
-2.  Calculate training metrics (TRIMP, Efficiency Factor).
-3.  Display your current Training Load status.
-4.  Recommend a specific workout.
+### Running the Web Dashboard
+The primary way to interact with the platform is via the web application.
 
-**Update Workout Library:**
-To scrape new workouts from Coros (Run occasionally):
-```bash
-python run.py --update-workouts
-```
-
-## Data Warehouse
-All data is stored in `data/strava_warehouse.duckdb`. You can query it using DuckDB CLI or DBeaver.
-
-## Key Files
-*   `run.py`: Main entry point.
-*   `ingest_strava_duckdb.py`: Fetches Strava data.
-*   `analyze_effectiveness.py`: Calculates effectiveness metrics.
-*   `analyze_training_load.py`: Calculates TSB and recommends workouts.
-*   `ingest_workouts.py`: Scrapes Coros website for workout plans.
-
-## Running the Web API
-
-The project includes a FastAPI backend that serves the data. You can start the server locally or via Docker.
-
-**Start Locally using Uvicorn:**
+**Option A: Local Uvicorn** (Recommended for development)
 ```bash
 python -m uvicorn src.api.main:app --reload
 ```
 
-**Start using Docker Compose:**
+**Option B: Docker Compose**
 ```bash
 docker-compose up --build
 ```
+Access the dashboard at `http://localhost:8000`.
 
-The API will be available at `http://127.0.0.1:8000`.
+### Data Ingestion
+To sync your latest Strava activities and recalculate effectiveness metrics:
+```bash
+python src/pipeline.py
+```
+
+## 🏗 Project Structure
+
+*   **/src/api**: FastAPI backend and Jinja2 templates (Dashboard, Warehouse, Activity Analysis).
+*   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB.
+*   **/data**: Contains the `strava_warehouse.duckdb` file.
+*   **analyze_effectiveness.py**: Core logic for calculating physiological metrics from activity streams.
+
+## 📊 Methodology
+*   **Training Load**: Uses the Banister TRIMP model where `Fitness (CTL)` is a 42-day exponentially weighted moving average (EWMA) and `Fatigue (ATL)` is a 7-day EWMA.
+*   **Pace Zones**: Calculated using a proprietary algorithm that analyzes the 95th percentile of your speed over the last 6 weeks to estimate Threshold Pace.
