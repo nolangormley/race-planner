@@ -11,10 +11,13 @@ services:
       - ./data:/app/data
       - ./.env:/app/.env
       - ./src:/app/src
-    network_mode: "host"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
     restart: always
     environment:
-      - DATABASE_URL=postgresql://user:password@localhost:5432/raceplanner
+      - DATABASE_URL=postgresql://user:password@db:5432/raceplanner
 
   db:
     image: postgres:15
