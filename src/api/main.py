@@ -19,10 +19,15 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category, calculate_vo2max_from_df, clean_val, calculate_acwr
 from src.api.auth_routes import router as auth_router
-from src.api.database import SessionLocal, User, Race
+from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry, ChatMessage
 from sqlalchemy.orm import Session
 
 load_dotenv()
+# Also try loading .env.dev, overriding variables from .env if both exist
+if os.path.exists(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env.dev')):
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env.dev'), override=True)
+elif os.path.exists('.env.dev'):
+    load_dotenv('.env.dev', override=True)
 
 app = FastAPI()
 
@@ -662,6 +667,35 @@ def get_ai_insight(stats, context="status", workout=None):
                 if hasattr(e, 'response') and e.response is not None:
                     print(f"Groq error response body: {e.response.text}")
                 raise
+        elif llm_provider == "deepseek":
+            deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+            if not deepseek_api_key:
+                return "Deepseek API key not set in environment (DEEPSEEK_API_KEY)."
+                
+            url = "https://api.deepseek.com/v1/chat/completions"
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ]
+            }
+            headers = {
+                "Authorization": f"Bearer {deepseek_api_key}",
+                "Content-Type": "application/json"
+            }
+            try:
+                response = requests.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    return data["choices"][0]["message"]["content"]
+                return str(data)
+            except requests.exceptions.HTTPError as e:
+                print(f"HTTPError on Deepseek API call: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"Deepseek error response body: {e.response.text}")
+                raise
         else:
             url = "http://localhost:1234/api/v1/chat"
             payload = {
@@ -830,6 +864,17 @@ def get_vo2max(user_id: int):
         raise HTTPException(status_code=404, detail="No stream data found to calculate VO2 Max for this user.")
     return vo2max_data
 
+def clean_json_response(content: str) -> str:
+    """Helper to strip markdown formatting from LLM JSON responses."""
+    content = content.strip()
+    if content.startswith("```json"):
+        content = content[7:]
+    elif content.startswith("```"):
+        content = content[3:]
+    if content.endswith("```"):
+        content = content[:-3]
+    return content.strip()
+
 def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optional[str] = None, pace_zones: Optional[dict] = None):
     try:
         current_date_str = stats.get('date', datetime.now().strftime('%Y-%m-%d'))
@@ -904,7 +949,7 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
                 data = response.json()
                 if "choices" in data and len(data["choices"]) > 0:
                     import json
-                    content = data["choices"][0]["message"]["content"]
+                    content = clean_json_response(data["choices"][0]["message"]["content"])
                     try:
                         return json.loads(content)
                     except json.JSONDecodeError:
@@ -915,8 +960,43 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
                 if hasattr(e, 'response') and e.response is not None:
                     print(f"Groq error response body: {e.response.text}")
                 return {"error": str(e)}
+        elif llm_provider == "deepseek":
+            deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+            if not deepseek_api_key:
+                return {"error": "Deepseek API key not set in environment (DEEPSEEK_API_KEY)."}
+                
+            url = "https://api.deepseek.com/v1/chat/completions"
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "response_format": {"type": "json_object"}
+            }
+            headers = {
+                "Authorization": f"Bearer {deepseek_api_key}",
+                "Content-Type": "application/json"
+            }
+            try:
+                response = requests.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    import json
+                    content = clean_json_response(data["choices"][0]["message"]["content"])
+                    try:
+                        return json.loads(content)
+                    except json.JSONDecodeError:
+                        return {"error": "Failed to parse JSON response from LLM", "raw_content": content}
+                return {"error": "Invalid response format from Deepseek API."}
+            except requests.exceptions.HTTPError as e:
+                print(f"HTTPError on Deepseek API call: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"Deepseek error response body: {e.response.text}")
+                return {"error": str(e)}
         else:
-            return {"error": "This feature currently requires the LLM_PROVIDER to be set to groq in order to return properly formatted JSON."}
+            return {"error": "This feature currently requires the LLM_PROVIDER to be set to groq or deepseek in order to return properly formatted JSON."}
 
     except Exception as e:
         print(f"Error getting AI training plan: {e}")
@@ -1255,3 +1335,406 @@ def update_profile(user_id: int, profile: ProfileUpdate):
     finally:
         db.close()
 
+
+# ==========================================
+# TRAINING CALENDAR PAGE
+# ==========================================
+
+@app.get("/training-calendar")
+def training_calendar_page(request: Request):
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+    db = SessionLocal()
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    db.close()
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse("training_calendar.html", {"request": request, "user": user})
+
+
+# ==========================================
+# TRAINING PLAN CRUD ENDPOINTS
+# ==========================================
+
+class PlanEntryCreate(BaseModel):
+    date: str
+    workout_type: Optional[str] = None
+    training_focus: Optional[str] = None
+    approximate_distance: Optional[str] = None
+    description: Optional[str] = None
+    is_completed: Optional[bool] = False
+    strava_activity_id: Optional[int] = None
+
+
+class PlanEntryUpdate(BaseModel):
+    workout_type: Optional[str] = None
+    training_focus: Optional[str] = None
+    approximate_distance: Optional[str] = None
+    description: Optional[str] = None
+    is_completed: Optional[bool] = None
+    strava_activity_id: Optional[int] = None
+
+
+class BulkEntriesCreate(BaseModel):
+    entries: List[PlanEntryCreate]
+    name: Optional[str] = None
+    race_id: Optional[int] = None
+
+
+class ChatMessageCreate(BaseModel):
+    message: str
+
+
+def _plan_to_dict(plan):
+    return {
+        "id": plan.id,
+        "user_id": plan.user_id,
+        "name": plan.name,
+        "race_id": plan.race_id,
+        "created_at": str(plan.created_at),
+        "updated_at": str(plan.updated_at),
+    }
+
+
+def _entry_to_dict(e):
+    return {
+        "id": e.id,
+        "plan_id": e.plan_id,
+        "date": str(e.date),
+        "workout_type": e.workout_type,
+        "training_focus": e.training_focus,
+        "approximate_distance": e.approximate_distance,
+        "description": e.description,
+        "is_completed": e.is_completed,
+        "strava_activity_id": e.strava_activity_id,
+    }
+
+
+@app.get("/api/training-plan/{user_id}")
+def get_training_plan(user_id: int):
+    """Get the active training plan for a user including all entries and chat history."""
+    db = SessionLocal()
+    try:
+        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
+        if not plan:
+            return {"plan": None, "entries": [], "chat_messages": []}
+        entries = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).order_by(TrainingPlanEntry.date).all()
+        messages = db.query(ChatMessage).filter(ChatMessage.plan_id == plan.id).order_by(ChatMessage.id).all()
+        return {
+            "plan": _plan_to_dict(plan),
+            "entries": [_entry_to_dict(e) for e in entries],
+            "chat_messages": [{"id": m.id, "role": m.role, "content": m.content, "created_at": str(m.created_at)} for m in messages],
+        }
+    finally:
+        db.close()
+
+
+@app.post("/api/training-plan/{user_id}")
+def create_or_replace_training_plan(user_id: int, body: BulkEntriesCreate):
+    """Replace the user's training plan with a new set of entries (AI or manual bulk-add)."""
+    db = SessionLocal()
+    try:
+        old_plans = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).all()
+        for p in old_plans:
+            db.delete(p)
+        db.commit()
+
+        plan = TrainingPlan(user_id=user_id, name=body.name or "My Training Plan", race_id=body.race_id)
+        db.add(plan)
+        db.commit()
+        db.refresh(plan)
+
+        for entry_data in body.entries:
+            entry = TrainingPlanEntry(
+                plan_id=plan.id,
+                date=datetime.strptime(entry_data.date, '%Y-%m-%d').date(),
+                workout_type=entry_data.workout_type,
+                training_focus=entry_data.training_focus,
+                approximate_distance=entry_data.approximate_distance,
+                description=entry_data.description,
+                is_completed=entry_data.is_completed or False,
+                strava_activity_id=entry_data.strava_activity_id,
+            )
+            db.add(entry)
+        db.commit()
+        return {"message": "Plan created", "plan_id": plan.id, "entry_count": len(body.entries)}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+
+@app.post("/api/training-plan/{user_id}/entry")
+def add_plan_entry(user_id: int, entry_data: PlanEntryCreate):
+    """Add a single entry (day) to the user's plan."""
+    db = SessionLocal()
+    try:
+        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
+        if not plan:
+            plan = TrainingPlan(user_id=user_id, name="My Training Plan")
+            db.add(plan)
+            db.commit()
+            db.refresh(plan)
+        entry = TrainingPlanEntry(
+            plan_id=plan.id,
+            date=datetime.strptime(entry_data.date, '%Y-%m-%d').date(),
+            workout_type=entry_data.workout_type,
+            training_focus=entry_data.training_focus,
+            approximate_distance=entry_data.approximate_distance,
+            description=entry_data.description,
+            is_completed=entry_data.is_completed or False,
+            strava_activity_id=entry_data.strava_activity_id,
+        )
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+        return _entry_to_dict(entry)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+
+@app.put("/api/training-plan/entry/{entry_id}")
+def update_plan_entry(entry_id: int, update: PlanEntryUpdate):
+    """Update a specific entry."""
+    db = SessionLocal()
+    try:
+        entry = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.id == entry_id).first()
+        if not entry:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        if update.workout_type is not None:
+            entry.workout_type = update.workout_type
+        if update.training_focus is not None:
+            entry.training_focus = update.training_focus
+        if update.approximate_distance is not None:
+            entry.approximate_distance = update.approximate_distance
+        if update.description is not None:
+            entry.description = update.description
+        if update.is_completed is not None:
+            entry.is_completed = update.is_completed
+        if update.strava_activity_id is not None:
+            entry.strava_activity_id = update.strava_activity_id
+        db.commit()
+        return _entry_to_dict(entry)
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+
+@app.delete("/api/training-plan/entry/{entry_id}")
+def delete_plan_entry(entry_id: int):
+    """Delete a specific entry."""
+    db = SessionLocal()
+    try:
+        entry = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.id == entry_id).first()
+        if not entry:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        db.delete(entry)
+        db.commit()
+        return {"message": "Entry deleted"}
+    finally:
+        db.close()
+
+
+@app.post("/api/training-plan/{user_id}/chat")
+def training_plan_chat(user_id: int, msg: ChatMessageCreate):
+    """Send a message to the AI to modify the training plan and persist the conversation."""
+    db = SessionLocal()
+    try:
+        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
+        if not plan:
+            plan = TrainingPlan(user_id=user_id, name="My Training Plan")
+            db.add(plan)
+            db.commit()
+            db.refresh(plan)
+
+        entries = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).order_by(TrainingPlanEntry.date).all()
+        entries_summary = "\n".join(
+            [f"  - {str(e.date)}: {e.workout_type} ({e.approximate_distance or 'N/A'}) — {e.description or ''}" for e in entries]
+        ) if entries else "  (No entries yet — this is a blank plan.)"
+
+        history = db.query(ChatMessage).filter(ChatMessage.plan_id == plan.id).order_by(ChatMessage.id.desc()).limit(20).all()
+        history = list(reversed(history))
+
+        user = db.query(User).filter(User.id == user_id).first()
+        user_info = ""
+        if user:
+            user_info = f"Athlete: {user.name}, Gender: {user.gender or 'N/A'}, Weight: {user.weight or 'N/A'} kg."
+            if user.race_date and user.race_length:
+                user_info += f" Racing a {user.race_length} on {user.race_date}."
+
+        llm_provider = os.getenv("LLM_PROVIDER", "local").lower()
+
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        system_prompt = (
+            f"You are an expert running coach AI assistant helping to build and modify a training calendar. {user_info}\n"
+            f"Today's date is {today_str}.\n"
+            f"The current training plan has these entries:\n{entries_summary}\n\n"
+            "When the user asks you to modify the plan, respond with a JSON object that has:\n"
+            "1. 'message': a friendly conversational reply explaining what you've done or recommending changes.\n"
+            "2. 'plan_updates': (optional) an object where keys are 'YYYY-MM-DD' dates and values are objects with keys: "
+            "'workout_type', 'training_focus', 'approximate_distance', 'description'. "
+            "Only include dates you are adding or changing. To remove a day, set 'workout_type' to 'Delete'.\n"
+            "3. 'replace_all': (optional) boolean — if true, the full new plan will be in 'full_plan' instead of 'plan_updates'.\n"
+            "4. 'full_plan': (optional) same structure as plan_updates but represents the complete new plan.\n"
+            "If the user is just chatting (no plan changes needed), only include 'message'.\n"
+            "CRITICAL: Always respond with valid JSON only. Do not wrap the JSON in ```json blocks or markdown. Output raw JSON."
+        )
+
+        messages_payload = [{"role": "system", "content": system_prompt}]
+        for h in history:
+            messages_payload.append({"role": h.role, "content": h.content})
+        messages_payload.append({"role": "user", "content": msg.message})
+
+        user_msg = ChatMessage(plan_id=plan.id, role="user", content=msg.message)
+        db.add(user_msg)
+        db.commit()
+
+        if llm_provider not in ["groq", "deepseek"]:
+            ai_reply = "AI chat requires LLM_PROVIDER=groq or deepseek to be set."
+            ai_msg = ChatMessage(plan_id=plan.id, role="assistant", content=ai_reply)
+            db.add(ai_msg)
+            db.commit()
+            return {"message": ai_reply, "plan_updates": None, "entries": [_entry_to_dict(e) for e in entries]}
+
+        import json as json_lib
+        
+        if llm_provider == "groq":
+            groq_api_key = os.getenv("GROQ_API_KEY")
+            if not groq_api_key:
+                raise HTTPException(status_code=500, detail="GROQ_API_KEY not set")
+    
+            url_api = "https://api.groq.com/openai/v1/chat/completions"
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": messages_payload,
+                "response_format": {"type": "json_object"},
+            }
+            headers = {"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"}
+            
+        elif llm_provider == "deepseek":
+            deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+            if not deepseek_api_key:
+                raise HTTPException(status_code=500, detail="DEEPSEEK_API_KEY not set")
+
+            url_api = "https://api.deepseek.com/v1/chat/completions"
+            payload = {
+                "model": "deepseek-v4-pro",
+                "messages": messages_payload,
+                "response_format": {"type": "json_object"},
+            }
+            headers = {"Authorization": f"Bearer {deepseek_api_key}", "Content-Type": "application/json"}
+
+        response = requests.post(url_api, json=payload, headers=headers, timeout=60)
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        content_clean = clean_json_response(content)
+        
+        try:
+            parsed = json_lib.loads(content_clean)
+        except json_lib.JSONDecodeError as e:
+            print(f"Failed to parse JSON. Raw content: {content}")
+            ai_reply = "Sorry, I couldn't process that properly."
+            ai_msg = ChatMessage(plan_id=plan.id, role="assistant", content=ai_reply)
+            db.add(ai_msg)
+            db.commit()
+            return {"message": ai_reply, "entries": [_entry_to_dict(e) for e in db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).order_by(TrainingPlanEntry.date).all()]}
+
+        ai_reply = parsed.get("message", "Done.")
+        ai_msg = ChatMessage(plan_id=plan.id, role="assistant", content=ai_reply)
+        db.add(ai_msg)
+        db.commit()
+
+        if parsed.get("replace_all") and "full_plan" in parsed:
+            db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).delete()
+            db.commit()
+            for date_str, w in parsed["full_plan"].items():
+                if w.get("workout_type", "").lower() == "delete":
+                    continue
+                try:
+                    entry = TrainingPlanEntry(
+                        plan_id=plan.id,
+                        date=datetime.strptime(date_str, '%Y-%m-%d').date(),
+                        workout_type=w.get("workout_type"),
+                        training_focus=w.get("training_focus"),
+                        approximate_distance=w.get("approximate_distance"),
+                        description=w.get("description"),
+                    )
+                    db.add(entry)
+                except Exception:
+                    pass
+            db.commit()
+
+        elif parsed.get("plan_updates"):
+            for date_str, w in parsed["plan_updates"].items():
+                try:
+                    date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    if w.get("workout_type", "").lower() == "delete":
+                        db.query(TrainingPlanEntry).filter(
+                            TrainingPlanEntry.plan_id == plan.id,
+                            TrainingPlanEntry.date == date_obj
+                        ).delete()
+                    else:
+                        existing = db.query(TrainingPlanEntry).filter(
+                            TrainingPlanEntry.plan_id == plan.id,
+                            TrainingPlanEntry.date == date_obj
+                        ).first()
+                        if existing:
+                            existing.workout_type = w.get("workout_type", existing.workout_type)
+                            existing.training_focus = w.get("training_focus", existing.training_focus)
+                            existing.approximate_distance = w.get("approximate_distance", existing.approximate_distance)
+                            existing.description = w.get("description", existing.description)
+                        else:
+                            entry = TrainingPlanEntry(
+                                plan_id=plan.id,
+                                date=date_obj,
+                                workout_type=w.get("workout_type"),
+                                training_focus=w.get("training_focus"),
+                                approximate_distance=w.get("approximate_distance"),
+                                description=w.get("description"),
+                            )
+                            db.add(entry)
+                except Exception:
+                    pass
+            db.commit()
+
+        all_entries = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).order_by(TrainingPlanEntry.date).all()
+        return {
+            "message": ai_reply,
+            "entries": [_entry_to_dict(e) for e in all_entries],
+        }
+
+    except Exception as e:
+        db.rollback()
+        print(f"Training plan chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@app.delete("/api/training-plan/{user_id}/chat")
+def clear_training_plan_chat(user_id: int):
+    """Clear the AI chat history for the user's training plan."""
+    db = SessionLocal()
+    try:
+        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
+        if not plan:
+            return {"message": "No active plan"}
+            
+        db.query(ChatMessage).filter(ChatMessage.plan_id == plan.id).delete()
+        db.commit()
+        return {"message": "Chat history cleared"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
