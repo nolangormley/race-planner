@@ -21,6 +21,7 @@
         <div>
             {% if user %}
                 <a href="/warehouse" style="margin-right: 15px; color: var(--text-secondary); text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: color 0.2s;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='var(--text-secondary)'">Activities</a>
+                <a href="/training-calendar" style="margin-right: 15px; color: var(--text-secondary); text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: color 0.2s;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='var(--text-secondary)'">Training Calendar</a>
                 <a href="/profile" style="margin-right: 15px; color: var(--text-secondary); text-decoration: none; font-weight: 600; transition: color 0.2s;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='var(--text-secondary)'">{{ user.name }}</a>
                 <a href="/logout" class="btn" style="padding: 0.5rem 1rem; border: 1px solid var(--panel-border)">Logout</a>
             {% else %}

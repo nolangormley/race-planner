@@ -1,0 +1,1066 @@
+{% extends "base.html" %}
+
+{% block split_styles %}
+<style>
+:root {
+    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.4);
+    --panel-bg: rgba(15, 23, 42, 0.6);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --input-bg: rgba(0,0,0,0.3);
+    --body-bg: #0f172a;
+    --danger: #f43f5e;
+    --success: #10b981;
+    --warning: #f59e0b;
+}
+
+[data-theme="light"] {
+    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.2);
+    --panel-bg: rgba(255, 255, 255, 0.9);
+    --panel-border: rgba(0, 0, 0, 0.1);
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --input-bg: rgba(255,255,255,0.8);
+    --body-bg: #f8fafc;
+}
+
+body {
+    background-color: var(--body-bg);
+    color: var(--text-primary);
+    transition: background-color 0.3s, color 0.3s;
+}
+
+/* Layout */
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 2rem;
+    margin-top: 2rem;
+}
+
+.page-title {
+    font-size: 2.5rem;
+    margin: 0;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.page-subtitle {
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.calendar-layout {
+    display: grid;
+    grid-template-columns: 350px 1fr;
+    gap: 1.5rem;
+    height: calc(100vh - 200px);
+    min-height: 700px;
+    transition: all 0.3s ease;
+}
+
+.calendar-layout.manual-mode {
+    grid-template-columns: 1fr;
+}
+
+.calendar-layout.manual-mode .chat-sidebar {
+    display: none;
+}
+
+/* Chat Sidebar */
+.chat-sidebar {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: var(--accent-glow);
+}
+
+.chat-header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--panel-border);
+    background: rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.chat-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: #c084fc;
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.chat-message {
+    max-width: 85%;
+    padding: 0.8rem 1rem;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    animation: fadeIn 0.3s ease-out forwards;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.chat-message.user {
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    color: white;
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+}
+
+.chat-message.assistant {
+    background: var(--input-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--panel-border);
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+}
+
+.chat-input-container {
+    padding: 1rem;
+    border-top: 1px solid var(--panel-border);
+    background: rgba(0,0,0,0.2);
+    display: flex;
+    gap: 0.5rem;
+}
+
+.chat-input {
+    flex: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 20px;
+    padding: 0.6rem 1rem;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.chat-input:focus {
+    border-color: #3b82f6;
+}
+
+.chat-send-btn {
+    background: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.chat-send-btn:hover {
+    background: #2563eb;
+    transform: scale(1.05);
+}
+
+/* Calendar Main Area */
+.calendar-main {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.calendar-header-actions {
+    padding: 1rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--panel-border);
+    background: rgba(0,0,0,0.2);
+}
+
+.mode-toggle {
+    display: flex;
+    background: var(--input-bg);
+    border-radius: 8px;
+    padding: 0.25rem;
+    border: 1px solid var(--panel-border);
+}
+
+.mode-btn {
+    background: transparent;
+    border: none;
+    padding: 0.5rem 1rem;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.mode-btn.active {
+    background: #3b82f6;
+    color: white;
+}
+
+.month-nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.month-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    min-width: 150px;
+    text-align: center;
+}
+
+.nav-btn {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text-primary);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.nav-btn:hover {
+    background: rgba(255,255,255,0.1);
+}
+
+/* Calendar Grid */
+.calendar-grid-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    overflow-y: auto;
+}
+
+.weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.weekday {
+    text-align: center;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    font-weight: 600;
+    padding: 0.5rem 0;
+}
+
+.days-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    grid-auto-rows: minmax(100px, auto);
+    gap: 0.5rem;
+    flex: 1;
+}
+
+.day-cell {
+    background: rgba(0,0,0,0.15);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    transition: border-color 0.2s, background 0.2s;
+    cursor: pointer;
+    min-height: 100px;
+}
+
+.day-cell:hover {
+    border-color: rgba(59, 130, 246, 0.5);
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.day-cell.other-month {
+    opacity: 0.4;
+}
+
+.day-cell.today {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.day-number {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: right;
+    margin-bottom: 0.25rem;
+}
+
+.day-cell.today .day-number {
+    color: #60a5fa;
+}
+
+/* Workout Cards */
+.workout-item {
+    background: var(--panel-bg);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-left: 3px solid #3b82f6;
+    border-radius: 6px;
+    padding: 0.4rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.1s;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.workout-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.workout-item.completed {
+    border-left-color: var(--success);
+    border-color: rgba(16, 185, 129, 0.3);
+    background: rgba(16, 185, 129, 0.05);
+}
+
+.workout-item.rest {
+    border-left-color: var(--text-secondary);
+    border-color: rgba(148, 163, 184, 0.3);
+    background: rgba(148, 163, 184, 0.05);
+}
+
+.workout-type-tag {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.workout-desc-snippet {
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+.modal-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.modal-content {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    width: 90%;
+    max-width: 500px;
+    padding: 2rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    transform: translateY(20px);
+    transition: transform 0.3s;
+}
+
+.modal-overlay.active .modal-content {
+    transform: translateY(0);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+
+.close-btn:hover {
+    color: var(--text-primary);
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.form-group input, .form-group select, .form-group textarea {
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--input-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: 'Inter', sans-serif;
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.btn-base {
+    padding: 0.6rem 1.2rem;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+    border: none;
+}
+
+.btn-primary {
+    background: #3b82f6;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #2563eb;
+}
+
+.btn-secondary {
+    background: rgba(255,255,255,0.1);
+    color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+    background: rgba(255,255,255,0.15);
+}
+
+.btn-danger {
+    background: rgba(244, 63, 94, 0.1);
+    color: var(--danger);
+    border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.btn-danger:hover {
+    background: rgba(244, 63, 94, 0.2);
+}
+
+.loader-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Scrollbar styling for chat and calendar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.1);
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+.typing-indicator {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px;
+    align-items: center;
+    width: fit-content;
+}
+
+.typing-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--text-secondary);
+    border-radius: 50%;
+    animation: typing 1.4s infinite ease-in-out both;
+}
+
+.typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes typing {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1); }
+}
+
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Training Calendar</h1>
+        <p class="page-subtitle">Build and manage your personalized training plan with AI.</p>
+    </div>
+</div>
+
+<div class="calendar-layout" id="main-layout">
+    <!-- Chat Sidebar -->
+    <div class="chat-sidebar" id="chat-sidebar">
+        <div class="chat-header" style="justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <h3>AI Coach</h3>
+            </div>
+            <button onclick="clearChat()" title="Clear Chat History" style="background: transparent; border: none; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; padding: 4px; border-radius: 4px; transition: background 0.2s, color 0.2s;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 6h18"></path>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+            <!-- Messages inserted here -->
+            <div class="chat-message assistant">
+                Hi! I'm your AI running coach. I can help you build a personalized training plan for your upcoming race. Tell me about your goals, or ask me to generate a plan based on your recent Strava data!
+            </div>
+        </div>
+        <form class="chat-input-container" id="chat-form">
+            <input type="text" class="chat-input" id="chat-input" placeholder="Message AI Coach..." autocomplete="off">
+            <button type="submit" class="chat-send-btn" id="chat-submit-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+            </button>
+        </form>
+    </div>
+
+    <!-- Calendar Main Area -->
+    <div class="calendar-main" id="calendar-main">
+        <div class="calendar-header-actions">
+            <div class="mode-toggle">
+                <button class="mode-btn active" id="mode-interactive" onclick="setMode('interactive')">Interactive AI</button>
+                <button class="mode-btn" id="mode-manual" onclick="setMode('manual')">Manual Mode</button>
+            </div>
+            
+            <div class="month-nav">
+                <button class="nav-btn" onclick="prevMonth()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <div class="month-title" id="month-display">Month Year</div>
+                <button class="nav-btn" onclick="nextMonth()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </button>
+            </div>
+            
+            <div style="width: 150px;"></div> <!-- Spacer for flexbox balance -->
+        </div>
+
+        <div class="calendar-grid-container">
+            <div class="weekdays">
+                <div class="weekday">Sun</div>
+                <div class="weekday">Mon</div>
+                <div class="weekday">Tue</div>
+                <div class="weekday">Wed</div>
+                <div class="weekday">Thu</div>
+                <div class="weekday">Fri</div>
+                <div class="weekday">Sat</div>
+            </div>
+            <div class="days-grid" id="days-grid">
+                <!-- Days inserted via JS -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Workout Modal -->
+<div class="modal-overlay" id="workout-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modal-title">Workout Details</h3>
+            <button class="close-btn" onclick="closeModal()">&times;</button>
+        </div>
+        <form id="workout-form">
+            <input type="hidden" id="entry-id">
+            <input type="hidden" id="entry-date">
+            
+            <div class="form-group">
+                <label>Date</label>
+                <input type="text" id="display-date" disabled style="background: rgba(0,0,0,0.1);">
+            </div>
+            
+            <div class="form-group">
+                <label>Workout Type</label>
+                <select id="workout-type">
+                    <option value="Rest">Rest</option>
+                    <option value="Easy Run">Easy Run</option>
+                    <option value="Long Run">Long Run</option>
+                    <option value="Tempo">Tempo</option>
+                    <option value="Intervals">Intervals</option>
+                    <option value="Cross Training">Cross Training</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Training Focus / Distance</label>
+                <div style="display: flex; gap: 0.5rem;">
+                    <input type="text" id="workout-focus" placeholder="e.g. Aerobic Base" style="flex: 1;">
+                    <input type="text" id="workout-distance" placeholder="e.g. 5 miles" style="width: 120px;">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>Description</label>
+                <textarea id="workout-desc" placeholder="Details about paces, intervals, etc."></textarea>
+            </div>
+
+            <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                <input type="checkbox" id="workout-completed" style="width: auto;">
+                <label for="workout-completed" style="margin: 0;">Mark as Completed</label>
+            </div>
+
+            <div class="modal-actions" id="modal-actions">
+                <!-- Actions injected based on edit vs create -->
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    const userId = {{ user.id }};
+    
+    // State
+    let currentDate = new Date();
+    let currentMode = 'interactive';
+    let planEntries = [];
+    let isWaitingForAi = false;
+
+    // Elements
+    const chatMessagesEl = document.getElementById('chat-messages');
+    const chatInputEl = document.getElementById('chat-input');
+    const chatFormEl = document.getElementById('chat-form');
+    const daysGridEl = document.getElementById('days-grid');
+    const monthDisplayEl = document.getElementById('month-display');
+    const modalEl = document.getElementById('workout-modal');
+
+    // Init
+    document.addEventListener('DOMContentLoaded', () => {
+        renderCalendar();
+        fetchTrainingPlan();
+    });
+
+    // Toggle Modes
+    function setMode(mode) {
+        currentMode = mode;
+        document.getElementById('mode-interactive').classList.toggle('active', mode === 'interactive');
+        document.getElementById('mode-manual').classList.toggle('active', mode === 'manual');
+        
+        if (mode === 'manual') {
+            document.getElementById('main-layout').classList.add('manual-mode');
+        } else {
+            document.getElementById('main-layout').classList.remove('manual-mode');
+        }
+    }
+
+    // Calendar Logic
+    function nextMonth() {
+        currentDate.setMonth(currentDate.getMonth() + 1);
+        renderCalendar();
+    }
+
+    function prevMonth() {
+        currentDate.setMonth(currentDate.getMonth() - 1);
+        renderCalendar();
+    }
+
+    function renderCalendar() {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        
+        // Setup Header
+        const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        monthDisplayEl.textContent = `${monthNames[month]} ${year}`;
+        
+        // Calculate grid
+        daysGridEl.innerHTML = '';
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        
+        const startingDay = firstDay.getDay(); // 0-6 (Sun-Sat)
+        const totalDays = lastDay.getDate();
+        
+        const today = new Date();
+        const isCurrentMonth = today.getMonth() === month && today.getFullYear() === year;
+
+        // Previous month padding
+        const prevMonthLastDay = new Date(year, month, 0).getDate();
+        for (let i = 0; i < startingDay; i++) {
+            const d = prevMonthLastDay - startingDay + i + 1;
+            const dateStr = formatDateStr(year, month - 1, d);
+            daysGridEl.appendChild(createDayCell(d, true, false, dateStr));
+        }
+
+        // Current month
+        for (let i = 1; i <= totalDays; i++) {
+            const isToday = isCurrentMonth && i === today.getDate();
+            const dateStr = formatDateStr(year, month, i);
+            daysGridEl.appendChild(createDayCell(i, false, isToday, dateStr));
+        }
+
+        // Next month padding
+        const totalCells = startingDay + totalDays;
+        const remainingCells = 42 - totalCells; // 6 rows always
+        for (let i = 1; i <= remainingCells; i++) {
+            const dateStr = formatDateStr(year, month + 1, i);
+            daysGridEl.appendChild(createDayCell(i, true, false, dateStr));
+        }
+        
+        // Populate entries
+        populateEntries();
+    }
+
+    function formatDateStr(y, m, d) {
+        const date = new Date(y, m, d);
+        return date.toISOString().split('T')[0];
+    }
+
+    function createDayCell(dayNum, isOtherMonth, isToday, dateStr) {
+        const cell = document.createElement('div');
+        cell.className = `day-cell ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}`;
+        cell.dataset.date = dateStr;
+        
+        const num = document.createElement('div');
+        num.className = 'day-number';
+        num.textContent = dayNum;
+        cell.appendChild(num);
+        
+        cell.addEventListener('click', (e) => {
+            if (e.target.closest('.workout-item')) return; // handled by item click
+            openModalForDate(dateStr);
+        });
+
+        return cell;
+    }
+
+    // Data Fetching
+    async function fetchTrainingPlan() {
+        try {
+            const res = await fetch(`/api/training-plan/${userId}`);
+            const data = await res.json();
+            
+            planEntries = data.entries || [];
+            populateEntries();
+            
+            // Populate Chat
+            if (data.chat_messages && data.chat_messages.length > 0) {
+                // Clear default greeting
+                chatMessagesEl.innerHTML = '';
+                data.chat_messages.forEach(msg => {
+                    appendMessage(msg.role, msg.content, false);
+                });
+                scrollToBottom();
+            }
+        } catch (e) {
+            console.error("Failed to fetch plan:", e);
+        }
+    }
+
+    function populateEntries() {
+        // Clear old items
+        document.querySelectorAll('.workout-item').forEach(el => el.remove());
+        
+        planEntries.forEach(entry => {
+            const cell = document.querySelector(`.day-cell[data-date="${entry.date}"]`);
+            if (cell) {
+                const item = document.createElement('div');
+                
+                const isRest = entry.workout_type?.toLowerCase() === 'rest';
+                item.className = `workout-item ${entry.is_completed ? 'completed' : ''} ${isRest ? 'rest' : ''}`;
+                
+                item.innerHTML = `
+                    <div class="workout-type-tag">${entry.workout_type || 'Workout'}</div>
+                    <div class="workout-desc-snippet">${entry.approximate_distance || entry.training_focus || 'Details'}</div>
+                `;
+                
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openModalForEntry(entry);
+                });
+                
+                cell.appendChild(item);
+            }
+        });
+    }
+
+    // Modals
+    function openModalForDate(dateStr) {
+        document.getElementById('modal-title').textContent = "Add Workout";
+        document.getElementById('workout-form').reset();
+        document.getElementById('entry-id').value = "";
+        document.getElementById('entry-date').value = dateStr;
+        
+        const d = new Date(dateStr + "T12:00:00");
+        document.getElementById('display-date').value = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+        
+        document.getElementById('modal-actions').innerHTML = `
+            <button type="button" class="btn-base btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="button" class="btn-base btn-primary" onclick="saveEntry()">Add to Plan</button>
+        `;
+        
+        modalEl.classList.add('active');
+    }
+
+    function openModalForEntry(entry) {
+        document.getElementById('modal-title').textContent = "Edit Workout";
+        document.getElementById('entry-id').value = entry.id;
+        document.getElementById('entry-date').value = entry.date;
+        
+        const d = new Date(entry.date + "T12:00:00");
+        document.getElementById('display-date').value = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+        
+        // Select matching type or fallback
+        const select = document.getElementById('workout-type');
+        let typeExists = false;
+        for (let i=0; i<select.options.length; i++) {
+            if (select.options[i].value === entry.workout_type) typeExists = true;
+        }
+        if (!typeExists && entry.workout_type) {
+            select.add(new Option(entry.workout_type, entry.workout_type));
+        }
+        select.value = entry.workout_type || "Easy Run";
+        
+        document.getElementById('workout-focus').value = entry.training_focus || "";
+        document.getElementById('workout-distance').value = entry.approximate_distance || "";
+        document.getElementById('workout-desc').value = entry.description || "";
+        document.getElementById('workout-completed').checked = entry.is_completed || false;
+        
+        document.getElementById('modal-actions').innerHTML = `
+            <button type="button" class="btn-base btn-danger" style="margin-right: auto;" onclick="deleteEntry(${entry.id})">Delete</button>
+            <button type="button" class="btn-base btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="button" class="btn-base btn-primary" onclick="saveEntry()">Save Changes</button>
+        `;
+        
+        modalEl.classList.add('active');
+    }
+
+    function closeModal() {
+        modalEl.classList.remove('active');
+    }
+
+    async function saveEntry() {
+        const id = document.getElementById('entry-id').value;
+        const payload = {
+            date: document.getElementById('entry-date').value,
+            workout_type: document.getElementById('workout-type').value,
+            training_focus: document.getElementById('workout-focus').value,
+            approximate_distance: document.getElementById('workout-distance').value,
+            description: document.getElementById('workout-desc').value,
+            is_completed: document.getElementById('workout-completed').checked
+        };
+        
+        try {
+            let res;
+            if (id) {
+                // Update
+                res = await fetch(`/api/training-plan/entry/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } else {
+                // Create
+                res = await fetch(`/api/training-plan/${userId}/entry`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }
+            
+            if (res.ok) {
+                closeModal();
+                fetchTrainingPlan(); // Refresh data
+            } else {
+                alert("Failed to save entry.");
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    async function deleteEntry(id) {
+        if (!confirm("Remove this workout?")) return;
+        try {
+            const res = await fetch(`/api/training-plan/entry/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                closeModal();
+                fetchTrainingPlan();
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    // Chat Interface
+    function appendMessage(role, content, animate = true) {
+        const div = document.createElement('div');
+        div.className = `chat-message ${role}`;
+        div.textContent = content;
+        if (!animate) div.style.animation = 'none';
+        chatMessagesEl.appendChild(div);
+        scrollToBottom();
+    }
+
+    function showTyping() {
+        const div = document.createElement('div');
+        div.className = 'chat-message assistant typing-indicator';
+        div.id = 'typing-indicator';
+        div.innerHTML = `<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>`;
+        chatMessagesEl.appendChild(div);
+        scrollToBottom();
+    }
+
+    function removeTyping() {
+        const indicator = document.getElementById('typing-indicator');
+        if (indicator) indicator.remove();
+    }
+
+    function scrollToBottom() {
+        chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    }
+
+    chatFormEl.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (isWaitingForAi) return;
+        
+        const msg = chatInputEl.value.trim();
+        if (!msg) return;
+        
+        chatInputEl.value = '';
+        appendMessage('user', msg);
+        
+        isWaitingForAi = true;
+        showTyping();
+        
+        try {
+            const res = await fetch(`/api/training-plan/${userId}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: msg })
+            });
+            
+            const data = await res.json();
+            removeTyping();
+            
+            if (data.message) {
+                appendMessage('assistant', data.message);
+            }
+            
+            if (data.entries) {
+                planEntries = data.entries;
+                populateEntries();
+            }
+            
+        } catch (err) {
+            console.error(err);
+            removeTyping();
+            appendMessage('assistant', "Sorry, I ran into an issue connecting to the server.");
+        } finally {
+            isWaitingForAi = false;
+        }
+    });
+
+    async function clearChat() {
+        if (!confirm("Are you sure you want to clear the chat history?")) return;
+        
+        try {
+            const res = await fetch(`/api/training-plan/${userId}/chat`, { method: 'DELETE' });
+            if (res.ok) {
+                chatMessagesEl.innerHTML = `
+                    <div class="chat-message assistant">
+                        Hi! I'm your AI running coach. I can help you build a personalized training plan for your upcoming race. Tell me about your goals, or ask me to generate a plan based on your recent Strava data!
+                    </div>
+                `;
+            } else {
+                alert("Failed to clear chat history.");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error clearing chat history.");
+        }
+    }
+
+</script>
+{% endblock %}
