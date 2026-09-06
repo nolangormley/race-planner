@@ -44,7 +44,10 @@ from src.api.schemas import (
     WorkoutCreate, SettingsUpdate, RaceCreate, ProfileUpdate,
     PlanEntryCreate, PlanEntryUpdate, BulkEntriesCreate, ChatMessageCreate,
 )
-from src.api.services.llm import call_llm, get_llm_provider, clean_json_response, LLMConfigError
+from src.api.services.llm import (
+    call_llm, get_llm_provider, clean_json_response, LLMConfigError, cached_call,
+    TRAINING_BENCHMARKS, NO_PSEUDOSCIENCE_CLAUSE, NEVER_CONTRADICT_STANDING_CLAUSE,
+)
 from src.api.deps import get_db_connection, DEFAULT_MAX_HR
 from src.api.services.metrics import (
     get_performance_standing,
@@ -718,13 +721,11 @@ def get_ai_insight(stats, context="status", workout=None):
 
         system_prompt = (
             f"You are an expert running coach and one of your athletes is {race_info} The athlete is {sex_str}, and {weight_str}. "
-            f"Use these rigid scientific benchmarks for context:\n"
-            f"- CTL: <40 Developing, 40-70 Consistent, 70-100 Advanced, >100 Elite Pro.\n"
-            f"- TSB: >15 Fresh (Peaking), -30 to -10 Optimal Training, <-30 High Overload.\n"
-            f"Provide actionable advice as concise bullet points. NEVER contradict the user's current 'Standing' provided in the prompt. "
+            f"{TRAINING_BENCHMARKS}"
+            f"Provide actionable advice as concise bullet points. {NEVER_CONTRADICT_STANDING_CLAUSE}"
             f"CRITICAL CONSTRAINTS: "
             f"1) Recommending a MAXIMUM of ONE training action for the current day. "
-            f"2) Do not hallucinate pseudo-science. Running depletes energy. Rest restores it. "
+            f"2) {NO_PSEUDOSCIENCE_CLAUSE}"
             f"3) Output plain text only. Do NOT use markdown or HTML tags. Use only simple hyphens (-) for bullet points. "
             f"4) KEEP IT EXTREMELY BRIEF. Provide exactly 1 short introductory sentence, followed by 2-3 short bullet points."
         )
@@ -768,7 +769,16 @@ def get_status(user_id: int, current_user: User = Depends(get_current_user)):
     status['race_date'] = str(current_user.race_date) if current_user.race_date else None
     status['goal_time'] = current_user.race_goal_time
 
-    status['ai_insight'] = get_ai_insight(status, context="status")
+    # Cached for an hour — this route is hit on every dashboard load, and
+    # was previously a fresh, unbounded billed LLM call every single time
+    # (see agent_prompting/improvement_plan.md Section 3). CTL/ATL/TSB don't
+    # meaningfully change within an hour, so a little staleness is an
+    # acceptable trade for not re-billing/re-latency-ing every page view.
+    status['ai_insight'] = cached_call(
+        f"ai_insight:status:{user_id}",
+        ttl_seconds=3600,
+        compute_fn=lambda: get_ai_insight(status, context="status"),
+    )
     return status
 
 @app.get("/recommend/{user_id}")
@@ -882,6 +892,9 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
 
         system_prompt = (
             f"You are an expert running coach. Your athlete is {sex_str} and {weight_str}. "
+            f"{TRAINING_BENCHMARKS}"
+            f"{NO_PSEUDOSCIENCE_CLAUSE}"
+            "Do not schedule more than one hard/quality session (Tempo, Long Run, Interval, Race) per day — pair hard days with Easy Run or Rest so the week has real recovery. "
             "You must respond STRICTLY with a valid JSON object. Do not include markdown formatting like ```json or any text outside the JSON framework. "
             "The JSON object must have three keys:\n"
             "1. 'blurb': a short introductory and motivating message about the plan.\n"
@@ -982,9 +995,19 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
             logger.exception(f"Failed to look up max_heartrate for athlete {user_id}; falling back to default.")
             hr_max = float(DEFAULT_MAX_HR)
 
+        # Bounded to the same 30-day window as load_dist below, and
+        # percentages are computed here rather than left for the frontend to
+        # derive — previously this returned a raw COUNT(*) across the
+        # athlete's *entire* history with no date bound, which is what
+        # produced the "Y-axis to 120,000" chart bug. That got fixed only in
+        # the frontend (a client-side percentage conversion); this endpoint
+        # itself still returned unbounded raw seconds, so any other consumer
+        # (or a future frontend change that forgets to renormalize) would
+        # reproduce the same bug. See
+        # agent_prompting/improvement_plan.md Section 3.
         hr_query = """
-        SELECT 
-            CASE 
+        SELECT
+            CASE
                 WHEN value < ? * 0.60 THEN 'Zone 1 (Recovery)'
                 WHEN value < ? * 0.70 THEN 'Zone 2 (Aerobic)'
                 WHEN value < ? * 0.80 THEN 'Zone 3 (Tempo)'
@@ -994,11 +1017,12 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
             COUNT(*) as secs
         FROM stream_heartrate h
         JOIN dim_activity a ON h.activity_id = a.activity_id
-        WHERE a.athlete_id = ?
+        WHERE a.athlete_id = ? AND a.start_date_local >= current_date - interval '30 days'
         GROUP BY 1 ORDER BY 1
         """
         hr_data = con.execute(hr_query, [hr_max, hr_max, hr_max, hr_max, user_id]).fetchall()
-        
+        total_hr_secs = sum(row[1] for row in hr_data)
+
         load_query = """
         SELECT type, SUM(distance) as total_dist
         FROM dim_activity
@@ -1006,9 +1030,16 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
         GROUP BY type
         """
         load_data = con.execute(load_query, [user_id]).fetchall()
-        
+
         return {
-            "hr_zones": [{"zone": row[0], "time_seconds": row[1]} for row in hr_data],
+            "hr_zones": [
+                {
+                    "zone": row[0],
+                    "time_seconds": row[1],
+                    "percentage": round((row[1] / total_hr_secs) * 100, 1) if total_hr_secs > 0 else 0.0,
+                }
+                for row in hr_data
+            ],
             "load_dist": [{"type": row[0], "distance": row[1]} for row in load_data]
         }
     except Exception as e:
@@ -1380,6 +1411,8 @@ def training_plan_chat(user_id: int, msg: ChatMessageCreate, current_user: User 
             f"You are an expert running coach AI assistant helping to build and modify a training calendar. {user_info}\n"
             f"Today's date is {today_str}.\n"
             f"The current training plan has these entries:\n{entries_summary}\n\n"
+            f"{NO_PSEUDOSCIENCE_CLAUSE}"
+            "Do not schedule more than one hard/quality session (Tempo, Long Run, Interval, Race) per day — pair hard days with Easy Run or Rest so the week has real recovery.\n"
             "When the user asks you to modify the plan, respond with a JSON object that has:\n"
             "1. 'message': a friendly conversational reply explaining what you've done or recommending changes.\n"
             "2. 'plan_updates': (optional) an object where keys are 'YYYY-MM-DD' dates and values are objects with keys: "

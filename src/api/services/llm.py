@@ -9,7 +9,34 @@ had a request timeout). There is now exactly one place that knows how to
 call each provider. See agent_prompting/improvement_plan.md Section 3/6.
 """
 import os
+import re
+import threading
+import time
+
 import requests
+
+# Shared anti-hallucination guardrails. Previously these existed only in
+# get_ai_insight's system prompt (the dashboard's "Coach AI Insight" card,
+# the one screenshotted in the project's own vp_review3.md/vp_review4.md) —
+# get_ai_training_plan (the race-schedule generator) and training_plan_chat
+# (the plan-editing chat) each had independent, hand-written prompts with no
+# CTL/TSB reference bands and no anti-pseudoscience clause, so the same
+# model could still hallucinate through either of those two surfaces even
+# after the dashboard card was fixed. Centralized here so all three prompts
+# draw from one place. See agent_prompting/improvement_plan.md Section 3.
+TRAINING_BENCHMARKS = (
+    "Use these rigid scientific benchmarks for context:\n"
+    "- CTL: <40 Developing, 40-70 Consistent, 70-100 Advanced, >100 Elite Pro.\n"
+    "- TSB: >15 Fresh (Peaking), -30 to -10 Optimal Training, <-30 High Overload.\n"
+)
+
+NO_PSEUDOSCIENCE_CLAUSE = (
+    "Do not hallucinate pseudo-science. Running depletes energy. Rest restores it. "
+)
+
+NEVER_CONTRADICT_STANDING_CLAUSE = (
+    "NEVER contradict the user's current 'Standing' provided in the prompt. "
+)
 
 PROVIDER_CONFIG = {
     "groq": {
@@ -131,4 +158,47 @@ def clean_json_response(content: str) -> str:
         content = content[3:]
     if content.endswith("```"):
         content = content[:-3]
+    content = content.strip()
+
+    # The fence-stripping above only matches a response that starts with
+    # ``` — it didn't cover a model prefacing JSON with prose (e.g. "Here's
+    # your plan:\n```json\n{...}\n```"), which previously fell through to
+    # json.loads() failing on the whole string. Falls back to extracting
+    # the first {...} block via regex; not a full parser (a stray brace in
+    # surrounding prose could still confuse it), just a better heuristic
+    # than requiring the response to start with a fence.
+    if not content.startswith("{"):
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            content = match.group(0)
+
     return content.strip()
+
+
+# ---- Lightweight in-process cache for billed LLM calls ----
+# main.py's plain `def` routes run in FastAPI's thread pool, so this needs a
+# lock even though it's a simple dict. Not distributed/persistent — fine for
+# a single-process deployment; a multi-worker/multi-process deployment would
+# need a shared store (Redis etc.) instead. Time-based only (no invalidation
+# on new activity data), which is the baseline fix
+# agent_prompting/improvement_plan.md Section 3 suggests: "/status/{user_id}
+# calls get_ai_insight on every request, no memoization ... cache the insight
+# per user for a TTL." This also naturally caps spend/rate — repeated calls
+# within the TTL window return the cached value instead of a fresh paid API
+# call, rather than needing a separate rate-limiter.
+_cache_lock = threading.Lock()
+_cache_store = {}  # key -> (expires_at_monotonic, value)
+
+
+def cached_call(key: str, ttl_seconds: int, compute_fn):
+    now = time.monotonic()
+    with _cache_lock:
+        cached = _cache_store.get(key)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+
+    value = compute_fn()
+
+    with _cache_lock:
+        _cache_store[key] = (now + ttl_seconds, value)
+    return value
