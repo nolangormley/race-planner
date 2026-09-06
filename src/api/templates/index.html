@@ -90,8 +90,12 @@
     </header>
 
     <main class="container">
-        <h1 class="main-title">Training Dashboard</h1>
-        <p class="subtitle">Manage your synced Strava activities and recommended Coros workouts.</p>
+        <div style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: flex-end;">
+            <div>
+                <h1 style="font-size: 2.5rem; margin-bottom: 0.5rem;">Strava Warehouse</h1>
+                <p style="color: var(--text-secondary);">Manage your synced Strava activities and recommended Coros workouts.</p>
+            </div>
+        </div>
 
         <div class="glass-panel">
             <div class="tabs">
@@ -236,6 +240,14 @@
             return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         }
 
+        // Escape untrusted text (Strava activity/workout names & descriptions
+        // are free-text) before it's interpolated into an HTML string.
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         // Tabs Logic
         function switchTab(tab) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -271,7 +283,7 @@
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${formatDate(act.start_date_local)}</td>
-                        <td><strong>${act.name}</strong></td>
+                        <td><strong>${escapeHtml(act.name)}</strong></td>
                         <td>${formatDistance(act.distance)}</td>
                         <td>${formatTime(act.moving_time)}</td>
                         <td>${formatPace(act.average_speed)}</td>
@@ -333,10 +345,10 @@
                     const tr = document.createElement('tr');
                     const desc = w.description ? (w.description.length > 60 ? w.description.substring(0, 60) + '...' : w.description) : '--';
                     tr.innerHTML = `
-                        <td><strong>${w.name}</strong></td>
-                        <td><span class="tag">${w.category || 'Uncategorized'}</span></td>
-                        <td><small>${desc}</small></td>
-                        <td><small>${w.source || 'Manual'}</small></td>
+                        <td><strong>${escapeHtml(w.name)}</strong></td>
+                        <td><span class="tag">${escapeHtml(w.category || 'Uncategorized')}</span></td>
+                        <td><small>${escapeHtml(desc)}</small></td>
+                        <td><small>${escapeHtml(w.source || 'Manual')}</small></td>
                         <td>
                             <div class="btn-group">
                                 <button class="wh-btn wh-btn-muted" onclick='editWorkout(${JSON.stringify(w).replace(/'/g, "&#39;")})'>&#9998; Edit</button>
