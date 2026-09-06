@@ -11,12 +11,34 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, date
 import calendar
+import logging
 import os
 import secrets
 import random
 import requests
 from dotenv import load_dotenv
 from sklearn.linear_model import LinearRegression
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("race_planner.api")
+
+# Fixed allowlist for delete_activity's per-table DELETE loop below. `table`
+# is never user input today, but interpolating it into an f-string SQL
+# statement is exactly the shape a real injection would take if that ever
+# changed — asserting against this constant enforces the safety in code
+# rather than by convention alone.
+ACTIVITY_TABLES_TO_DELETE = (
+    "stream_altitude", "stream_cadence", "stream_heartrate", "stream_moving",
+    "stream_temperature", "stream_velocity", "stream_watts", "activity_effectiveness",
+    "dim_activity"
+)
+
+# Fallback used when an athlete's own max heart rate isn't on record.
+# Previously three independent hardcoded "190"/"190.0" literals; centralized
+# here (see also src/pipeline.py's own DEFAULT_MAX_HR, which is 192 — the two
+# files historically use slightly different fallback values and haven't been
+# unified, see agent_prompting/improvement_plan.md Section 2/6).
+DEFAULT_MAX_HR = 190
 
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -163,7 +185,8 @@ def get_activities(limit: Optional[int] = 50, current_user: User = Depends(get_c
         columns = [desc[0] for desc in con.description]
         return [dict(zip(columns, row)) for row in activities]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -194,7 +217,8 @@ def get_user_activities(user_id: int, limit: Optional[int] = 100, current_user: 
         cols = [desc[0] for desc in con.description]
         return [dict(zip(cols, r)) for r in rows]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -253,73 +277,75 @@ def get_mileage_summary(user_id: int, start: str = None, end: str = None, curren
         start: Start date filter (YYYY-MM-DD), defaults to start of current month
         end: End date filter (YYYY-MM-DD), defaults to end of current month
     """
-    from datetime import datetime, date
-
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this user's mileage summary")
 
+    if not current_user.strava_athlete_id:
+        return {"planned_miles": 0, "actual_miles": 0, "planned_days": 0, "completed_days": 0, "rest_days": 0}
+    athlete_id = current_user.strava_athlete_id
+
+    # Determine date range
+    if not (start and end):
+        today = date.today()
+        start = today.replace(day=1).isoformat()
+        last_day = calendar.monthrange(today.year, today.month)[1]
+        end = today.replace(day=last_day).isoformat()
+
+    try:
+        start_date = datetime.strptime(start, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end, '%Y-%m-%d').date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="start/end must be YYYY-MM-DD dates.")
+
+    db = SessionLocal()
     con = get_db_connection()
     try:
-        if not current_user.strava_athlete_id:
-            return {"planned_miles": 0, "actual_miles": 0, "planned_days": 0, "completed_days": 0, "rest_days": 0}
-        athlete_id = current_user.strava_athlete_id
-        
-        # Determine date range
-        if start and end:
-            date_filter = "AND da.start_date_local::DATE BETWEEN ? AND ?"
-            date_params = [start, end]
-        else:
-            today = date.today()
-            start = today.replace(day=1).isoformat()
-            last_day = calendar.monthrange(today.year, today.month)[1]
-            end = today.replace(day=last_day).isoformat()
-            date_filter = "AND da.start_date_local::DATE BETWEEN ? AND ?"
-            date_params = [start, end]
-        
-        # Planned mileage from the latest training plan entries
-        plan = con.execute(
-            "SELECT approximate_distance FROM TrainingPlanEntry WHERE plan_id = ("
-            "SELECT id FROM TrainingPlan WHERE user_id = ? ORDER BY id DESC LIMIT 1)",
-            [user_id]
-        ).fetchall()
+        # TrainingPlan/TrainingPlanEntry live in Postgres (via SQLAlchemy),
+        # not the DuckDB warehouse — this used to query them through the
+        # DuckDB connection, which has no such tables and raised a Catalog
+        # Error on every single call. See
+        # agent_prompting/improvement_plan.md Section 6.
+        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
+
         planned = 0.0
-        for (dist,) in plan:
-            if dist:
-                try:
-                    num = float(dist.split()[0])
-                    if 'km' in dist.lower():
-                        num = num * 0.621371
-                    planned += num
-                except:
-                    pass
-        
-        # Actual mileage from completed activities (distance in meters -> convert to miles)
-        activities = con.execute(
-            f"SELECT distance FROM dim_activity WHERE athlete_id = ? {date_filter}",
-            [athlete_id] + date_params
-        ).fetchall()
-        actual_meters = sum(row[0] for row in activities if row[0])
-        actual_miles = actual_meters * 0.000621371
-        
-        # Count entries by type for plan stats
-        entries = con.execute(
-            "SELECT workout_type, is_completed FROM TrainingPlanEntry WHERE plan_id = ("
-            "SELECT id FROM TrainingPlan WHERE user_id = ? ORDER BY id DESC LIMIT 1)"
-            f" AND date BETWEEN ? AND ?",
-            [user_id, start, end]
-        ).fetchall()
-        
         planned_days = 0
         completed_days = 0
         rest_days = 0
-        for (wt, completed) in entries:
-            if wt and wt.lower() == 'rest':
-                rest_days += 1
-            else:
-                planned_days += 1
-            if completed:
-                completed_days += 1
-        
+        if plan:
+            # Planned mileage is the full plan's total (unfiltered by date,
+            # matching the original behavior); day counts below ARE
+            # filtered to the requested range.
+            for entry in db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).all():
+                if entry.approximate_distance:
+                    try:
+                        num = float(entry.approximate_distance.split()[0])
+                        if 'km' in entry.approximate_distance.lower():
+                            num = num * 0.621371
+                        planned += num
+                    except (ValueError, IndexError):
+                        pass
+
+            ranged_entries = db.query(TrainingPlanEntry).filter(
+                TrainingPlanEntry.plan_id == plan.id,
+                TrainingPlanEntry.date.between(start_date, end_date)
+            ).all()
+            for entry in ranged_entries:
+                if entry.workout_type and entry.workout_type.lower() == 'rest':
+                    rest_days += 1
+                else:
+                    planned_days += 1
+                if entry.is_completed:
+                    completed_days += 1
+
+        # Actual mileage still comes from the DuckDB warehouse (distance in
+        # meters -> miles).
+        activities = con.execute(
+            "SELECT distance FROM dim_activity WHERE athlete_id = ? AND start_date_local::DATE BETWEEN ? AND ?",
+            [athlete_id, start, end]
+        ).fetchall()
+        actual_meters = sum(row[0] for row in activities if row[0])
+        actual_miles = actual_meters * 0.000621371
+
         return {
             "planned_miles": round(planned, 2),
             "actual_miles": round(actual_miles, 2),
@@ -327,11 +353,14 @@ def get_mileage_summary(user_id: int, start: str = None, end: str = None, curren
             "completed_days": completed_days,
             "rest_days": rest_days
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Mileage summary error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Mileage summary error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
+        db.close()
 @app.get("/api/activities/{activity_id}")
 def get_activity(activity_id: int, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
@@ -350,7 +379,8 @@ def get_activity(activity_id: int, current_user: User = Depends(get_current_user
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -397,7 +427,8 @@ def get_activity_streams(activity_id: int, current_user: User = Depends(get_curr
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -440,8 +471,8 @@ def get_activity_effectiveness(activity_id: int, current_user: User = Depends(ge
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Effectiveness error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Effectiveness error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -502,22 +533,43 @@ def delete_activity(activity_id: int, current_user: User = Depends(get_current_u
         if not owner_row:
             raise HTTPException(status_code=404, detail="Activity not found")
 
-        # Delete from all tables sequentially.
-        tables = [
-            "stream_altitude", "stream_cadence", "stream_heartrate", "stream_moving",
-            "stream_temperature", "stream_velocity", "stream_watts", "activity_effectiveness",
-            "dim_activity"
-        ]
-        for table in tables:
+        # Delete from all tables sequentially, tracking failures instead of
+        # unconditionally reporting success regardless of what happened.
+        failed_tables = []
+        for table in ACTIVITY_TABLES_TO_DELETE:
+            # table is never user input today, but an f-string table name is
+            # exactly the shape a real SQL injection would take if that ever
+            # changed — assert against a fixed allowlist so the safety is
+            # enforced in code, not just by "table always comes from this
+            # literal list" convention.
+            assert table in ACTIVITY_TABLES_TO_DELETE
             try:
                 con.execute(f"DELETE FROM {table} WHERE activity_id = ?", [activity_id])
             except Exception as e:
                 print(f"Failed deleting from {table}: {e}")
+                failed_tables.append(table)
+
+        if "dim_activity" in failed_tables:
+            # The activity record itself wasn't removed — this is the one
+            # failure serious enough to fail the whole request, since the
+            # caller would otherwise believe the activity is gone.
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete the activity record; some associated data may already be removed. Failed tables: {failed_tables}"
+            )
+
+        if failed_tables:
+            return {
+                "message": "Activity deleted, but some associated data failed to clean up.",
+                "failed_tables": failed_tables,
+            }
+
         return {"message": "Activity deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -543,7 +595,8 @@ def get_workouts(current_user: User = Depends(get_current_user)):
         columns = [desc[0] for desc in con.description]
         return [dict(zip(columns, row)) for row in workouts]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -561,7 +614,8 @@ def create_workout(workout: WorkoutCreate, current_user: User = Depends(get_curr
         )
         return {"message": "Workout created successfully", "workout_id": next_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -575,7 +629,8 @@ def update_workout(workout_id: int, workout: WorkoutCreate, current_user: User =
         )
         return {"message": "Workout updated successfully"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -586,7 +641,8 @@ def delete_workout(workout_id: int, current_user: User = Depends(get_current_use
         con.execute("DELETE FROM dim_workouts WHERE workout_id=?", [workout_id])
         return {"message": "Workout deleted successfully"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -602,16 +658,25 @@ def get_users(current_user: User = Depends(get_current_user)):
         # Check if table exists
         try:
             users = con.execute("SELECT * FROM dim_athlete").fetchall()
-        except:
-             return []
-             
+        except duckdb.CatalogException:
+            # dim_athlete genuinely doesn't exist yet (fresh warehouse) — a
+            # real "no data" case.
+            return []
+        except Exception:
+            logger.exception("Unexpected error querying dim_athlete")
+            raise HTTPException(status_code=500, detail="Failed to query athletes.")
+
+
         columns = [desc[0] for desc in con.description]
         result = []
         for user in users:
             result.append(dict(zip(columns, user)))
         return result
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unhandled error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
 
@@ -1051,9 +1116,10 @@ def calculate_vo2max(user_id: int):
     try:
         try:
             max_hr_query = con.execute("SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id=?", [user_id]).fetchone()
-            hr_max = max_hr_query[0] if max_hr_query and max_hr_query[0] and max_hr_query[0] > 100 else 190
-        except:
-            hr_max = 190
+            hr_max = max_hr_query[0] if max_hr_query and max_hr_query[0] and max_hr_query[0] > 100 else DEFAULT_MAX_HR
+        except Exception:
+            logger.exception(f"Failed to look up max_heartrate for athlete {user_id}; falling back to default.")
+            hr_max = DEFAULT_MAX_HR
 
         hr_rest = 60
         
@@ -1338,32 +1404,39 @@ def speed_to_pace_str(speed_ms):
     return f"{m}:{s:02d} /mi"
 
 def calculate_pace_zones(user_id: int):
+    # NOTE: previously this connection was never closed on any code path in
+    # this function (get_db_connection() with no matching finally). Wrapped
+    # the whole DB-touching section in try/finally to fix the leak.
     con = get_db_connection()
     try:
-        max_hr_query = con.execute("SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id=?", [user_id]).fetchone()
-        hr_max = max_hr_query[0] if max_hr_query and max_hr_query[0] and max_hr_query[0] > 100 else 190
-    except:
-        hr_max = 190
+        try:
+            max_hr_query = con.execute("SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id=?", [user_id]).fetchone()
+            hr_max = max_hr_query[0] if max_hr_query and max_hr_query[0] and max_hr_query[0] > 100 else DEFAULT_MAX_HR
+        except Exception:
+            logger.exception(f"Failed to look up max_heartrate for athlete {user_id}; falling back to default.")
+            hr_max = DEFAULT_MAX_HR
 
-    # Limit to recent activities for more accurate current zones (e.g. last 90 days)
-    try:
-        query = """
-        SELECT 
-            v.value as speed,
-            h.value as hr
-        FROM dim_activity a
-        JOIN stream_velocity v ON a.activity_id = v.activity_id
-        JOIN stream_heartrate h ON a.activity_id = h.activity_id AND v.time_offset = h.time_offset
-        WHERE a.athlete_id = ? AND a.type = 'Run'
-          AND v.value > 1.8 AND v.value < 8.0
-          AND h.value > 80 AND h.value <= ?
-          AND a.start_date_local >= current_date - interval '90 days'
-        """
-        df = con.execute(query, [user_id, hr_max + 10]).fetchdf()
-    except Exception as e:
-        print(f"Error querying streams for pace zones: {e}")
-        return None
-        
+        # Limit to recent activities for more accurate current zones (e.g. last 90 days)
+        try:
+            query = """
+            SELECT
+                v.value as speed,
+                h.value as hr
+            FROM dim_activity a
+            JOIN stream_velocity v ON a.activity_id = v.activity_id
+            JOIN stream_heartrate h ON a.activity_id = h.activity_id AND v.time_offset = h.time_offset
+            WHERE a.athlete_id = ? AND a.type = 'Run'
+              AND v.value > 1.8 AND v.value < 8.0
+              AND h.value > 80 AND h.value <= ?
+              AND a.start_date_local >= current_date - interval '90 days'
+            """
+            df = con.execute(query, [user_id, hr_max + 10]).fetchdf()
+        except Exception as e:
+            print(f"Error querying streams for pace zones: {e}")
+            return None
+    finally:
+        con.close()
+
     if df.empty:
         return None
 
@@ -1445,15 +1518,16 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's analytics")
     con = get_db_connection()
     try:
-        # Derive HR max from athlete's recorded data (fallback 190)
+        # Derive HR max from athlete's recorded data (fallback DEFAULT_MAX_HR)
         try:
             hr_max_row = con.execute(
                 "SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id = ? AND max_heartrate > 100",
                 [user_id]
             ).fetchone()
-            hr_max = float(hr_max_row[0]) if hr_max_row and hr_max_row[0] else 190.0
+            hr_max = float(hr_max_row[0]) if hr_max_row and hr_max_row[0] else float(DEFAULT_MAX_HR)
         except Exception:
-            hr_max = 190.0
+            logger.exception(f"Failed to look up max_heartrate for athlete {user_id}; falling back to default.")
+            hr_max = float(DEFAULT_MAX_HR)
 
         hr_query = """
         SELECT 
@@ -2055,10 +2129,16 @@ def training_plan_chat(user_id: int, msg: ChatMessageCreate, current_user: User 
             "entries": [_entry_to_dict(e) for e in all_entries],
         }
 
+    except HTTPException:
+        # Deliberate, safe-to-show errors raised above (e.g. "GROQ_API_KEY
+        # not set") — pass through as-is rather than falling into the
+        # generic handler below and losing the specific message.
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
-        print(f"Training plan chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Training plan chat error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         db.close()
 
@@ -2079,6 +2159,7 @@ def clear_training_plan_chat(user_id: int, current_user: User = Depends(get_curr
         return {"message": "Chat history cleared"}
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Clear training plan chat error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         db.close()
