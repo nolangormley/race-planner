@@ -315,8 +315,10 @@ body { background-color: var(--body-bg); color: var(--text-primary); }
                 ✅ Connected
             </div>
             <div class="field-row"><span class="field-label">Athlete ID</span><span class="field-value">{{ user.strava_athlete_id }}</span></div>
-            <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
+            <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+                <button type="button" id="sync-strava-btn" onclick="syncStravaNow()" class="btn-save" style="cursor: pointer;">Sync Strava Now</button>
                 <a href="/strava-auth" class="btn-save" style="text-decoration: none; display: inline-block; text-align: center;">Re-authorize Strava</a>
+                <span id="sync-strava-msg" style="font-size: 0.85rem;"></span>
             </div>
         {% else %}
             <div class="strava-badge strava-disconnected" style="margin-bottom: 1.5rem;">
@@ -631,6 +633,35 @@ async function loadAccountStats() {
         document.getElementById('stat-total-dist').textContent = totalMiles;
         document.getElementById('stat-earliest').textContent = earliest;
     } catch (e) { /* silent */ }
+}
+
+// ---- Strava Sync ----
+async function syncStravaNow() {
+    const btn = document.getElementById('sync-strava-btn');
+    const msg = document.getElementById('sync-strava-msg');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Syncing...';
+    msg.style.color = 'var(--text-secondary)';
+    msg.textContent = 'This can take a minute for a lot of new activity.';
+
+    try {
+        const res = await fetch(`/api/sync-strava/${userId}`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            msg.style.color = '#10b981';
+            msg.textContent = `✅ Synced — ${data.new_activities} new/updated ${data.new_activities === 1 ? 'activity' : 'activities'}.`;
+        } else {
+            msg.style.color = '#f43f5e';
+            msg.textContent = '❌ ' + (data.detail || 'Sync failed.');
+        }
+    } catch (e) {
+        msg.style.color = '#f43f5e';
+        msg.textContent = '❌ Connection error.';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
 }
 
 // ---- App Preferences Toggles ----

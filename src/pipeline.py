@@ -39,6 +39,15 @@ DEFAULT_MAX_HR = 192
 DEFAULT_REST_HR = 60
 
 
+class StravaAuthError(Exception):
+    """Raised when a specific stored Strava refresh_token is invalid/revoked
+    and can't be silently recovered from (unlike the CLI's get_access_token,
+    which falls back to an interactive browser-based OAuth flow — not
+    something a web request can do). Callers should surface this as "please
+    reconnect Strava" rather than retrying."""
+    pass
+
+
 def _request_with_retry(method, url, max_retries=3, **kwargs):
     """Wraps a requests.get/post call with Strava 429 rate-limit handling:
     reads the Retry-After header (seconds) and sleeps before retrying, up to
@@ -125,6 +134,37 @@ class StravaManager:
         except Exception as e:
             print(f"Error getting access token: {e}")
             return None
+
+    def refresh_access_token(self, refresh_token):
+        """Exchanges a specific refresh_token for a fresh access_token,
+        without ever falling back to the interactive OAuth flow.
+
+        Unlike get_access_token (which reads the single-tenant
+        STRAVA_REFRESH_TOKEN env var and, on failure, opens a browser and
+        blocks on a local HTTP server — fine for the CLI, wrong for a web
+        request), this is for a *specific* Strava account's own stored
+        refresh_token (e.g. a User row's strava_refresh_token). On failure
+        it raises StravaAuthError so the caller can tell its user to
+        reconnect Strava, rather than hanging the request.
+
+        Returns (access_token, new_refresh_token_or_None) — Strava
+        sometimes rotates the refresh token on use; the caller is
+        responsible for persisting new_refresh_token if it's not None.
+        """
+        resp = requests.post("https://www.strava.com/oauth/token", data={
+            'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
+            'refresh_token': refresh_token, 'grant_type': 'refresh_token'
+        })
+        if resp.status_code in (400, 401):
+            raise StravaAuthError(
+                "Strava refresh token is invalid or has been revoked. Reconnect Strava to sync again."
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        new_refresh_token = data.get('refresh_token')
+        if new_refresh_token == refresh_token:
+            new_refresh_token = None
+        return data['access_token'], new_refresh_token
 
     def fetch_activities(self, access_token, count=5, page=1, after=None):
         params = {'per_page': count, 'page': page}
@@ -296,10 +336,22 @@ class StravaDB:
                 return True
         return False
 
-def ingest_data(manager, db, access_token, lookback_days=42):
+def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None):
+    """reauth_fn is called (with no arguments) if a request comes back 401
+    mid-ingestion, and must return a fresh access_token (or None/raise to
+    give up). Defaults to manager.run_oauth_flow — the CLI's interactive
+    "open a browser and run a local server" flow. A caller running this on
+    behalf of a specific web user (see sync_athlete below) must pass a
+    non-interactive reauth_fn instead: run_oauth_flow would otherwise try to
+    open a browser and block on a local HTTP server on whatever machine is
+    running the API process, which can never receive a real callback there.
+    """
+    if reauth_fn is None:
+        reauth_fn = manager.run_oauth_flow
+
     after_ts = int((datetime.now() - timedelta(days=lookback_days)).timestamp())
     print(f"Limiting ingestion to activities after {datetime.fromtimestamp(after_ts)} ({lookback_days} days lookback)")
-    
+
     try:
         print("Fetching athlete profile...")
         athlete = requests.get("https://www.strava.com/api/v3/athlete", headers={'Authorization': f'Bearer {access_token}'}).json()
@@ -318,15 +370,15 @@ def ingest_data(manager, db, access_token, lookback_days=42):
             print(f"Error fetching activities on page {page}: {e}")
             if "Unauthorized" in str(e):
                 print("Token expired during ingest, re-authenticating...")
-                access_token = manager.run_oauth_flow()
+                access_token = reauth_fn()
                 if not access_token: break
                 continue
             break
-            
+
         if not activities:
             print("No more activities found.")
             break
-        
+
         print(f"Found {len(activities)} activities on page {page}.")
         for act in activities:
             act_id = act.get('id')
@@ -336,13 +388,13 @@ def ingest_data(manager, db, access_token, lookback_days=42):
             act_name = act.get('name', '(unnamed)')
             exists = db.activity_exists(act_id)
             has_streams = db.activity_has_streams(act_id)
-            
+
             if not exists or not has_streams:
                 if not exists:
                     print(f"  New activity: {act_name} ({act_id})")
                 else:
                     print(f"  Activity exists but missing streams: {act_name} ({act_id})")
-                
+
                 db.upsert_activity(act)
                 try:
                     streams = manager.fetch_activity_streams(access_token, act_id)
@@ -353,7 +405,7 @@ def ingest_data(manager, db, access_token, lookback_days=42):
                     print(f"    Error fetching streams for {act_id}: {str_e}")
                     if "Unauthorized" in str(str_e):
                         print("    Token expired during stream fetch, re-authenticating...")
-                        access_token = manager.run_oauth_flow()
+                        access_token = reauth_fn()
                         if access_token:
                             streams = manager.fetch_activity_streams(access_token, act_id)
                             if streams: db.insert_streams(act_id, streams)
@@ -362,7 +414,7 @@ def ingest_data(manager, db, access_token, lookback_days=42):
                 # Debug: skip message
                 # print(f"  Skipping {act_name} (already indexed)")
                 pass
-                
+
         if len(activities) < 50:
             print("Reached last page of activities.")
             break
@@ -528,6 +580,49 @@ def run_analyze_training_load(db):
     
     today = merged.iloc[-1]
     return {"CTL": today['CTL'], "ATL": today['ATL'], "TSB": today['TSB']}
+
+
+def sync_athlete(refresh_token, lookback_days=180, db_path=None):
+    """Runs one full ingest + effectiveness + training-load cycle for a
+    single athlete, using their own stored refresh_token — this is what
+    backs the web app's on-demand "Sync Strava Now" action
+    (POST /api/sync-strava/{user_id} in src/api/main.py), as opposed to the
+    CLI's main() below, which is single-tenant (STRAVA_REFRESH_TOKEN in
+    .env) and interactive on auth failure.
+
+    Returns (new_refresh_token_or_None, new_activity_count). Raises
+    StravaAuthError if the refresh_token is invalid/revoked — the caller
+    (the API route) is expected to turn that into a "reconnect Strava" error
+    response rather than opening a browser.
+
+    NOTE: DuckDB allows only one read-write connection to a file at a time.
+    A sync can take anywhere from a few seconds to a couple of minutes
+    depending on how many new activities there are (one streams request
+    per new activity), during which other requests that need to write to
+    the same warehouse file may block or fail. This is an inherent
+    DuckDB constraint, not something this function works around — see
+    agent_prompting/improvement_plan.md.
+    """
+    manager = StravaManager()
+    access_token, new_refresh_token = manager.refresh_access_token(refresh_token)
+
+    def _reauth_unavailable():
+        # ingest_data calls this if a request 401s mid-sync (the access
+        # token we just fetched is normally valid for 6 hours, so this is
+        # very unlikely to fire within a single sync run). There's no
+        # browser to open here — surface a clear error instead of hanging.
+        raise StravaAuthError("Strava access expired mid-sync. Reconnect Strava and try again.")
+
+    db = StravaDB(db_path=db_path or DB_PATH)
+    try:
+        count = ingest_data(manager, db, access_token, lookback_days=lookback_days, reauth_fn=_reauth_unavailable)
+        run_analyze_effectiveness(db)
+        run_analyze_training_load(db)
+    finally:
+        db.con.close()
+
+    return new_refresh_token, count
+
 
 def main():
     manager = StravaManager()

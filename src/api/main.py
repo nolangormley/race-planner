@@ -21,6 +21,7 @@ from sklearn.linear_model import LinearRegression
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category, calculate_vo2max_from_df, clean_val, calculate_acwr
+from src.pipeline import sync_athlete, StravaAuthError
 from src.api.auth_routes import router as auth_router, get_current_user, get_current_user_from_session
 from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry, ChatMessage
 from sqlalchemy.orm import Session
@@ -196,6 +197,51 @@ def get_user_activities(user_id: int, limit: Optional[int] = 100, current_user: 
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         con.close()
+
+@app.post("/api/sync-strava/{user_id}")
+def sync_strava(user_id: int, current_user: User = Depends(get_current_user)):
+    """Manually triggers a Strava sync for the logged-in user, using their
+    own stored refresh token (captured at /strava-callback). This is the
+    only thing that connects a web user's Strava login to the DuckDB
+    warehouse — before this route existed, /strava-callback stored tokens
+    that were never read anywhere else, and the warehouse could only be
+    populated by running src/pipeline.py by hand against a single
+    developer's STRAVA_REFRESH_TOKEN in .env (see
+    agent_prompting/improvement_plan.md Section 2).
+
+    This runs synchronously (it's a plain `def` route, so FastAPI runs it in
+    its thread pool rather than blocking the event loop) — for an account
+    with a lot of new activity this can take a while, and while it's
+    running, other requests that need to write to the DuckDB warehouse may
+    block or fail, since DuckDB only allows one read-write connection to a
+    file at a time. Fine for a manual, deliberate "Sync Now" click on a
+    small personal app; a background job queue would be the fix if this
+    ever needs to run automatically/frequently or the warehouse ever
+    supports many concurrent users.
+    """
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to sync Strava data for this user")
+
+    if not current_user.strava_refresh_token:
+        raise HTTPException(status_code=400, detail="Strava isn't connected for this account yet — visit /strava-auth first.")
+
+    try:
+        new_refresh_token, new_activity_count = sync_athlete(current_user.strava_refresh_token)
+    except StravaAuthError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Strava sync failed: {e}")
+
+    if new_refresh_token:
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == current_user.id).first()
+            user.strava_refresh_token = new_refresh_token
+            db.commit()
+        finally:
+            db.close()
+
+    return {"message": "Sync complete", "new_activities": new_activity_count}
 
 # Mileage summary endpoint – planned vs actual mileage for a user
 @app.get("/api/mileage-summary/{user_id}")
