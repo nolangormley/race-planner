@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, date
 import calendar
+import json
 import logging
 import os
 import secrets
@@ -46,6 +47,11 @@ from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category, c
 from src.pipeline import sync_athlete, StravaAuthError
 from src.api.auth_routes import router as auth_router, get_current_user, get_current_user_from_session
 from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry, ChatMessage
+from src.api.schemas import (
+    WorkoutCreate, SettingsUpdate, RaceCreate, ProfileUpdate,
+    PlanEntryCreate, PlanEntryUpdate, BulkEntriesCreate, ChatMessageCreate,
+)
+from src.api.services.llm import call_llm, get_llm_provider, clean_json_response, LLMConfigError
 from sqlalchemy.orm import Session
 
 load_dotenv()
@@ -579,14 +585,6 @@ def delete_activity(activity_id: int, current_user: User = Depends(get_current_u
 # the current schema, so these routes only require *some* authenticated user
 # (no per-resource ownership check is possible without a schema change).
 # ==========================================
-class WorkoutCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    category: Optional[str] = None
-    tags: Optional[str] = None
-    url: Optional[str] = None
-    source: Optional[str] = "Manual"
-
 @app.get("/api/workouts")
 def get_workouts(current_user: User = Depends(get_current_user)):
     con = get_db_connection()
@@ -861,7 +859,7 @@ def get_ai_insight(stats, context="status", workout=None):
         history_str = "\n".join([f"  - {h['date']}: Form (TSB): {h['form']}, Load (ATL): {h['fatigue']}" for h in stats.get('history', [])])
 
         standings = get_performance_standing(stats)
-        
+
         if context == "status":
             prompt = (
                 f"Explain the user's current training status based on these metrics and standings:\n"
@@ -885,14 +883,12 @@ def get_ai_insight(stats, context="status", workout=None):
                 f"Description: {workout.get('description')}\n\n"
                 f"Briefly explain in 2-3 sentences why this specific workout is appropriate for their current training state, acting as their professional endurance coach. Talk directly to them."
             )
-            
-        llm_provider = os.getenv("LLM_PROVIDER", "local").lower()
-        
+
         weight_str = f"weighs {stats.get('weight_lbs')}lbs" if stats.get('weight_lbs') else "weighs 220lbs"
         sex_str = stats.get('sex', 'male')
         if sex_str == 'M': sex_str = 'male'
         elif sex_str == 'F': sex_str = 'female'
-        
+
         user_race_type = stats.get('race_type')
         user_race_date = stats.get('race_date')
         user_goal_time = stats.get('goal_time')
@@ -917,115 +913,25 @@ def get_ai_insight(stats, context="status", workout=None):
             f"4) KEEP IT EXTREMELY BRIEF. Provide exactly 1 short introductory sentence, followed by 2-3 short bullet points."
         )
 
-        if llm_provider == "groq":
-            groq_api_key = os.getenv("GROQ_API_KEY")
-            if not groq_api_key:
-                return "Groq API key not set in environment (GROQ_API_KEY)."
-                
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            payload = {
-                "model": "llama-3.1-8b-instant",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ]
-            }
-            headers = {
-                "Authorization": f"Bearer {groq_api_key}",
-                "Content-Type": "application/json"
-            }
-            try:
-                response = requests.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    return data["choices"][0]["message"]["content"]
-                return str(data)
-            except requests.exceptions.HTTPError as e:
-                print(f"HTTPError on Groq API call: {e}")
-                if hasattr(e, 'response') and e.response is not None:
-                    print(f"Groq error response body: {e.response.text}")
-                raise
-        elif llm_provider == "deepseek":
-            deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-            if not deepseek_api_key:
-                return "Deepseek API key not set in environment (DEEPSEEK_API_KEY)."
-                
-            url = "https://api.deepseek.com/v1/chat/completions"
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ]
-            }
-            headers = {
-                "Authorization": f"Bearer {deepseek_api_key}",
-                "Content-Type": "application/json"
-            }
-            try:
-                response = requests.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    return data["choices"][0]["message"]["content"]
-                return str(data)
-            except requests.exceptions.HTTPError as e:
-                print(f"HTTPError on Deepseek API call: {e}")
-                if hasattr(e, 'response') and e.response is not None:
-                    print(f"Deepseek error response body: {e.response.text}")
-                raise
-        elif llm_provider == "gemini":
-            gemini_api_key = os.getenv("GEMINI_API_KEY")
-            if not gemini_api_key:
-                return "Gemini API key not set in environment (GEMINI_API_KEY)."
-                
-            url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            payload = {
-                "model": "gemini-2.5-flash",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ]
-            }
-            headers = {
-                "Authorization": f"Bearer {gemini_api_key}",
-                "Content-Type": "application/json"
-            }
-            try:
-                response = requests.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    return data["choices"][0]["message"]["content"]
-                return str(data)
-            except requests.exceptions.HTTPError as e:
-                print(f"HTTPError on Gemini API call: {e}")
-                if hasattr(e, 'response') and e.response is not None:
-                    print(f"Gemini error response body: {e.response.text}")
-                raise
-        else:
-            url = "http://localhost:1234/api/v1/chat"
-            payload = {
-                "model": "mistralai/ministral-3-3b",
-                "system_prompt": system_prompt,
-                "input": prompt
-            }
-            headers = {"Content-Type": "application/json"}
-            response = requests.post(url, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            if "choices" in data and len(data["choices"]) > 0 and "message" in data["choices"][0]:
-                return data["choices"][0]["message"]["content"]
-            elif "output" in data and len(data["output"]) > 0 and "content" in data["output"][0]:
-                return data["output"][0]["content"]
-            elif "message" in data:
-                return data["message"]
-            elif "response" in data:
-                return data["response"]
-            else:
-                return str(data)
-            
+        # Small model for groq here (fast, short answer) — get_ai_training_plan
+        # and training_plan_chat deliberately use a bigger groq model since
+        # they generate structured JSON plans, not a one-paragraph insight.
+        model = "llama-3.1-8b-instant" if get_llm_provider() == "groq" else None
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            # 30s timeout — previously this call had none at all (could hang
+            # a request thread indefinitely); see
+            # agent_prompting/improvement_plan.md Section 3.
+            return call_llm(messages, model=model, timeout=30)
+        except LLMConfigError as e:
+            # Covers both "API key not set" and "unexpected response shape"
+            # — the latter used to `return str(data)` here, i.e. a raw
+            # provider response dict rendered as if it were coaching text.
+            return str(e)
+
     except Exception as e:
         print(f"Error getting AI insight: {e}")
         return None
@@ -1182,21 +1088,10 @@ def get_vo2max(user_id: int, current_user: User = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="No stream data found to calculate VO2 Max for this user.")
     return vo2max_data
 
-def clean_json_response(content: str) -> str:
-    """Helper to strip markdown formatting from LLM JSON responses."""
-    content = content.strip()
-    if content.startswith("```json"):
-        content = content[7:]
-    elif content.startswith("```"):
-        content = content[3:]
-    if content.endswith("```"):
-        content = content[:-3]
-    return content.strip()
-
 def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optional[str] = None, pace_zones: Optional[dict] = None):
     try:
         current_date_str = stats.get('date', datetime.now().strftime('%Y-%m-%d'))
-        
+
         prompt = (
             f"The athlete is racing a {race_type} on {race_date}.\n"
         )
@@ -1204,7 +1099,7 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
             prompt += f"Their goal time is {goal_time}.\n"
         else:
             prompt += "They have not provided a goal time. Please recommend a challenging but realistic goal time based on their current fitness level (especially VO2 max and Threshold pace) and include it in your response.\n"
-            
+
         prompt += (
             f"Today's date is {current_date_str}.\n"
             f"Please create a daily training plan from tomorrow until the race date.\n\n"
@@ -1218,20 +1113,18 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
             f"Based on these metrics, tailor the difficulty and volume of the plan. "
             f"If fatigue is high, perhaps start with recovery. If fitness is high, challenge them appropriately.\n"
         )
-        
+
         if pace_zones and "pace_zones_min_per_mile" in pace_zones:
             prompt += "\nUse the following exact pace zones based on their recent data when recommending how fast they should run:\n"
             for z_name, z_range in pace_zones["pace_zones_min_per_mile"].items():
                 prompt += f"- {z_name}: {z_range}\n"
             prompt += "\nMake sure to explicitly mention these paces in the workout 'description' so the user knows what speed to run at. Just use the mean of the pace zone range when providing the pace in the description.\n\n"
-        
-        llm_provider = os.getenv("LLM_PROVIDER", "local").lower()
-        
+
         weight_str = f"weighs {stats.get('weight_lbs')}lbs" if stats.get('weight_lbs') else "weighs 220lbs"
         sex_str = stats.get('sex', 'male')
         if sex_str == 'M': sex_str = 'male'
         elif sex_str == 'F': sex_str = 'female'
-        
+
         system_prompt = (
             f"You are an expert running coach. Your athlete is {sex_str} and {weight_str}. "
             "You must respond STRICTLY with a valid JSON object. Do not include markdown formatting like ```json or any text outside the JSON framework. "
@@ -1244,116 +1137,27 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
             "CRITICAL TOKEN LIMIT: Do not generate more than 60 days of workouts at once. If the user asks for a plan longer than 8 weeks, generate the first 8 weeks and explain in your 'blurb' that you generated the first phase and they can ask you to generate the next phase later."
         )
 
-        if llm_provider == "groq":
-            groq_api_key = os.getenv("GROQ_API_KEY")
-            if not groq_api_key:
-                return {"error": "Groq API key not set in environment (GROQ_API_KEY)."}
-                
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            payload = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 8192
-            }
-            headers = {
-                "Authorization": f"Bearer {groq_api_key}",
-                "Content-Type": "application/json"
-            }
-            try:
-                response = requests.post(url, json=payload, headers=headers, timeout=300)
-                response.raise_for_status()
-                data = response.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    import json
-                    content = clean_json_response(data["choices"][0]["message"]["content"])
-                    try:
-                        return json.loads(content)
-                    except json.JSONDecodeError:
-                        return {"error": "Failed to parse JSON response from LLM", "raw_content": content}
-                return {"error": "Invalid response format from Groq API."}
-            except requests.exceptions.HTTPError as e:
-                print(f"HTTPError on Groq API call: {e}")
-                if hasattr(e, 'response') and e.response is not None:
-                    print(f"Groq error response body: {e.response.text}")
-                return {"error": str(e)}
-        elif llm_provider == "deepseek":
-            deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-            if not deepseek_api_key:
-                return {"error": "Deepseek API key not set in environment (DEEPSEEK_API_KEY)."}
-                
-            url = "https://api.deepseek.com/v1/chat/completions"
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 8192
-            }
-            headers = {
-                "Authorization": f"Bearer {deepseek_api_key}",
-                "Content-Type": "application/json"
-            }
-            try:
-                response = requests.post(url, json=payload, headers=headers, timeout=300)
-                response.raise_for_status()
-                data = response.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    import json
-                    content = clean_json_response(data["choices"][0]["message"]["content"])
-                    try:
-                        return json.loads(content)
-                    except json.JSONDecodeError:
-                        return {"error": "Failed to parse JSON response from LLM", "raw_content": content}
-                return {"error": "Invalid response format from Deepseek API."}
-            except requests.exceptions.HTTPError as e:
-                print(f"HTTPError on Deepseek API call: {e}")
-                if hasattr(e, 'response') and e.response is not None:
-                    print(f"Deepseek error response body: {e.response.text}")
-                return {"error": str(e)}
-        elif llm_provider == "gemini":
-            gemini_api_key = os.getenv("GEMINI_API_KEY")
-            if not gemini_api_key:
-                return {"error": "Gemini API key not set in environment (GEMINI_API_KEY)."}
-                
-            url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            payload = {
-                "model": "gemini-2.5-flash",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 8192
-            }
-            headers = {
-                "Authorization": f"Bearer {gemini_api_key}",
-                "Content-Type": "application/json"
-            }
-            try:
-                response = requests.post(url, json=payload, headers=headers, timeout=300)
-                response.raise_for_status()
-                data = response.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    import json
-                    content = clean_json_response(data["choices"][0]["message"]["content"])
-                    try:
-                        return json.loads(content)
-                    except json.JSONDecodeError:
-                        return {"error": "Failed to parse JSON response from LLM", "raw_content": content}
-                return {"error": "Invalid response format from Gemini API."}
-            except requests.exceptions.HTTPError as e:
-                print(f"HTTPError on Gemini API call: {e}")
-                if hasattr(e, 'response') and e.response is not None:
-                    print(f"Gemini error response body: {e.response.text}")
-                return {"error": str(e)}
-        else:
+        provider = get_llm_provider()
+        if provider not in ("groq", "deepseek", "gemini"):
             return {"error": "This feature currently requires the LLM_PROVIDER to be set to groq, deepseek, or gemini in order to return properly formatted JSON."}
+
+        model = "llama-3.3-70b-versatile" if provider == "groq" else None
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            content = call_llm(messages, model=model, json_mode=True, max_tokens=8192, timeout=300)
+        except LLMConfigError as e:
+            return {"error": str(e)}
+        except requests.exceptions.HTTPError as e:
+            return {"error": str(e)}
+
+        content_clean = clean_json_response(content)
+        try:
+            return json.loads(content_clean)
+        except json.JSONDecodeError:
+            return {"error": "Failed to parse JSON response from LLM", "raw_content": content_clean}
 
     except Exception as e:
         print(f"Error getting AI training plan: {e}")
@@ -1563,11 +1367,6 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
     finally:
         con.close()
 
-class SettingsUpdate(BaseModel):
-    race_length: str
-    race_date: str
-    race_goal_time: str
-
 @app.post("/settings/{user_id}")
 def update_settings(user_id: int, settings: SettingsUpdate, current_user: User = Depends(get_current_user)):
     if user_id != current_user.id:
@@ -1592,12 +1391,6 @@ def update_settings(user_id: int, settings: SettingsUpdate, current_user: User =
         db.close()
 
 # ---- RACE CALENDAR ENDPOINTS ----
-
-class RaceCreate(BaseModel):
-    name: Optional[str] = None
-    race_length: str
-    race_date: str
-    goal_time: Optional[str] = None
 
 @app.get("/api/races/{user_id}")
 def get_user_races(user_id: int, current_user: User = Depends(get_current_user)):
@@ -1673,14 +1466,6 @@ def profile_page(request: Request):
     return templates.TemplateResponse("profile.html", {"request": request, "user": user})
 
 
-class ProfileUpdate(BaseModel):
-    name: str
-    email: str
-    date_of_birth: Optional[str] = None
-    gender: Optional[str] = None
-    height: Optional[float] = None  # stored in meters
-    weight: Optional[float] = None  # stored in kg
-
 @app.post("/profile/{user_id}")
 def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = Depends(get_current_user)):
     if user_id != current_user.id:
@@ -1734,35 +1519,6 @@ def training_calendar_page(request: Request):
 # ==========================================
 # TRAINING PLAN CRUD ENDPOINTS
 # ==========================================
-
-class PlanEntryCreate(BaseModel):
-    date: str
-    workout_type: Optional[str] = None
-    training_focus: Optional[str] = None
-    approximate_distance: Optional[str] = None
-    description: Optional[str] = None
-    is_completed: Optional[bool] = False
-    strava_activity_id: Optional[int] = None
-
-
-class PlanEntryUpdate(BaseModel):
-    workout_type: Optional[str] = None
-    training_focus: Optional[str] = None
-    approximate_distance: Optional[str] = None
-    description: Optional[str] = None
-    is_completed: Optional[bool] = None
-    strava_activity_id: Optional[int] = None
-
-
-class BulkEntriesCreate(BaseModel):
-    entries: List[PlanEntryCreate]
-    name: Optional[str] = None
-    race_id: Optional[int] = None
-
-
-class ChatMessageCreate(BaseModel):
-    message: str
-
 
 def _plan_to_dict(plan):
     return {
@@ -1970,8 +1726,6 @@ def training_plan_chat(user_id: int, msg: ChatMessageCreate, current_user: User 
             if user.race_date and user.race_length:
                 user_info += f" Racing a {user.race_length} on {user.race_date}."
 
-        llm_provider = os.getenv("LLM_PROVIDER", "local").lower()
-
         today_str = datetime.now().strftime('%Y-%m-%d')
         system_prompt = (
             f"You are an expert running coach AI assistant helping to build and modify a training calendar. {user_info}\n"
@@ -1998,66 +1752,25 @@ def training_plan_chat(user_id: int, msg: ChatMessageCreate, current_user: User 
         db.add(user_msg)
         db.commit()
 
-        if llm_provider not in ["groq", "deepseek", "gemini"]:
+        provider = get_llm_provider()
+        if provider not in ("groq", "deepseek", "gemini"):
             ai_reply = "AI chat requires LLM_PROVIDER=groq, deepseek, or gemini to be set."
             ai_msg = ChatMessage(plan_id=plan.id, role="assistant", content=ai_reply)
             db.add(ai_msg)
             db.commit()
             return {"message": ai_reply, "plan_updates": None, "entries": [_entry_to_dict(e) for e in entries]}
 
-        import json as json_lib
-        
-        if llm_provider == "groq":
-            groq_api_key = os.getenv("GROQ_API_KEY")
-            if not groq_api_key:
-                raise HTTPException(status_code=500, detail="GROQ_API_KEY not set")
-    
-            url_api = "https://api.groq.com/openai/v1/chat/completions"
-            payload = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": messages_payload,
-                "response_format": {"type": "json_object"},
-                "max_tokens": 8192
-            }
-            headers = {"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"}
-            
-        elif llm_provider == "deepseek":
-            deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-            if not deepseek_api_key:
-                raise HTTPException(status_code=500, detail="DEEPSEEK_API_KEY not set")
-
-            url_api = "https://api.deepseek.com/v1/chat/completions"
-            payload = {
-                "model": "deepseek-chat",
-                "messages": messages_payload,
-                "response_format": {"type": "json_object"},
-                "max_tokens": 8192
-            }
-            headers = {"Authorization": f"Bearer {deepseek_api_key}", "Content-Type": "application/json"}
-
-        elif llm_provider == "gemini":
-            gemini_api_key = os.getenv("GEMINI_API_KEY")
-            if not gemini_api_key:
-                raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
-
-            url_api = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            payload = {
-                "model": "gemini-2.5-flash",
-                "messages": messages_payload,
-                "response_format": {"type": "json_object"},
-                "max_tokens": 8192
-            }
-            headers = {"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"}
-
-        response = requests.post(url_api, json=payload, headers=headers, timeout=300)
-        response.raise_for_status()
-        data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        content_clean = clean_json_response(content)
-        
+        model = "llama-3.3-70b-versatile" if provider == "groq" else None
         try:
-            parsed = json_lib.loads(content_clean)
-        except json_lib.JSONDecodeError as e:
+            content = call_llm(messages_payload, model=model, json_mode=True, max_tokens=8192, timeout=300)
+        except LLMConfigError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+        content_clean = clean_json_response(content)
+
+        try:
+            parsed = json.loads(content_clean)
+        except json.JSONDecodeError as e:
             print(f"Failed to parse JSON. Raw content: {content}")
             ai_reply = "Sorry, I couldn't process that properly."
             ai_msg = ChatMessage(plan_id=plan.id, role="assistant", content=ai_reply)
