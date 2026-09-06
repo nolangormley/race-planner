@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -11,6 +12,7 @@ import numpy as np
 from datetime import datetime, timedelta, date
 import calendar
 import os
+import secrets
 import random
 import requests
 from dotenv import load_dotenv
@@ -19,7 +21,7 @@ from sklearn.linear_model import LinearRegression
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category, calculate_vo2max_from_df, clean_val, calculate_acwr
-from src.api.auth_routes import router as auth_router
+from src.api.auth_routes import router as auth_router, get_current_user, get_current_user_from_session
 from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry, ChatMessage
 from sqlalchemy.orm import Session
 
@@ -34,9 +36,46 @@ app = FastAPI()
 
 app.include_router(auth_router)
 
+# SECRET_KEY signs the session cookie (see SessionMiddleware below). Without
+# it — or with a hardcoded/guessable value — anyone could forge a session.
+# Falling back to a random key keeps local dev working without extra setup,
+# but it means sessions won't survive a restart and *must* be overridden with
+# a real, persistent value in any shared/production environment.
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_hex(32)
+    print(
+        "WARNING: SECRET_KEY is not set in the environment. Using a random, "
+        "process-local key — all sessions will be invalidated on restart. "
+        "Set SECRET_KEY in your .env for any shared or production deployment."
+    )
+
+# https_only should be True in any deployment served over HTTPS (e.g. Render).
+# It defaults to False so local http://localhost dev keeps working; set
+# SECURE_COOKIES=true in production environments.
+SECURE_COOKIES = os.getenv("SECURE_COOKIES", "false").lower() == "true"
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    session_cookie="session",
+    same_site="lax",
+    https_only=SECURE_COOKIES,
+    max_age=60 * 60 * 24 * 14,  # 14 days
+)
+
+# CORS: this app's own frontend is server-rendered and only ever calls the
+# API via same-origin relative fetch() calls, so there's no legitimate need
+# for a wildcard. allow_origins=["*"] combined with allow_credentials=True is
+# also invalid per the CORS spec, which made browsers/Starlette effectively
+# reflect any Origin — i.e. any third-party site could make credentialed
+# requests against this API. ALLOWED_ORIGINS lets a real deployment add its
+# own domain without editing code.
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,31 +106,24 @@ def get_db_connection():
 
 @app.get("/")
 def read_root(request: Request):
-    user_id = request.cookies.get("user_id")
-    if user_id:
+    if request.session.get("user_id"):
         return RedirectResponse(url="/dashboard", status_code=302)
     return RedirectResponse(url="/login", status_code=302)
 
 @app.get("/dashboard")
 def dashboard(request: Request):
-    user_id = request.cookies.get("user_id")
-    if not user_id:
-        return RedirectResponse(url="/login", status_code=302)
     db = SessionLocal()
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = get_current_user_from_session(request, db)
     db.close()
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-        
+
     return templates.TemplateResponse("dashboard.html", {"request": request, "user": user})
 
 @app.get("/workout_streams/{activity_id}")
 def view_workout_streams(request: Request, activity_id: int):
-    user_id = request.cookies.get("user_id")
-    if not user_id:
-        return RedirectResponse(url="/login", status_code=302)
     db = SessionLocal()
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = get_current_user_from_session(request, db)
     db.close()
     if not user:
         return RedirectResponse(url="/login", status_code=302)
@@ -99,29 +131,34 @@ def view_workout_streams(request: Request, activity_id: int):
 
 @app.get("/warehouse")
 def view_warehouse(request: Request):
-    user_id = request.cookies.get("user_id")
-    if not user_id:
+    db = SessionLocal()
+    user = get_current_user_from_session(request, db)
+    db.close()
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {"request": request, "user": user})
 
 # ==========================================
 # CRUD FOR ACTIVITIES (Read, Delete)
 # ==========================================
 
 @app.get("/api/activities")
-def get_activities(limit: Optional[int] = 50):
+def get_activities(limit: Optional[int] = 50, current_user: User = Depends(get_current_user)):
+    # Scoped to the logged-in user's own athlete_id — this used to return
+    # every activity from every athlete in the warehouse to any caller.
     con = get_db_connection()
     try:
         query = """
-        SELECT 
-            da.*, 
+        SELECT
+            da.*,
             ae.trimp_banister as training_load
         FROM dim_activity da
         LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
+        WHERE da.athlete_id = ?
         ORDER BY da.start_date DESC
         LIMIT ?
         """
-        activities = con.execute(query, [limit]).fetchall()
+        activities = con.execute(query, [current_user.strava_athlete_id, limit]).fetchall()
         columns = [desc[0] for desc in con.description]
         return [dict(zip(columns, row)) for row in activities]
     except Exception as e:
@@ -131,21 +168,17 @@ def get_activities(limit: Optional[int] = 50):
 
 # New endpoint to fetch activities for a specific user (athlete)
 @app.get("/api/user-activities/{user_id}")
-def get_user_activities(user_id: int, limit: Optional[int] = 100):
+def get_user_activities(user_id: int, limit: Optional[int] = 100, current_user: User = Depends(get_current_user)):
     """Return recent activities for the given user (athlete).
     user_id here is the local User.id - we look up the strava_athlete_id.
     """
-    db = SessionLocal()
-    user = db.query(User).filter(User.id == user_id).first()
-    db.close()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    athlete_id = user.strava_athlete_id
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this user's activities")
+
+    athlete_id = current_user.strava_athlete_id
     if not athlete_id:
         return []
-    
+
     con = get_db_connection()
     try:
         query = """
@@ -166,25 +199,24 @@ def get_user_activities(user_id: int, limit: Optional[int] = 100):
 
 # Mileage summary endpoint – planned vs actual mileage for a user
 @app.get("/api/mileage-summary/{user_id}")
-def get_mileage_summary(user_id: int, start: str = None, end: str = None):
+def get_mileage_summary(user_id: int, start: str = None, end: str = None, current_user: User = Depends(get_current_user)):
     """Return planned vs actual mileage for the user.
-    
+
     Args:
         user_id: User/athlete ID
         start: Start date filter (YYYY-MM-DD), defaults to start of current month
         end: End date filter (YYYY-MM-DD), defaults to end of current month
     """
     from datetime import datetime, date
-    
+
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this user's mileage summary")
+
     con = get_db_connection()
     try:
-        # Get athlete_id for this user
-        db = SessionLocal()
-        user = db.query(User).filter(User.id == user_id).first()
-        db.close()
-        if not user or not user.strava_athlete_id:
+        if not current_user.strava_athlete_id:
             return {"planned_miles": 0, "actual_miles": 0, "planned_days": 0, "completed_days": 0, "rest_days": 0}
-        athlete_id = user.strava_athlete_id
+        athlete_id = current_user.strava_athlete_id
         
         # Determine date range
         if start and end:
@@ -255,10 +287,16 @@ def get_mileage_summary(user_id: int, start: str = None, end: str = None):
     finally:
         con.close()
 @app.get("/api/activities/{activity_id}")
-def get_activity(activity_id: int):
+def get_activity(activity_id: int, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
-        activity = con.execute("SELECT * FROM dim_activity WHERE activity_id = ?", [activity_id]).fetchone()
+        # athlete_id filter scopes this to activities the current user owns —
+        # a mismatched activity_id looks identical to a nonexistent one (404),
+        # so this doesn't reveal whether the id belongs to someone else.
+        activity = con.execute(
+            "SELECT * FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
+            [activity_id, current_user.strava_athlete_id]
+        ).fetchone()
         if not activity:
             raise HTTPException(status_code=404, detail="Activity not found")
         columns = [desc[0] for desc in con.description]
@@ -271,9 +309,18 @@ def get_activity(activity_id: int):
         con.close()
 
 @app.get("/api/activities/{activity_id}/streams")
-def get_activity_streams(activity_id: int):
+def get_activity_streams(activity_id: int, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
+        # The stream_* tables have no athlete_id column of their own, so
+        # ownership has to be checked against dim_activity separately.
+        owner_row = con.execute(
+            "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
+            [activity_id, current_user.strava_athlete_id]
+        ).fetchone()
+        if not owner_row:
+            raise HTTPException(status_code=404, detail="Activity not found")
+
         # Join streams
         query = """
         SELECT 
@@ -301,13 +348,15 @@ def get_activity_streams(activity_id: int):
         df = df.replace({np.nan: None})
         
         return df.to_dict(orient="records")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         con.close()
 
 @app.get("/api/activities/{activity_id}/effectiveness")
-def get_activity_effectiveness(activity_id: int):
+def get_activity_effectiveness(activity_id: int, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
         # Check if table exists
@@ -331,17 +380,19 @@ def get_activity_effectiveness(activity_id: int):
             ae.effectiveness_score
         FROM dim_activity da
         LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
-        WHERE da.activity_id = ?
+        WHERE da.activity_id = ? AND da.athlete_id = ?
         """
-        row = con.execute(query, [activity_id]).fetchone()
+        row = con.execute(query, [activity_id, current_user.strava_athlete_id]).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Activity not found")
-        
+
         columns = [desc[0] for desc in con.description]
         data = dict(zip(columns, row))
-        
+
         # Cleanup: convert NaNs or similar if needed (tuple fetch doesn't usually have them but good to be safe)
         return data
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Effectiveness error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -349,15 +400,15 @@ def get_activity_effectiveness(activity_id: int):
         con.close()
 
 @app.get("/api/activities/{activity_id}/ai_summary")
-def get_activity_ai_summary(activity_id: int):
+def get_activity_ai_summary(activity_id: int, current_user: User = Depends(get_current_user)):
     # This endpoint provides a coaching summary for a SPECIFIC completed activity
     con = get_db_connection()
     try:
         # Get activity and athlete details
         query = """
-        SELECT 
-            da.*, 
-            ath.sex, 
+        SELECT
+            da.*,
+            ath.sex,
             ath.weight as weight_lbs,
             ae.trimp_banister as trimp,
             ae.efficiency_factor,
@@ -365,27 +416,29 @@ def get_activity_ai_summary(activity_id: int):
         FROM dim_activity da
         JOIN dim_athlete ath ON da.athlete_id = ath.athlete_id
         LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
-        WHERE da.activity_id = ?
+        WHERE da.activity_id = ? AND da.athlete_id = ?
         """
-        row = con.execute(query, [activity_id]).fetchone()
+        row = con.execute(query, [activity_id, current_user.strava_athlete_id]).fetchone()
         if not row: raise HTTPException(status_code=404, detail="Activity not found")
         cols = [desc[0] for desc in con.description]
         stats = dict(zip(cols, row))
-        
+
         # Get current training status (CTL/TSB) to give context
         # Reuse logic from calculate_training_status_logic but for specific athlete
         status = calculate_training_status_logic(stats['athlete_id'])
         if status:
             stats.update(status)
-            
+
         mock_workout = {
             "name": stats.get('name'),
             "category": stats.get('type'),
             "description": stats.get('description', 'A completed effort.')
         }
-        
+
         summary = get_ai_insight(stats, context="workout", workout=mock_workout)
         return {"summary": summary}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"AI summary error for activity {activity_id}: {e}")
         return {"error": str(e)}
@@ -393,9 +446,16 @@ def get_activity_ai_summary(activity_id: int):
         con.close()
 
 @app.delete("/api/activities/{activity_id}")
-def delete_activity(activity_id: int):
+def delete_activity(activity_id: int, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
+        owner_row = con.execute(
+            "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
+            [activity_id, current_user.strava_athlete_id]
+        ).fetchone()
+        if not owner_row:
+            raise HTTPException(status_code=404, detail="Activity not found")
+
         # Delete from all tables sequentially.
         tables = [
             "stream_altitude", "stream_cadence", "stream_heartrate", "stream_moving",
@@ -408,6 +468,8 @@ def delete_activity(activity_id: int):
             except Exception as e:
                 print(f"Failed deleting from {table}: {e}")
         return {"message": "Activity deleted successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -415,6 +477,9 @@ def delete_activity(activity_id: int):
 
 # ==========================================
 # CRUD FOR WORKOUTS (Create, Read, Update, Delete)
+# dim_workouts is a shared workout library with no per-user owner column in
+# the current schema, so these routes only require *some* authenticated user
+# (no per-resource ownership check is possible without a schema change).
 # ==========================================
 class WorkoutCreate(BaseModel):
     name: str
@@ -425,7 +490,7 @@ class WorkoutCreate(BaseModel):
     source: Optional[str] = "Manual"
 
 @app.get("/api/workouts")
-def get_workouts():
+def get_workouts(current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
         workouts = con.execute("SELECT * FROM dim_workouts ORDER BY workout_id DESC").fetchall()
@@ -437,7 +502,7 @@ def get_workouts():
         con.close()
 
 @app.post("/api/workouts")
-def create_workout(workout: WorkoutCreate):
+def create_workout(workout: WorkoutCreate, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
         # Auto-incrementing workout_id via MAX + 1
@@ -455,7 +520,7 @@ def create_workout(workout: WorkoutCreate):
         con.close()
 
 @app.put("/api/workouts/{workout_id}")
-def update_workout(workout_id: int, workout: WorkoutCreate):
+def update_workout(workout_id: int, workout: WorkoutCreate, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
         con.execute(
@@ -469,7 +534,7 @@ def update_workout(workout_id: int, workout: WorkoutCreate):
         con.close()
 
 @app.delete("/api/workouts/{workout_id}")
-def delete_workout(workout_id: int):
+def delete_workout(workout_id: int, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
         con.execute("DELETE FROM dim_workouts WHERE workout_id=?", [workout_id])
@@ -485,7 +550,7 @@ def delete_workout(workout_id: int):
 # ==========================================
 
 @app.get("/users/")
-def get_users():
+def get_users(current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
         # Check if table exists
@@ -878,24 +943,30 @@ def get_ai_insight(stats, context="status", workout=None):
         return None
 
 @app.get("/status/{user_id}")
-def get_status(user_id: int):
+def get_status(user_id: int, current_user: User = Depends(get_current_user)):
+    # NOTE: user_id here is the Strava athlete_id, not User.id (see
+    # agent_prompting/improvement_plan.md — the two are used inconsistently
+    # across this file's routes).
+    if user_id != current_user.strava_athlete_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's status")
+
     status = calculate_training_status_logic(user_id)
     if not status:
         raise HTTPException(status_code=404, detail="No training data found for user")
-        
-    db = SessionLocal()
-    user = db.query(User).filter(User.strava_athlete_id == user_id).first()
-    if user:
-        status['race_type'] = user.race_length
-        status['race_date'] = str(user.race_date) if user.race_date else None
-        status['goal_time'] = user.race_goal_time
-    db.close()
-    
+
+    status['race_type'] = current_user.race_length
+    status['race_date'] = str(current_user.race_date) if current_user.race_date else None
+    status['goal_time'] = current_user.race_goal_time
+
     status['ai_insight'] = get_ai_insight(status, context="status")
     return status
 
 @app.get("/recommend/{user_id}")
-def get_recommendation(user_id: int):
+def get_recommendation(user_id: int, current_user: User = Depends(get_current_user)):
+    # user_id here is the Strava athlete_id (see /status/{user_id} above).
+    if user_id != current_user.strava_athlete_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's recommendation")
+
     status = calculate_training_status_logic(user_id)
     if not status:
         raise HTTPException(status_code=404, detail="No training data found for user")
@@ -1013,7 +1084,10 @@ def calculate_vo2max(user_id: int):
         con.close()
 
 @app.get("/vo2max/{user_id}")
-def get_vo2max(user_id: int):
+def get_vo2max(user_id: int, current_user: User = Depends(get_current_user)):
+    # user_id here is the Strava athlete_id (see /status/{user_id} above).
+    if user_id != current_user.strava_athlete_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's VO2max")
     vo2max_data = calculate_vo2max(user_id)
     if not vo2max_data:
         raise HTTPException(status_code=404, detail="No stream data found to calculate VO2 Max for this user.")
@@ -1197,7 +1271,10 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
         return {"error": str(e)}
 
 @app.get("/schedule/{user_id}")
-def get_race_schedule(user_id: int, race_date: str, race_type: str, goal_time: Optional[str] = None):
+def get_race_schedule(user_id: int, race_date: str, race_type: str, goal_time: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    # user_id here is the Strava athlete_id (see /status/{user_id} above).
+    if user_id != current_user.strava_athlete_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's schedule")
     # Validations
     try:
         datetime.strptime(race_date, '%Y-%m-%d')
@@ -1329,14 +1406,20 @@ def calculate_pace_zones(user_id: int):
     }
 
 @app.get("/pace_zones/{user_id}")
-def get_pace_zones(user_id: int):
+def get_pace_zones(user_id: int, current_user: User = Depends(get_current_user)):
+    # user_id here is the Strava athlete_id (see /status/{user_id} above).
+    if user_id != current_user.strava_athlete_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's pace zones")
     zones = calculate_pace_zones(user_id)
     if not zones:
         raise HTTPException(status_code=404, detail="No stream data found to calculate Pace Zones for this user.")
     return zones
 
 @app.get("/analytics/{user_id}")
-def get_analytics(user_id: int):
+def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
+    # user_id here is the Strava athlete_id (see /status/{user_id} above).
+    if user_id != current_user.strava_athlete_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's analytics")
     con = get_db_connection()
     try:
         # Derive HR max from athlete's recorded data (fallback 190)
@@ -1389,13 +1472,15 @@ class SettingsUpdate(BaseModel):
     race_goal_time: str
 
 @app.post("/settings/{user_id}")
-def update_settings(user_id: int, settings: SettingsUpdate):
+def update_settings(user_id: int, settings: SettingsUpdate, current_user: User = Depends(get_current_user)):
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify these settings")
     db = SessionLocal()
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         db.close()
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     try:
         if settings.race_date:
             user.race_date = datetime.strptime(settings.race_date, '%Y-%m-%d').date()
@@ -1418,7 +1503,9 @@ class RaceCreate(BaseModel):
     goal_time: Optional[str] = None
 
 @app.get("/api/races/{user_id}")
-def get_user_races(user_id: int):
+def get_user_races(user_id: int, current_user: User = Depends(get_current_user)):
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view these races")
     db = SessionLocal()
     try:
         races = db.query(Race).filter(Race.user_id == user_id).order_by(Race.race_date.asc()).all()
@@ -1436,7 +1523,9 @@ def get_user_races(user_id: int):
         db.close()
 
 @app.post("/api/races/{user_id}")
-def create_user_race(user_id: int, race_data: RaceCreate):
+def create_user_race(user_id: int, race_data: RaceCreate, current_user: User = Depends(get_current_user)):
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to create a race for this user")
     db = SessionLocal()
     try:
         r_date = datetime.strptime(race_data.race_date, '%Y-%m-%d').date()
@@ -1458,11 +1547,13 @@ def create_user_race(user_id: int, race_data: RaceCreate):
         db.close()
 
 @app.delete("/api/races/{race_id}")
-def delete_race(race_id: int):
+def delete_race(race_id: int, current_user: User = Depends(get_current_user)):
     db = SessionLocal()
     try:
         race = db.query(Race).filter(Race.id == race_id).first()
-        if not race:
+        # 404 for both "doesn't exist" and "isn't yours" so this endpoint
+        # doesn't confirm the existence of other users' race ids.
+        if not race or race.user_id != current_user.id:
             raise HTTPException(status_code=404, detail="Race not found")
         db.delete(race)
         db.commit()
@@ -1477,11 +1568,8 @@ def delete_race(race_id: int):
 
 @app.get("/profile")
 def profile_page(request: Request):
-    user_id = request.cookies.get("user_id")
-    if not user_id:
-        return RedirectResponse(url="/login", status_code=302)
     db = SessionLocal()
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = get_current_user_from_session(request, db)
     db.close()
     if not user:
         return RedirectResponse(url="/login", status_code=302)
@@ -1497,7 +1585,9 @@ class ProfileUpdate(BaseModel):
     weight: Optional[float] = None  # stored in kg
 
 @app.post("/profile/{user_id}")
-def update_profile(user_id: int, profile: ProfileUpdate):
+def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = Depends(get_current_user)):
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this profile")
     db = SessionLocal()
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -1536,11 +1626,8 @@ def update_profile(user_id: int, profile: ProfileUpdate):
 
 @app.get("/training-calendar")
 def training_calendar_page(request: Request):
-    user_id = request.cookies.get("user_id")
-    if not user_id:
-        return RedirectResponse(url="/login", status_code=302)
     db = SessionLocal()
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = get_current_user_from_session(request, db)
     db.close()
     if not user:
         return RedirectResponse(url="/login", status_code=302)
@@ -1606,8 +1693,10 @@ def _entry_to_dict(e):
 
 
 @app.get("/api/training-plan/{user_id}")
-def get_training_plan(user_id: int):
+def get_training_plan(user_id: int, current_user: User = Depends(get_current_user)):
     """Get the active training plan for a user including all entries and chat history."""
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this training plan")
     db = SessionLocal()
     try:
         plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
@@ -1625,8 +1714,10 @@ def get_training_plan(user_id: int):
 
 
 @app.post("/api/training-plan/{user_id}")
-def create_or_replace_training_plan(user_id: int, body: BulkEntriesCreate):
+def create_or_replace_training_plan(user_id: int, body: BulkEntriesCreate, current_user: User = Depends(get_current_user)):
     """Replace the user's training plan with a new set of entries (AI or manual bulk-add)."""
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this training plan")
     db = SessionLocal()
     try:
         old_plans = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).all()
@@ -1661,8 +1752,10 @@ def create_or_replace_training_plan(user_id: int, body: BulkEntriesCreate):
 
 
 @app.post("/api/training-plan/{user_id}/entry")
-def add_plan_entry(user_id: int, entry_data: PlanEntryCreate):
+def add_plan_entry(user_id: int, entry_data: PlanEntryCreate, current_user: User = Depends(get_current_user)):
     """Add a single entry (day) to the user's plan."""
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this training plan")
     db = SessionLocal()
     try:
         plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
@@ -1693,11 +1786,19 @@ def add_plan_entry(user_id: int, entry_data: PlanEntryCreate):
 
 
 @app.put("/api/training-plan/entry/{entry_id}")
-def update_plan_entry(entry_id: int, update: PlanEntryUpdate):
+def update_plan_entry(entry_id: int, update: PlanEntryUpdate, current_user: User = Depends(get_current_user)):
     """Update a specific entry."""
     db = SessionLocal()
     try:
-        entry = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.id == entry_id).first()
+        # Ownership check via TrainingPlanEntry -> TrainingPlan.user_id. 404
+        # (not 403) for a mismatch too, so this doesn't confirm the existence
+        # of another user's entry ids.
+        entry = (
+            db.query(TrainingPlanEntry)
+            .join(TrainingPlan, TrainingPlanEntry.plan_id == TrainingPlan.id)
+            .filter(TrainingPlanEntry.id == entry_id, TrainingPlan.user_id == current_user.id)
+            .first()
+        )
         if not entry:
             raise HTTPException(status_code=404, detail="Entry not found")
         if update.workout_type is not None:
@@ -1724,11 +1825,16 @@ def update_plan_entry(entry_id: int, update: PlanEntryUpdate):
 
 
 @app.delete("/api/training-plan/entry/{entry_id}")
-def delete_plan_entry(entry_id: int):
+def delete_plan_entry(entry_id: int, current_user: User = Depends(get_current_user)):
     """Delete a specific entry."""
     db = SessionLocal()
     try:
-        entry = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.id == entry_id).first()
+        entry = (
+            db.query(TrainingPlanEntry)
+            .join(TrainingPlan, TrainingPlanEntry.plan_id == TrainingPlan.id)
+            .filter(TrainingPlanEntry.id == entry_id, TrainingPlan.user_id == current_user.id)
+            .first()
+        )
         if not entry:
             raise HTTPException(status_code=404, detail="Entry not found")
         db.delete(entry)
@@ -1739,8 +1845,10 @@ def delete_plan_entry(entry_id: int):
 
 
 @app.post("/api/training-plan/{user_id}/chat")
-def training_plan_chat(user_id: int, msg: ChatMessageCreate):
+def training_plan_chat(user_id: int, msg: ChatMessageCreate, current_user: User = Depends(get_current_user)):
     """Send a message to the AI to modify the training plan and persist the conversation."""
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this training plan")
     db = SessionLocal()
     try:
         plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
@@ -1933,8 +2041,10 @@ def training_plan_chat(user_id: int, msg: ChatMessageCreate):
 
 
 @app.delete("/api/training-plan/{user_id}/chat")
-def clear_training_plan_chat(user_id: int):
+def clear_training_plan_chat(user_id: int, current_user: User = Depends(get_current_user)):
     """Clear the AI chat history for the user's training plan."""
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this training plan")
     db = SessionLocal()
     try:
         plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
