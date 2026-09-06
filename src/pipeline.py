@@ -189,19 +189,45 @@ class StravaDB:
         self.con = duckdb.connect(db_path)
         self.init_schema()
         
+    def _migration_applied(self, name):
+        row = self.con.execute("SELECT 1 FROM schema_migrations WHERE name = ?", [name]).fetchone()
+        return row is not None
+
+    def _mark_migration_applied(self, name):
+        self.con.execute(
+            "INSERT INTO schema_migrations (name) VALUES (?) ON CONFLICT (name) DO NOTHING",
+            [name]
+        )
+
     def init_schema(self):
+        # schema_migrations gives this file's ad hoc CREATE/ALTER-based
+        # schema management a visible, queryable history — there's no
+        # dedicated migration framework for DuckDB the way Alembic exists
+        # for Postgres (see alembic/ + src/api/database.py), so this is the
+        # minimum viable version: a named list of migrations, each recorded
+        # once applied. New schema changes should add a new named entry here
+        # rather than another bare try/except ALTER TABLE.
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                name VARCHAR PRIMARY KEY,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS dim_athlete (
                 athlete_id UBIGINT PRIMARY KEY, username VARCHAR, firstname VARCHAR, lastname VARCHAR,
                 city VARCHAR, state VARCHAR, country VARCHAR, sex VARCHAR, weight DOUBLE, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
-        try:
-            self.con.execute("ALTER TABLE dim_athlete ADD COLUMN weight DOUBLE;")
-        except duckdb.CatalogException:
-            pass
-        except duckdb.BinderException:
-            pass
+        if not self._migration_applied("dim_athlete_add_weight_column"):
+            try:
+                self.con.execute("ALTER TABLE dim_athlete ADD COLUMN weight DOUBLE;")
+            except duckdb.CatalogException:
+                pass
+            except duckdb.BinderException:
+                pass
+            self._mark_migration_applied("dim_athlete_add_weight_column")
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS dim_activity (
                 activity_id UBIGINT PRIMARY KEY, athlete_id UBIGINT, name VARCHAR, type VARCHAR,

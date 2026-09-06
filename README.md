@@ -9,7 +9,7 @@ A professional-grade training analytics platform and AI coaching engine built on
 *   **Deep Activity Analysis**:
     *   **Efficiency Factor (EF)**: Tracking aerobic efficiency over time.
     *   **Aerobic Decoupling (Pa:Hr)**: Measure how well your heart rate holds steady during endurance runs.
-    *   **Pace Zone Mapping**: Automatic calculation of physiological zones (Recovery to Anaerobic) based on your recent 6-week performance.
+    *   **Pace Zone Mapping**: Automatic calculation of physiological zones (Recovery to Anaerobic) based on your recent 90-day performance (see Methodology below for the exact algorithm).
 *   **Performance Metrics Warehouse**: All data is stored locally in a high-performance **DuckDB** warehouse for lightning-fast queries and long-term history tracking.
 *   **Modern Web UI**: A glass-morphic, responsive dashboard with interactive charts (Chart.js) and real-time AI executive summaries.
 
@@ -21,14 +21,21 @@ A professional-grade training analytics platform and AI coaching engine built on
     ```
 
 2.  **Configuration**:
-    Create a `.env` file in the root directory:
+    Create a `.env` file in the root directory (see `.env.example` for the full list of variables, including `SECRET_KEY`/`DATABASE_URL`):
     ```env
     STRAVA_CLIENT_ID=your_id
     STRAVA_CLIENT_SECRET=your_secret
     GROQ_API_KEY=your_key
     ```
 
-3.  **Authentication**:
+3.  **Database schema**:
+    The Postgres schema (users, races, training plans) is managed by Alembic, not created automatically at startup. Run:
+    ```bash
+    alembic upgrade head
+    ```
+    `docker-compose up`/the Dockerfiles run this automatically on container start; for local `uvicorn` development, run it once yourself first.
+
+4.  **Authentication**:
     Run the ingestion pipeline to authenticate with Strava and populate your warehouse:
     ```bash
     python src/pipeline.py
@@ -60,6 +67,7 @@ python src/pipeline.py
 
 *   **/src/api**: FastAPI backend and Jinja2 templates (Dashboard, Warehouse, Activity Analysis).
 *   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB — including `run_analyze_effectiveness()`, which computes per-activity physiological metrics from activity streams.
+*   **/alembic**: Postgres schema migrations (`alembic upgrade head` to apply). The DuckDB warehouse's own schema is managed separately, inside `src/pipeline.py`'s `StravaDB.init_schema()`.
 *   **/data**: Contains the `strava_warehouse.duckdb` file.
 
 ## 📊 Methodology

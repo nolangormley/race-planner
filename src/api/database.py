@@ -94,4 +94,10 @@ class ChatMessage(Base):
     plan = relationship("TrainingPlan", back_populates="chat_messages")
 
 
-Base.metadata.create_all(bind=engine)
+# Schema is managed by Alembic (see /alembic and alembic.ini at the repo
+# root) — run `alembic upgrade head` to create/update tables. This used to
+# call Base.metadata.create_all(bind=engine) here at import time, which only
+# ever creates missing tables and never alters existing ones; the first
+# schema change after a table already existed in a deployed DB would fail at
+# runtime with no migration path. See
+# agent_prompting/improvement_plan.md Section 2/6.
