@@ -8,7 +8,8 @@ from typing import Optional, List
 import duckdb
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+import calendar
 import os
 import random
 import requests
@@ -128,6 +129,131 @@ def get_activities(limit: Optional[int] = 50):
     finally:
         con.close()
 
+# New endpoint to fetch activities for a specific user (athlete)
+@app.get("/api/user-activities/{user_id}")
+def get_user_activities(user_id: int, limit: Optional[int] = 100):
+    """Return recent activities for the given user (athlete).
+    user_id here is the local User.id - we look up the strava_athlete_id.
+    """
+    db = SessionLocal()
+    user = db.query(User).filter(User.id == user_id).first()
+    db.close()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    athlete_id = user.strava_athlete_id
+    if not athlete_id:
+        return []
+    
+    con = get_db_connection()
+    try:
+        query = """
+        SELECT da.*, ae.trimp_banister as training_load
+        FROM dim_activity da
+        LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
+        WHERE da.athlete_id = ?
+        ORDER BY da.start_date DESC
+        LIMIT ?
+        """
+        rows = con.execute(query, [athlete_id, limit]).fetchall()
+        cols = [desc[0] for desc in con.description]
+        return [dict(zip(cols, r)) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        con.close()
+
+# Mileage summary endpoint – planned vs actual mileage for a user
+@app.get("/api/mileage-summary/{user_id}")
+def get_mileage_summary(user_id: int, start: str = None, end: str = None):
+    """Return planned vs actual mileage for the user.
+    
+    Args:
+        user_id: User/athlete ID
+        start: Start date filter (YYYY-MM-DD), defaults to start of current month
+        end: End date filter (YYYY-MM-DD), defaults to end of current month
+    """
+    from datetime import datetime, date
+    
+    con = get_db_connection()
+    try:
+        # Get athlete_id for this user
+        db = SessionLocal()
+        user = db.query(User).filter(User.id == user_id).first()
+        db.close()
+        if not user or not user.strava_athlete_id:
+            return {"planned_miles": 0, "actual_miles": 0, "planned_days": 0, "completed_days": 0, "rest_days": 0}
+        athlete_id = user.strava_athlete_id
+        
+        # Determine date range
+        if start and end:
+            date_filter = "AND da.start_date_local::DATE BETWEEN ? AND ?"
+            date_params = [start, end]
+        else:
+            today = date.today()
+            start = today.replace(day=1).isoformat()
+            last_day = calendar.monthrange(today.year, today.month)[1]
+            end = today.replace(day=last_day).isoformat()
+            date_filter = "AND da.start_date_local::DATE BETWEEN ? AND ?"
+            date_params = [start, end]
+        
+        # Planned mileage from the latest training plan entries
+        plan = con.execute(
+            "SELECT approximate_distance FROM TrainingPlanEntry WHERE plan_id = ("
+            "SELECT id FROM TrainingPlan WHERE user_id = ? ORDER BY id DESC LIMIT 1)",
+            [user_id]
+        ).fetchall()
+        planned = 0.0
+        for (dist,) in plan:
+            if dist:
+                try:
+                    num = float(dist.split()[0])
+                    if 'km' in dist.lower():
+                        num = num * 0.621371
+                    planned += num
+                except:
+                    pass
+        
+        # Actual mileage from completed activities (distance in meters -> convert to miles)
+        activities = con.execute(
+            f"SELECT distance FROM dim_activity WHERE athlete_id = ? {date_filter}",
+            [athlete_id] + date_params
+        ).fetchall()
+        actual_meters = sum(row[0] for row in activities if row[0])
+        actual_miles = actual_meters * 0.000621371
+        
+        # Count entries by type for plan stats
+        entries = con.execute(
+            "SELECT workout_type, is_completed FROM TrainingPlanEntry WHERE plan_id = ("
+            "SELECT id FROM TrainingPlan WHERE user_id = ? ORDER BY id DESC LIMIT 1)"
+            f" AND date BETWEEN ? AND ?",
+            [user_id, start, end]
+        ).fetchall()
+        
+        planned_days = 0
+        completed_days = 0
+        rest_days = 0
+        for (wt, completed) in entries:
+            if wt and wt.lower() == 'rest':
+                rest_days += 1
+            else:
+                planned_days += 1
+            if completed:
+                completed_days += 1
+        
+        return {
+            "planned_miles": round(planned, 2),
+            "actual_miles": round(actual_miles, 2),
+            "planned_days": planned_days,
+            "completed_days": completed_days,
+            "rest_days": rest_days
+        }
+    except Exception as e:
+        print(f"Mileage summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        con.close()
 @app.get("/api/activities/{activity_id}")
 def get_activity(activity_id: int):
     con = get_db_connection()
@@ -696,6 +822,35 @@ def get_ai_insight(stats, context="status", workout=None):
                 if hasattr(e, 'response') and e.response is not None:
                     print(f"Deepseek error response body: {e.response.text}")
                 raise
+        elif llm_provider == "gemini":
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
+            if not gemini_api_key:
+                return "Gemini API key not set in environment (GEMINI_API_KEY)."
+                
+            url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            payload = {
+                "model": "gemini-2.5-flash",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ]
+            }
+            headers = {
+                "Authorization": f"Bearer {gemini_api_key}",
+                "Content-Type": "application/json"
+            }
+            try:
+                response = requests.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    return data["choices"][0]["message"]["content"]
+                return str(data)
+            except requests.exceptions.HTTPError as e:
+                print(f"HTTPError on Gemini API call: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"Gemini error response body: {e.response.text}")
+                raise
         else:
             url = "http://localhost:1234/api/v1/chat"
             payload = {
@@ -922,7 +1077,8 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
             "2. 'recommended_goal_time': a string recommending a goal time based on their metrics. If they provided a goal time, just restate it.\n"
             "3. 'plan': a dictionary where keys are the dates in 'YYYY-MM-DD' format, and values are objects with keys: "
             "'type_of_workout' (e.g., Easy Run, Tempo, Long Run, Rest), 'training_focus' (the purpose of the workout), "
-            "'approximate_distance' (e.g., '5 miles'), and 'description' (detailed instructions)."
+            "'approximate_distance' (e.g., '5 miles'), and 'description' (detailed instructions).\n"
+            "CRITICAL TOKEN LIMIT: Do not generate more than 60 days of workouts at once. If the user asks for a plan longer than 8 weeks, generate the first 8 weeks and explain in your 'blurb' that you generated the first phase and they can ask you to generate the next phase later."
         )
 
         if llm_provider == "groq":
@@ -937,14 +1093,15 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                "response_format": {"type": "json_object"}
+                "response_format": {"type": "json_object"},
+                "max_tokens": 8192
             }
             headers = {
                 "Authorization": f"Bearer {groq_api_key}",
                 "Content-Type": "application/json"
             }
             try:
-                response = requests.post(url, json=payload, headers=headers)
+                response = requests.post(url, json=payload, headers=headers, timeout=300)
                 response.raise_for_status()
                 data = response.json()
                 if "choices" in data and len(data["choices"]) > 0:
@@ -972,14 +1129,15 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                "response_format": {"type": "json_object"}
+                "response_format": {"type": "json_object"},
+                "max_tokens": 8192
             }
             headers = {
                 "Authorization": f"Bearer {deepseek_api_key}",
                 "Content-Type": "application/json"
             }
             try:
-                response = requests.post(url, json=payload, headers=headers)
+                response = requests.post(url, json=payload, headers=headers, timeout=300)
                 response.raise_for_status()
                 data = response.json()
                 if "choices" in data and len(data["choices"]) > 0:
@@ -995,8 +1153,44 @@ def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optio
                 if hasattr(e, 'response') and e.response is not None:
                     print(f"Deepseek error response body: {e.response.text}")
                 return {"error": str(e)}
+        elif llm_provider == "gemini":
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
+            if not gemini_api_key:
+                return {"error": "Gemini API key not set in environment (GEMINI_API_KEY)."}
+                
+            url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            payload = {
+                "model": "gemini-2.5-flash",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": 8192
+            }
+            headers = {
+                "Authorization": f"Bearer {gemini_api_key}",
+                "Content-Type": "application/json"
+            }
+            try:
+                response = requests.post(url, json=payload, headers=headers, timeout=300)
+                response.raise_for_status()
+                data = response.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    import json
+                    content = clean_json_response(data["choices"][0]["message"]["content"])
+                    try:
+                        return json.loads(content)
+                    except json.JSONDecodeError:
+                        return {"error": "Failed to parse JSON response from LLM", "raw_content": content}
+                return {"error": "Invalid response format from Gemini API."}
+            except requests.exceptions.HTTPError as e:
+                print(f"HTTPError on Gemini API call: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"Gemini error response body: {e.response.text}")
+                return {"error": str(e)}
         else:
-            return {"error": "This feature currently requires the LLM_PROVIDER to be set to groq or deepseek in order to return properly formatted JSON."}
+            return {"error": "This feature currently requires the LLM_PROVIDER to be set to groq, deepseek, or gemini in order to return properly formatted JSON."}
 
     except Exception as e:
         print(f"Error getting AI training plan: {e}")
@@ -1586,6 +1780,7 @@ def training_plan_chat(user_id: int, msg: ChatMessageCreate):
             "3. 'replace_all': (optional) boolean — if true, the full new plan will be in 'full_plan' instead of 'plan_updates'.\n"
             "4. 'full_plan': (optional) same structure as plan_updates but represents the complete new plan.\n"
             "If the user is just chatting (no plan changes needed), only include 'message'.\n"
+            "CRITICAL TOKEN LIMIT: Do not generate more than 60 days of workouts at once. If the user asks for a plan longer than 8 weeks, generate the first 8 weeks and explain in your message that you generated the first phase and they can ask you to generate the next phase.\n"
             "CRITICAL: Always respond with valid JSON only. Do not wrap the JSON in ```json blocks or markdown. Output raw JSON."
         )
 
@@ -1598,8 +1793,8 @@ def training_plan_chat(user_id: int, msg: ChatMessageCreate):
         db.add(user_msg)
         db.commit()
 
-        if llm_provider not in ["groq", "deepseek"]:
-            ai_reply = "AI chat requires LLM_PROVIDER=groq or deepseek to be set."
+        if llm_provider not in ["groq", "deepseek", "gemini"]:
+            ai_reply = "AI chat requires LLM_PROVIDER=groq, deepseek, or gemini to be set."
             ai_msg = ChatMessage(plan_id=plan.id, role="assistant", content=ai_reply)
             db.add(ai_msg)
             db.commit()
@@ -1617,6 +1812,7 @@ def training_plan_chat(user_id: int, msg: ChatMessageCreate):
                 "model": "llama-3.3-70b-versatile",
                 "messages": messages_payload,
                 "response_format": {"type": "json_object"},
+                "max_tokens": 8192
             }
             headers = {"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"}
             
@@ -1627,13 +1823,28 @@ def training_plan_chat(user_id: int, msg: ChatMessageCreate):
 
             url_api = "https://api.deepseek.com/v1/chat/completions"
             payload = {
-                "model": "deepseek-v4-pro",
+                "model": "deepseek-chat",
                 "messages": messages_payload,
                 "response_format": {"type": "json_object"},
+                "max_tokens": 8192
             }
             headers = {"Authorization": f"Bearer {deepseek_api_key}", "Content-Type": "application/json"}
 
-        response = requests.post(url_api, json=payload, headers=headers, timeout=60)
+        elif llm_provider == "gemini":
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
+            if not gemini_api_key:
+                raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+
+            url_api = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            payload = {
+                "model": "gemini-2.5-flash",
+                "messages": messages_payload,
+                "response_format": {"type": "json_object"},
+                "max_tokens": 8192
+            }
+            headers = {"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"}
+
+        response = requests.post(url_api, json=payload, headers=headers, timeout=300)
         response.raise_for_status()
         data = response.json()
         content = data["choices"][0]["message"]["content"]
