@@ -1,0 +1,5 @@
+# Dev/test-only dependencies, layered on top of the runtime requirements.
+# Kept separate so the deployed/Docker image (which installs only
+# requirements.txt) doesn't carry test tooling it never runs.
+-r requirements.txt
+pytest==8.4.2
