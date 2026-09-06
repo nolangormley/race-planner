@@ -150,13 +150,21 @@ def scrape_workouts_dom():
     print(f"Total workouts scraped: {len(all_workouts)}")
     return all_workouts
 
-def ingest_to_duckdb(workouts):
+def ingest_to_duckdb(workouts, min_expected=1):
+    """Upserts scraped workouts into dim_workouts.
+
+    Previously this dropped and recreated the whole table on every run, so
+    if Coros changed their page layout and the scrape only partially
+    succeeded (a very plausible failure mode given the best-effort,
+    try/except-per-item selector logic in scrape_workouts_dom), a complete
+    table was silently replaced with a small partial one. Now it upserts by
+    workout_id (URL) and refuses to proceed at all if the new scrape returned
+    suspiciously few workouts compared to what's already stored.
+    """
     con = duckdb.connect(DB_PATH)
-    
-    # Re-create table
-    con.execute("DROP TABLE IF EXISTS dim_workouts")
+
     con.execute("""
-        CREATE TABLE dim_workouts (
+        CREATE TABLE IF NOT EXISTS dim_workouts (
             workout_id VARCHAR PRIMARY KEY,
             name VARCHAR,
             description VARCHAR,
@@ -166,35 +174,46 @@ def ingest_to_duckdb(workouts):
             source VARCHAR DEFAULT 'COROS'
         );
     """)
-    
-    print("Inserting into DuckDB...")
+
+    existing_count = con.execute("SELECT COUNT(*) FROM dim_workouts").fetchone()[0]
+    # Refuse to (potentially) shrink an existing library via a bad scrape.
+    # min_expected guards the from-empty case (a fresh DB legitimately starts
+    # at 0); half of the existing count is a permissive guard against a
+    # genuinely partial scrape, not against normal day-to-day fluctuation.
+    if existing_count > 0 and len(workouts) < max(min_expected, existing_count // 2):
+        print(
+            f"Refusing to ingest: scrape returned {len(workouts)} workouts, "
+            f"but dim_workouts already has {existing_count}. This looks like "
+            f"a partial/failed scrape (e.g. Coros changed their page layout) "
+            f"rather than a real shrink of the workout library — not touching "
+            f"existing data. Re-run once the scraper is confirmed working."
+        )
+        con.close()
+        return
+
+    print("Upserting into DuckDB...")
     count = 0
-    buffer = []
-    
-    # Dedup by URL
     seen_urls = set()
-    
+    buffer = []
     for w in workouts:
         if w['url'] in seen_urls: continue
         seen_urls.add(w['url'])
-        
         buffer.append((w['url'], w['name'], w['description'], w['category'], w['tags'], w['url']))
         count += 1
-        
+
     if buffer:
         con.executemany("""
             INSERT INTO dim_workouts (workout_id, name, description, category, tags, url)
             VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (workout_id) DO UPDATE SET
+                name = EXCLUDED.name, description = EXCLUDED.description,
+                category = EXCLUDED.category, tags = EXCLUDED.tags, url = EXCLUDED.url
         """, buffer)
-        
-    print(f"Successfully inserted {count} unique workouts.")
+
+    con.close()
+    print(f"Successfully upserted {count} unique workouts.")
 
 if __name__ == "__main__":
     workouts = scrape_workouts_dom()
     if workouts:
         ingest_to_duckdb(workouts)
-# Re-run analysis to show it works
-import os
-if os.path.exists("analyze_training_load.py"):
-    print("\nRunning analysis with new data...")
-    os.system("python analyze_training_load.py")

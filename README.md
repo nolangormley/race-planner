@@ -59,10 +59,9 @@ python src/pipeline.py
 ## 🏗 Project Structure
 
 *   **/src/api**: FastAPI backend and Jinja2 templates (Dashboard, Warehouse, Activity Analysis).
-*   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB.
+*   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB — including `run_analyze_effectiveness()`, which computes per-activity physiological metrics from activity streams.
 *   **/data**: Contains the `strava_warehouse.duckdb` file.
-*   **analyze_effectiveness.py**: Core logic for calculating physiological metrics from activity streams.
 
 ## 📊 Methodology
 *   **Training Load**: Uses the Banister TRIMP model where `Fitness (CTL)` is a 42-day exponentially weighted moving average (EWMA) and `Fatigue (ATL)` is a 7-day EWMA.
-*   **Pace Zones**: Calculated using a proprietary algorithm that analyzes the 95th percentile of your speed over the last 6 weeks to estimate Threshold Pace.
+*   **Pace Zones**: Calculated (`calculate_pace_zones()` in `src/api/main.py`) from a 90-day rolling window: the threshold speed is the 80th percentile of speed samples in the 85–92% max-HR band (or, with fewer than 30 such samples, the 90th percentile of all speed samples as a fallback), then Coros-style zone bands are derived as percentages of that threshold pace.

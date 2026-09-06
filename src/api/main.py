@@ -570,62 +570,42 @@ def get_users(current_user: User = Depends(get_current_user)):
         con.close()
 
 def calculate_training_status_logic(user_id: int):
+    """Computes CTL/ATL/TSB/ACWR/VO2 history for an athlete.
+
+    Reads daily training load from activity_effectiveness (populated by
+    src/pipeline.py's run_analyze_effectiveness, which integrates TRIMP
+    sample-by-sample over the real HR stream) instead of recomputing TRIMP/EF
+    independently here from dim_activity summary fields. This used to be a
+    second, hand-written implementation of the Banister TRIMP formula that
+    disagreed with pipeline.py's in three ways: an opposite default sex
+    coefficient when an athlete's sex was unknown, a 60x unit difference in
+    efficiency factor (no `* 60` here), and a Run-only activity filter where
+    pipeline.py had none. There is now exactly one TRIMP/EF implementation
+    (src/pipeline.py), and this function just aggregates its output to a
+    daily series — see agent_prompting/improvement_plan.md Section 2.
+
+    NOTE: because pipeline.py's version has no activity-type filter, daily
+    load here now includes all activity types with an HR stream (e.g.
+    cycling), not just runs — a deliberate behavior change, since CTL/ATL are
+    meant to track overall training stress rather than running load alone.
+    """
     con = get_db_connection()
     try:
-        # --- Get athlete sex for TRIMP Banister sex coefficient ---
         try:
-            athlete_row = con.execute(
-                "SELECT sex, weight FROM dim_athlete WHERE athlete_id = ?", [user_id]
-            ).fetchone()
-            sex = athlete_row[0] if athlete_row else 'M'
-            weight_kg = athlete_row[1] if athlete_row else None
-        except Exception:
-            sex = 'M'
-            weight_kg = None
-
-        # TRIMP Banister sex coefficient: 1.92 for males, 1.67 for females
-        sex_coeff = 1.67 if sex == 'F' else 1.92
-        hr_rest = 60  # assumed resting heart rate
-
-        # --- Compute daily TRIMP + EF directly from dim_activity (no separate table needed) ---
-        # TRIMP Banister = duration_min * hr_ratio * 0.64 * exp(sex_coeff * hr_ratio)
-        # Efficiency Factor (EF) = avg_speed / avg_heartrate  (proxy: m/s per bpm)
-        try:
-            df = con.execute(f"""
+            df = con.execute("""
                 SELECT
                     da.start_date_local::DATE as activity_date,
-                    SUM(
-                        CASE
-                            WHEN da.average_heartrate IS NOT NULL
-                              AND da.max_heartrate IS NOT NULL
-                              AND da.max_heartrate > da.average_heartrate
-                              AND da.max_heartrate > {hr_rest}
-                            THEN
-                                (da.moving_time / 60.0)
-                                * GREATEST(0.0, (da.average_heartrate - {hr_rest}) / (da.max_heartrate - {hr_rest}))
-                                * 0.64
-                                * EXP({sex_coeff} * GREATEST(0.0, (da.average_heartrate - {hr_rest}) / (da.max_heartrate - {hr_rest})))
-                            ELSE 0
-                        END
-                    ) as daily_load,
-                    AVG(
-                        CASE
-                            WHEN da.average_heartrate IS NOT NULL AND da.average_heartrate > 0
-                                 AND da.average_speed IS NOT NULL AND da.average_speed > 0
-                            THEN da.average_speed / da.average_heartrate
-                            ELSE NULL
-                        END
-                    ) as daily_ef,
-                    CAST(NULL AS DOUBLE) as daily_decoup
+                    SUM(ae.trimp_banister) as daily_load,
+                    AVG(ae.efficiency_factor) as daily_ef,
+                    AVG(ae.aerobic_decoupling) as daily_decoup
                 FROM dim_activity da
+                JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
                 WHERE da.athlete_id = ?
-                  AND da.type = 'Run'
-                  AND da.moving_time > 0
                 GROUP BY 1
                 ORDER BY 1
             """, [user_id]).fetchdf()
         except Exception as e:
-            print(f"Error computing TRIMP from dim_activity: {e}")
+            print(f"Error computing daily training load from activity_effectiveness: {e}")
             return None
 
         if df.empty:
@@ -675,9 +655,6 @@ def calculate_training_status_logic(user_id: int):
         
         vo2max_data = calculate_vo2max(user_id)
         latest_vo2_max = vo2max_data.get('latest_vo2_max') if vo2max_data else None
-        
-        # weight_kg and sex already fetched at top of function; derive weight_lbs here
-        weight_lbs = round(weight_kg * 2.20462) if weight_kg else None
 
         history_df = merged.tail(90)
         history_list = []
@@ -981,7 +958,7 @@ def get_recommendation(user_id: int, current_user: User = Depends(get_current_us
         try:
             workouts = con.execute("SELECT name, description, url, category FROM dim_workouts WHERE category = ?", [target_category]).fetchall()
         except Exception as e:
-            return {"error": "dim_workouts table not found. Run ingest_workouts.py first."}
+            return {"error": "dim_workouts table not found. Run src/scrape_coros_workouts.py first."}
 
         if not workouts:
              fallback_map = {

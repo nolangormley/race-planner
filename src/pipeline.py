@@ -32,6 +32,30 @@ DB_PATH = os.path.join(DATA_DIR, 'strava_warehouse.duckdb')
 
 STREAMS_TO_FETCH = ["time", "heartrate", "velocity_smooth", "cadence", "watts", "temp", "altitude", "moving"]
 
+# Physiological fallbacks used when an athlete's own values aren't on record.
+# Not yet personalized per-athlete (dim_athlete has no resting_heartrate
+# column) — see agent_prompting/improvement_plan.md Section 2.
+DEFAULT_MAX_HR = 192
+DEFAULT_REST_HR = 60
+
+
+def _request_with_retry(method, url, max_retries=3, **kwargs):
+    """Wraps a requests.get/post call with Strava 429 rate-limit handling:
+    reads the Retry-After header (seconds) and sleeps before retrying, up to
+    max_retries times, instead of letting a 429 raise_for_status() abort
+    ingestion partway through.
+    """
+    resp = None
+    for attempt in range(max_retries + 1):
+        resp = method(url, **kwargs)
+        if resp.status_code == 429 and attempt < max_retries:
+            retry_after = int(resp.headers.get('Retry-After', 15))
+            print(f"  Rate limited (429). Waiting {retry_after}s before retry ({attempt + 1}/{max_retries})...")
+            time.sleep(retry_after)
+            continue
+        return resp
+    return resp
+
 class OAuthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         query_components = parse_qs(urlparse(self.path).query)
@@ -105,14 +129,14 @@ class StravaManager:
     def fetch_activities(self, access_token, count=5, page=1, after=None):
         params = {'per_page': count, 'page': page}
         if after: params['after'] = after
-        resp = requests.get("https://www.strava.com/api/v3/athlete/activities", headers={'Authorization': f'Bearer {access_token}'}, params=params)
+        resp = _request_with_retry(requests.get, "https://www.strava.com/api/v3/athlete/activities", headers={'Authorization': f'Bearer {access_token}'}, params=params)
         if resp.status_code == 401: raise Exception("Unauthorized")
         resp.raise_for_status()
         return resp.json()
 
     def fetch_activity_streams(self, access_token, activity_id, keys=STREAMS_TO_FETCH):
         print(f"  Fetching streams for activity {activity_id}...")
-        resp = requests.get(f"https://www.strava.com/api/v3/activities/{activity_id}/streams", headers={'Authorization': f'Bearer {access_token}'}, params={'keys': ",".join(keys), 'key_by_type': 'true'})
+        resp = _request_with_retry(requests.get, f"https://www.strava.com/api/v3/activities/{activity_id}/streams", headers={'Authorization': f'Bearer {access_token}'}, params={'keys': ",".join(keys), 'key_by_type': 'true'})
         if resp.status_code == 401: raise Exception("Unauthorized")
         if resp.status_code == 404:
             print(f"  Streams not found for activity {activity_id}")
@@ -149,8 +173,20 @@ class StravaDB:
             );
         """)
         def create_stream_table(name, val_type="DOUBLE"):
-            self.con.execute(f"CREATE TABLE IF NOT EXISTS stream_{name} (activity_id UBIGINT, time_offset INTEGER, value {val_type}, FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id));")
-            
+            # PRIMARY KEY (activity_id, time_offset) makes a fresh table
+            # idempotent under upsert. CREATE TABLE IF NOT EXISTS is a no-op
+            # for a table that already exists (from before this constraint
+            # was added), which is why _migrate_stream_table_to_pk below
+            # exists — it detects and fixes that specific case.
+            self.con.execute(f"""
+                CREATE TABLE IF NOT EXISTS stream_{name} (
+                    activity_id UBIGINT, time_offset INTEGER, value {val_type},
+                    FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id),
+                    PRIMARY KEY (activity_id, time_offset)
+                );
+            """)
+            self._migrate_stream_table_to_pk(name, val_type)
+
         create_stream_table("heartrate", "INTEGER")
         create_stream_table("velocity", "DOUBLE")
         create_stream_table("cadence", "INTEGER")
@@ -158,6 +194,47 @@ class StravaDB:
         create_stream_table("temperature", "INTEGER")
         create_stream_table("altitude", "DOUBLE")
         create_stream_table("moving", "BOOLEAN")
+
+    def _table_has_pk(self, table_name):
+        try:
+            row = self.con.execute(
+                "SELECT 1 FROM duckdb_constraints() WHERE table_name = ? AND constraint_type = 'PRIMARY KEY' LIMIT 1",
+                [table_name]
+            ).fetchone()
+            return row is not None
+        except Exception:
+            return False
+
+    def _migrate_stream_table_to_pk(self, name, val_type):
+        """One-time migration for a stream_* table created before this table
+        had a PRIMARY KEY(activity_id, time_offset). Deduplicates existing
+        rows (duplicates were confirmed to have identical values — see
+        agent_prompting/improvement_plan.md Section 2) and rebuilds the table
+        with the constraint in place. No-ops (cheaply) once migrated, since
+        _table_has_pk then returns True.
+        """
+        table = f"stream_{name}"
+        if self._table_has_pk(table):
+            return
+        before = self.con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        print(f"  Migrating {table}: adding PRIMARY KEY(activity_id, time_offset) and deduping {before} rows...")
+        self.con.execute(f"""
+            CREATE TABLE {table}_new (
+                activity_id UBIGINT, time_offset INTEGER, value {val_type},
+                FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id),
+                PRIMARY KEY (activity_id, time_offset)
+            );
+        """)
+        self.con.execute(f"""
+            INSERT INTO {table}_new (activity_id, time_offset, value)
+            SELECT activity_id, time_offset, MAX(value)
+            FROM {table}
+            GROUP BY activity_id, time_offset;
+        """)
+        after = self.con.execute(f"SELECT COUNT(*) FROM {table}_new").fetchone()[0]
+        self.con.execute(f"DROP TABLE {table};")
+        self.con.execute(f"ALTER TABLE {table}_new RENAME TO {table};")
+        print(f"    {table}: {before} -> {after} rows ({before - after} duplicate(s) removed).")
 
     def upsert_athlete(self, a):
         self.con.execute("""
@@ -174,12 +251,29 @@ class StravaDB:
 
     def insert_streams(self, activity_id, streams):
         if not streams or 'time' not in streams: return
-        for t in ["stream_heartrate", "stream_velocity", "stream_cadence", "stream_watts", "stream_temperature", "stream_altitude", "stream_moving"]:
-            self.con.execute(f"DELETE FROM {t} WHERE activity_id = ?", [activity_id])
         time_data = streams['time']['data']
+
         def proc(key, tbl):
-            if key in streams:
-                self.con.executemany(f"INSERT INTO stream_{tbl} VALUES (?, ?, ?)", list(zip([activity_id]*len(time_data), time_data, streams[key]['data'])))
+            if key not in streams: return
+            values = streams[key]['data']
+            if len(values) != len(time_data):
+                # Strava can return a shorter stream than 'time' (e.g. a
+                # sensor connected partway through). zip() would silently
+                # truncate to the shortest and misalign every offset after
+                # that point, so skip this stream for this activity entirely
+                # instead of inserting misaligned data.
+                print(f"    WARNING: stream '{key}' for activity {activity_id} has {len(values)} samples but 'time' has {len(time_data)}; skipping this stream for this activity.")
+                return
+            rows = list(zip([activity_id] * len(time_data), time_data, values))
+            # ON CONFLICT DO UPDATE (upsert) instead of a separate DELETE+INSERT
+            # — the PRIMARY KEY(activity_id, time_offset) on this table makes
+            # re-running ingestion for the same activity idempotent rather
+            # than depending on the DELETE having actually run first.
+            self.con.executemany(
+                f"INSERT INTO stream_{tbl} VALUES (?, ?, ?) ON CONFLICT (activity_id, time_offset) DO UPDATE SET value = EXCLUDED.value",
+                rows
+            )
+
         proc('heartrate', 'heartrate')
         proc('velocity_smooth', 'velocity')
         proc('cadence', 'cadence')
@@ -189,7 +283,18 @@ class StravaDB:
         proc('moving', 'moving')
 
     def activity_exists(self, act_id): return self.con.execute("SELECT 1 FROM dim_activity WHERE activity_id = ?", [act_id]).fetchone() is not None
-    def activity_has_streams(self, act_id): return self.con.execute("SELECT 1 FROM stream_velocity WHERE activity_id = ? LIMIT 1", [act_id]).fetchone() is not None
+
+    def activity_has_streams(self, act_id):
+        # Checks all seven stream tables, not just stream_velocity — an
+        # activity genuinely lacking GPS/velocity data (treadmill run,
+        # manual entry) used to fail this check forever even after its other
+        # streams were successfully fetched, triggering a full re-fetch (and
+        # re-upsert) of all its streams on every single future ingestion run.
+        for tbl in ("stream_heartrate", "stream_velocity", "stream_cadence",
+                    "stream_watts", "stream_temperature", "stream_altitude", "stream_moving"):
+            if self.con.execute(f"SELECT 1 FROM {tbl} WHERE activity_id = ? LIMIT 1", [act_id]).fetchone() is not None:
+                return True
+        return False
 
 def ingest_data(manager, db, access_token, lookback_days=42):
     after_ts = int((datetime.now() - timedelta(days=lookback_days)).timestamp())
@@ -202,8 +307,6 @@ def ingest_data(manager, db, access_token, lookback_days=42):
         print(f"Athlete: {athlete.get('firstname')} {athlete.get('lastname')}")
     except Exception as e:
         print(f"Warning: Could not fetch athlete profile: {e}")
-
-    after_timestamp = int(time.time() - (lookback_days * 24 * 60 * 60))
 
     page = 1
     processed_count = 0
@@ -226,8 +329,11 @@ def ingest_data(manager, db, access_token, lookback_days=42):
         
         print(f"Found {len(activities)} activities on page {page}.")
         for act in activities:
-            act_id = act['id']
-            act_name = act['name']
+            act_id = act.get('id')
+            if act_id is None:
+                print(f"  Skipping malformed activity entry with no id: {act}")
+                continue
+            act_name = act.get('name', '(unnamed)')
             exists = db.activity_exists(act_id)
             has_streams = db.activity_has_streams(act_id)
             
@@ -292,43 +398,116 @@ def calculate_aerobic_decoupling(hr_times, hr_values, vel_times, vel_values):
     return ((ef1 - ef2) / ef1) * 100
 
 def run_analyze_effectiveness(db):
+    """Computes per-activity TRIMP/EF/zones/decoupling into
+    activity_effectiveness. This is the sole implementation of that math in
+    the codebase (see calculate_training_status_logic in src/api/main.py,
+    which now just aggregates this table's output) — unify any future change
+    here rather than adding a second copy elsewhere.
+    """
     con = db.con
-    con.execute("DROP TABLE IF EXISTS activity_effectiveness")
-    con.execute("CREATE TABLE IF NOT EXISTS activity_effectiveness (activity_id UBIGINT PRIMARY KEY, trimp_banister DOUBLE, trimp_edwards DOUBLE, efficiency_factor DOUBLE, intensity_factor DOUBLE, aerobic_decoupling DOUBLE, zone_1_sec INTEGER, zone_2_sec INTEGER, zone_3_sec INTEGER, zone_4_sec INTEGER, zone_5_sec INTEGER, effectiveness_score DOUBLE, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id));")
-    
-    acts = con.execute("SELECT da.activity_id, da.name, da.start_date_local, da.max_heartrate, da.average_speed, ath.sex FROM dim_activity da JOIN stream_heartrate sh ON da.activity_id = sh.activity_id JOIN dim_athlete ath ON da.athlete_id = ath.athlete_id GROUP BY 1,2,3,4,5,6").fetchall()
-    
+    # Upsert (activity_id is the PRIMARY KEY) instead of DROP+recreate: a
+    # crash partway through used to lose every activity's previously-computed
+    # row, not just the one that failed.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS activity_effectiveness (
+            activity_id UBIGINT PRIMARY KEY, trimp_banister DOUBLE, trimp_edwards DOUBLE,
+            efficiency_factor DOUBLE, intensity_factor DOUBLE, aerobic_decoupling DOUBLE,
+            zone_1_sec INTEGER, zone_2_sec INTEGER, zone_3_sec INTEGER, zone_4_sec INTEGER, zone_5_sec INTEGER,
+            effectiveness_score DOUBLE, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
+        );
+    """)
+
+    # Activities with a heartrate stream get a real per-sample TRIMP.
+    # Activities with only a Strava-reported average_heartrate (no stream —
+    # e.g. an activity type Strava didn't record HR samples for) still get a
+    # single-point TRIMP from that average, instead of being silently
+    # excluded from training load entirely (previously indistinguishable
+    # from a rest day).
+    acts = con.execute("""
+        SELECT da.activity_id, da.name, da.start_date_local, da.max_heartrate, da.average_speed, ath.sex,
+               da.average_heartrate, da.moving_time
+        FROM dim_activity da
+        JOIN dim_athlete ath ON da.athlete_id = ath.athlete_id
+        WHERE EXISTS (SELECT 1 FROM stream_heartrate sh WHERE sh.activity_id = da.activity_id)
+           OR (da.average_heartrate IS NOT NULL AND da.average_heartrate > 0)
+    """).fetchall()
+
     processed = 0
     total = len(acts)
-    for i, (act_id, name, date, rep_max_hr, avg_speed, sex) in enumerate(acts):
+    for i, (act_id, name, date, rep_max_hr, avg_speed, sex, avg_hr_summary, moving_time) in enumerate(acts):
         if i % 10 == 0:
             print(f"  Processing {i}/{total}: {name}...")
-        
-        hr_data = con.execute(f"SELECT value, time_offset FROM stream_heartrate WHERE activity_id = {act_id} ORDER BY time_offset").fetchall()
-        if not hr_data: continue
-        hr_vals, times = [h[0] for h in hr_data], [h[1] for h in hr_data]
-        user_max_hr = rep_max_hr if (rep_max_hr and rep_max_hr > 150) else 192
-        avg_hr = sum(hr_vals) / len(hr_vals)
-        
-        is_male = (sex == 'M')
-        trimp_b = 0
-        prev_t = times[0]
-        for idx in range(1, len(hr_vals)):
-            dt = (times[idx] - prev_t) / 60.0
-            if dt > 5: dt = 0
-            trimp_b += calculate_trimp_banister(dt * 60, hr_vals[idx], user_max_hr, 60, is_male)
-            prev_t = times[idx]
-            
-        trimp_e = calculate_trimp_edwards(hr_vals, user_max_hr)
-        zones = calculate_time_in_zones(hr_vals, user_max_hr)
-        ef = ((avg_speed or 0) * 60) / avg_hr if avg_hr > 0 else 0
-        intensity = avg_hr / user_max_hr
-        
-        vel_data = con.execute(f"SELECT value, time_offset FROM stream_velocity WHERE activity_id = {act_id} ORDER BY time_offset").fetchall()
-        decoupling = calculate_aerobic_decoupling(times, hr_vals, [v[1] for v in vel_data], [v[0] for v in vel_data]) if vel_data else None
-        
-        con.execute("INSERT INTO activity_effectiveness (activity_id, trimp_banister, trimp_edwards, efficiency_factor, intensity_factor, aerobic_decoupling, zone_1_sec, zone_2_sec, zone_3_sec, zone_4_sec, zone_5_sec, effectiveness_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [act_id, trimp_b, trimp_e, ef, intensity, decoupling, zones[0], zones[1], zones[2], zones[3], zones[4], trimp_b])
-        processed += 1
+
+        try:
+            hr_data = con.execute(
+                "SELECT value, time_offset FROM stream_heartrate WHERE activity_id = ? ORDER BY time_offset",
+                [act_id]
+            ).fetchall()
+            # Filter out NULL samples (a sensor dropout mid-activity) before
+            # aggregating — an unfiltered sum() over a NULL raises TypeError
+            # and used to abort this entire function partway through.
+            hr_data = [(v, t) for (v, t) in hr_data if v is not None]
+
+            user_max_hr = rep_max_hr if (rep_max_hr and rep_max_hr > 150) else DEFAULT_MAX_HR
+            # Sex-coefficient default: unknown/missing sex assumes male
+            # (1.92). This used to default to female (1.67) here but male
+            # elsewhere in the codebase for the same missing-data case —
+            # picking one convention and applying it everywhere it's needed
+            # now that this is the only place TRIMP is computed.
+            is_male = (sex != 'F')
+
+            if hr_data:
+                hr_vals, times = [h[0] for h in hr_data], [h[1] for h in hr_data]
+                avg_hr = sum(hr_vals) / len(hr_vals)
+                trimp_b = 0
+                prev_t = times[0]
+                for idx in range(1, len(hr_vals)):
+                    dt = (times[idx] - prev_t) / 60.0
+                    if dt > 5: dt = 0
+                    trimp_b += calculate_trimp_banister(dt * 60, hr_vals[idx], user_max_hr, DEFAULT_REST_HR, is_male)
+                    prev_t = times[idx]
+
+                trimp_e = calculate_trimp_edwards(hr_vals, user_max_hr)
+                zones = calculate_time_in_zones(hr_vals, user_max_hr)
+                ef = ((avg_speed or 0) * 60) / avg_hr if avg_hr > 0 else 0
+                intensity = avg_hr / user_max_hr if user_max_hr else 0
+
+                vel_data = con.execute(
+                    "SELECT value, time_offset FROM stream_velocity WHERE activity_id = ? ORDER BY time_offset",
+                    [act_id]
+                ).fetchall()
+                decoupling = calculate_aerobic_decoupling(times, hr_vals, [v[1] for v in vel_data], [v[0] for v in vel_data]) if vel_data else None
+            elif avg_hr_summary and moving_time:
+                # No stream — single-point TRIMP from the Strava summary.
+                avg_hr = avg_hr_summary
+                trimp_b = calculate_trimp_banister(moving_time, avg_hr, user_max_hr, DEFAULT_REST_HR, is_male)
+                trimp_e = 0
+                zones = [0, 0, 0, 0, 0]
+                ef = ((avg_speed or 0) * 60) / avg_hr if avg_hr > 0 else 0
+                intensity = avg_hr / user_max_hr if user_max_hr else 0
+                decoupling = None
+            else:
+                continue
+
+            con.execute("""
+                INSERT INTO activity_effectiveness (activity_id, trimp_banister, trimp_edwards, efficiency_factor, intensity_factor, aerobic_decoupling, zone_1_sec, zone_2_sec, zone_3_sec, zone_4_sec, zone_5_sec, effectiveness_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (activity_id) DO UPDATE SET
+                    trimp_banister = EXCLUDED.trimp_banister, trimp_edwards = EXCLUDED.trimp_edwards,
+                    efficiency_factor = EXCLUDED.efficiency_factor, intensity_factor = EXCLUDED.intensity_factor,
+                    aerobic_decoupling = EXCLUDED.aerobic_decoupling, zone_1_sec = EXCLUDED.zone_1_sec,
+                    zone_2_sec = EXCLUDED.zone_2_sec, zone_3_sec = EXCLUDED.zone_3_sec, zone_4_sec = EXCLUDED.zone_4_sec,
+                    zone_5_sec = EXCLUDED.zone_5_sec, effectiveness_score = EXCLUDED.effectiveness_score, updated_at = now()
+            """, [act_id, trimp_b, trimp_e, ef, intensity, decoupling, zones[0], zones[1], zones[2], zones[3], zones[4], trimp_b])
+            processed += 1
+        except Exception as e:
+            # One bad activity no longer aborts the whole batch — and
+            # because the table is upserted rather than dropped-and-rebuilt,
+            # every other activity's previously-computed row survives even
+            # if this one keeps failing.
+            print(f"  WARNING: failed to compute effectiveness for activity {act_id} ({name}): {e}")
+            continue
     return processed
 
 def run_analyze_training_load(db):
@@ -358,8 +537,15 @@ def main():
         return
         
     db = StravaDB()
-    print("Ingesting Strava data (past 42 days)...")
-    count = ingest_data(manager, db, access_token, lookback_days=42)
+    # 180 days, not 42: CTL uses a 42-day EWMA time constant, and a
+    # zero-seeded EWMA only reaches ~63% of steady state after exactly one
+    # time constant's worth of days — a 42-day ingestion window meant CTL
+    # was systematically understated for every user, worst right after a
+    # fresh backfill. 180 days (~4x the constant) gives it room to converge
+    # before "today" (see agent_prompting/improvement_plan.md Section 2).
+    lookback_days = 180
+    print(f"Ingesting Strava data (past {lookback_days} days)...")
+    count = ingest_data(manager, db, access_token, lookback_days=lookback_days)
     print(f"Ingestion complete ({count} new activities).")
     
     print("Analyzing effectiveness...", end='', flush=True)
@@ -370,8 +556,9 @@ def main():
     stats = run_analyze_training_load(db)
     if stats:
         print(f" Done.\n-> Status: CTL: {stats['CTL']:.1f}, ATL: {stats['ATL']:.1f}, TSB: {stats['TSB']:.1f} ({get_target_category(stats['TSB'])})")
+    else:
         print(" Failed (no data).")
-        
+
     db.con.close()
 
 if __name__ == "__main__":

@@ -31,6 +31,17 @@ def test_calculate_acwr():
     acwr = calculate_acwr([50.0, 0.0], [70.0, 50.0])
     assert acwr == [1.4, 0.0]
 
+def test_calculate_acwr_series():
+    # pd.Series is the only branch production code actually calls
+    # (calculate_training_status_logic in src/api/main.py passes
+    # merged['CTL']/merged['ATL'], which are Series) — it previously had no
+    # test coverage at all despite being the live code path.
+    ctl = pd.Series([50.0, 0.0, 25.0])
+    atl = pd.Series([70.0, 50.0, 0.0])
+    result = calculate_acwr(ctl, atl)
+    assert isinstance(result, np.ndarray)
+    np.testing.assert_allclose(result, [1.4, 0.0, 0.0])
+
 def test_get_target_category():
     assert get_target_category(10) == "Anaerobic"
     assert get_target_category(0) == "VO2Max"
