@@ -2,32 +2,10 @@
 
 {% block split_styles %}
 <style>
-/* Theme Variables */
-:root {
-    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.4);
-    --panel-bg: rgba(15, 23, 42, 0.6);
-    --panel-border: rgba(255, 255, 255, 0.08);
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --input-bg: rgba(0,0,0,0.3);
-    --body-bg: #0f172a;
-}
-
-[data-theme="light"] {
-    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.2);
-    --panel-bg: rgba(255, 255, 255, 0.9);
-    --panel-border: rgba(0, 0, 0, 0.1);
-    --text-primary: #0f172a;
-    --text-secondary: #64748b;
-    --input-bg: rgba(255,255,255,0.8);
-    --body-bg: #f8fafc;
-}
-
-body {
-    background-color: var(--body-bg);
-    color: var(--text-primary);
-    transition: background-color 0.3s, color 0.3s;
-}
+/* Design tokens (--panel-bg, --text-primary/secondary, --input-bg,
+   --accent-glow, etc.) and the theme-aware body background now live once in
+   style.css/base.html instead of being redeclared per-page — see
+   agent_prompting/improvement_plan.md Section 4. */
 
 .dashboard-container {
     display: grid;
@@ -187,11 +165,9 @@ body {
     border-left: 4px solid #3b82f6;
     border-radius: 8px;
     padding: 1rem;
-    cursor: grab;
     transition: all 0.2s;
     color: var(--text-primary);
 }
-.workout-card.drag-over { border: 2px dashed #10b981; }
 
 .workout-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
 .workout-date { font-weight: bold; color: #60a5fa; }
@@ -218,14 +194,7 @@ body {
 .empty-state button { margin-top: 1rem; padding: 0.5rem 1rem; border-radius: 6px; border: none; background: #3b82f6; color: white; cursor: pointer; }
 
 </style>
-<script>
-    // Initialize theme immediately to prevent flashing
-    const savedThemeInit = localStorage.getItem('theme');
-    if (savedThemeInit === 'light') {
-        document.documentElement.setAttribute('data-theme', 'light');
-    }
-</script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -248,7 +217,9 @@ body {
     <!-- Sidebar -->
     <aside class="modern-sidebar">
         <div class="settings-card">
-            <h3 style="margin-bottom: 1rem;">Target Race Goal <i class="fas fa-flag-checkered" style="color:var(--text-secondary); font-size: 0.9rem; opacity: 0.7;"></i></h3>
+            <h3 style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.4rem;">Target Race Goal
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.7;" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V15"/></svg>
+            </h3>
             <div class="form-group" style="margin-bottom: 0;">
                 <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.4;">Select a race from your calendar for the AI to build a customized training schedule.</p>
                 <div class="custom-select-wrapper">
@@ -412,13 +383,7 @@ Chart.defaults.color = '#c9d1d9';
 Chart.defaults.font.family = 'Inter, sans-serif';
 Chart.defaults.font.size = 12;
 
-// Escape untrusted text before it's ever interpolated into an HTML string.
-// AI-generated and Strava-sourced text are both untrusted input here.
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// escapeHtml() and showToast() are defined once, shared, in app.js.
 
 // Lightweight markdown → HTML converter for AI insight output.
 // The LLM's output is untrusted text (it can be influenced by user-controlled
@@ -485,30 +450,40 @@ function setPmcWindow(days) {
     if (allHistory.length > 0) renderPmcChart();
 }
 
+function showPaceZonesMessage(message) {
+    document.getElementById('pace-zones-body').innerHTML =
+        `<tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 2rem;">${message}</td></tr>`;
+}
+
 async function fetchPaceZones() {
     document.getElementById('pace-zones-unit').textContent = isMetric ? 'Min/KM' : 'Min/Mile';
     try {
         const res = await fetch(`/pace_zones/${athleteId}`);
-        if(res.ok) {
-            const data = await res.json();
-            const zones = data.pace_zones_min_per_mile;
-            const body = document.getElementById('pace-zones-body');
-            body.innerHTML = '';
-            
-            const zoneOrder = ["Recovery", "Aerobic Endurance", "Aerobic Power", "Threshold", "Anaerobic Endurance", "Anaerobic Power"];
-            const colors = ["#94a3b8", "#10b981", "#3b82f6", "#f59e0b", "#f43f5e", "#a855f7"];
-
-            zoneOrder.forEach((z, i) => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td style="width: 10px; padding: 0;"><div style="width: 4px; height: 30px; background: ${colors[i]}; border-radius: 2px;"></div></td>
-                    <td style="font-weight: 600; color: var(--text-main);">${z}</td>
-                    <td style="text-align: right; font-family: 'Monaco', monospace; color: var(--text-secondary);">${zones[z]}</td>
-                `;
-                body.appendChild(row);
-            });
+        if(!res.ok) {
+            showPaceZonesMessage('Not enough activity history yet to calculate pace zones.');
+            return;
         }
-    } catch(err) { console.error(err); }
+        const data = await res.json();
+        const zones = data.pace_zones_min_per_mile;
+        const body = document.getElementById('pace-zones-body');
+        body.innerHTML = '';
+
+        const zoneOrder = ["Recovery", "Aerobic Endurance", "Aerobic Power", "Threshold", "Anaerobic Endurance", "Anaerobic Power"];
+        const colors = ["#94a3b8", "#10b981", "#3b82f6", "#f59e0b", "#f43f5e", "#a855f7"];
+
+        zoneOrder.forEach((z, i) => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td style="width: 10px; padding: 0;"><div style="width: 4px; height: 30px; background: ${colors[i]}; border-radius: 2px;"></div></td>
+                <td style="font-weight: 600; color: var(--text-main);">${z}</td>
+                <td style="text-align: right; font-family: 'Monaco', monospace; color: var(--text-secondary);">${zones[z]}</td>
+            `;
+            body.appendChild(row);
+        });
+    } catch(err) {
+        console.error(err);
+        showPaceZonesMessage('Could not load pace zones. Try refreshing the page.');
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -535,22 +510,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-function showEmptyState(containerId, title, message) {
-    const container = document.getElementById(containerId);
-    container.innerHTML = `
-        <div class="empty-state">
-            <div class="empty-illustration">
-                <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M50 20C40 20 30 30 30 45C30 65 50 80 50 80C50 80 70 65 70 45C70 30 60 20 50 20Z" stroke="#3b82f6" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
-                    <path d="M45 40L55 50M55 40L45 50" stroke="#f43f5e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </div>
-            <h4>${title}</h4>
-            <p>${message}</p>
-            <button onclick="window.location.href='/strava-auth'">Sync Strava Now</button>
-        </div>
-    `;
-}
+// showEmptyState() is defined once, shared, in app.js.
 
 async function fetchDashboardRaces() {
     try {
@@ -604,7 +564,7 @@ async function fetchAnalytics() {
             if(data.hr_zones && data.hr_zones.length > 0) {
                 const totalSecs = data.hr_zones.reduce((acc, z) => acc + z.time_seconds, 0);
                 if (totalSecs === 0) {
-                    showEmptyState('hr-container', 'No Heart Rate Data', 'Wear a heart rate monitor on your next activity.');
+                    showEmptyState('hr-container', { title: 'No Heart Rate Data', message: 'Wear a heart rate monitor on your next activity.' });
                 } else {
                     const ctxHr = document.getElementById('hrChart').getContext('2d');
                     if(hrChartInst) hrChartInst.destroy();
@@ -630,7 +590,7 @@ async function fetchAnalytics() {
                     });
                 }
             } else {
-                showEmptyState('hr-container', 'No Heart Rate Data', 'Wear a heart rate monitor on your next activity.');
+                showEmptyState('hr-container', { title: 'No Heart Rate Data', message: 'Wear a heart rate monitor on your next activity.' });
             }
 
             if(data.load_dist && data.load_dist.length > 0) {
@@ -648,7 +608,7 @@ async function fetchAnalytics() {
                     options: { responsive: true, maintainAspectRatio: false, cutout: '70%' }
                 });
             } else {
-                showEmptyState('load-container', 'No Training Load', 'Log some activities to see your load distribution.');
+                showEmptyState('load-container', { title: 'No Training Load', message: 'Log some activities to see your load distribution.' });
             }
         }
     } catch(e) { console.error(e); }
@@ -759,7 +719,7 @@ async function fetchStats() {
             if(data.history.length > 0) {
                 renderPmcChart();
             } else {
-                showEmptyState('pmc-container', 'No Activity History', 'Hit the road and upload some runs!');
+                showEmptyState('pmc-container', { title: 'No Activity History', message: 'Hit the road and upload some runs!' });
             }
 
             updateMetricStandings(data);
@@ -856,19 +816,21 @@ async function fetchSchedule() {
                     if(!isNaN(miles)) dist = (miles * 1.60934).toFixed(1) + ' km';
                 }
 
+                // NOTE: this card used to be draggable, but dragstart/drop
+                // never actually reordered or persisted anything (drop never
+                // read the data dragstart set) — a border-color flash was
+                // the only visible effect. Each card is keyed to a specific
+                // calendar date from the AI-generated schedule, which also
+                // isn't persisted anywhere reordering could write to, so
+                // removed rather than inventing new semantics for a preview
+                // that doesn't have a save step. See
+                // agent_prompting/improvement_plan.md Section 4.
                 const card = document.createElement('div');
                 card.className = 'workout-card';
-                card.draggable = true;
-                
-                card.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', i); card.style.opacity = '0.5'; });
-                card.addEventListener('dragend', () => card.style.opacity = '1');
-                card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drag-over'); });
-                card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
-                card.addEventListener('drop', (e) => { e.preventDefault(); card.classList.remove('drag-over'); card.style.borderColor = '#10b981'; });
 
                 card.innerHTML = `
                     <div class="workout-header">
-                        <span class="workout-date"><i class="fas fa-calendar-alt"></i> ${dayStr}</span>
+                        <span class="workout-date"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:2px;" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ${dayStr}</span>
                         <span class="workout-type">${p.type_of_workout}</span>
                     </div>
                     <div class="workout-desc">

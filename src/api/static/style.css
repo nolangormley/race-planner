@@ -1,7 +1,17 @@
+/* Design tokens. Previously only a subset lived here — dashboard.html,
+   profile.html, and training_calendar.html each independently redeclared
+   (and slightly disagreed on) --panel-bg/--panel-border plus a further set
+   of tokens (--accent-glow, --text-primary, --text-secondary, --input-bg,
+   --body-bg, and training_calendar's own --danger/--warning/--success)
+   entirely missing from here. Pages with no such <style> block of their own
+   (streams.html, index.html, all 4 auth pages) used --text-secondary/
+   --text-primary/--danger anyway, silently resolving to nothing and falling
+   back to the inherited body color. Consolidated here once — see
+   agent_prompting/improvement_plan.md Section 4. */
 :root {
   --bg-color: #0b0f19;
   --bg-gradient: linear-gradient(135deg, #0b0f19 0%, #1a1b26 100%);
-  --panel-bg: rgba(255, 255, 255, 0.03);
+  --panel-bg: rgba(15, 23, 42, 0.6);
   --panel-border: rgba(255, 255, 255, 0.08);
   --primary: #f43f5e;
   --primary-hover: #e11d48;
@@ -10,6 +20,25 @@
   --text-muted: #94a3b8;
   --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
   --success: #10b981;
+  --danger: #f43f5e;
+  --warning: #f59e0b;
+  --accent-glow: 0 0 20px rgba(59, 130, 246, 0.4);
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --input-bg: rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme="light"] {
+  --bg-color: #f8fafc;
+  --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #eef2f7 100%);
+  --panel-bg: rgba(255, 255, 255, 0.9);
+  --panel-border: rgba(0, 0, 0, 0.1);
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --accent-glow: 0 0 20px rgba(59, 130, 246, 0.2);
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --input-bg: rgba(255, 255, 255, 0.8);
 }
 
 * {
@@ -20,11 +49,15 @@
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Shorthand only — a page-specific override that only set
+     background-color (as dashboard.html/profile.html/training_calendar.html
+     each used to) could never clear this background-image, so the light
+     theme's body background never actually appeared underneath it. */
   background: var(--bg-gradient);
-  background-color: var(--bg-color);
   color: var(--text-main);
   min-height: 100vh;
   line-height: 1.6;
+  transition: background-color 0.3s, color 0.3s;
 }
 
 /* Glassmorphism Classes */
@@ -175,6 +208,17 @@ header {
   z-index: 10;
 }
 
+.nav-link {
+  color: var(--text-secondary);
+}
+.nav-link:hover {
+  color: #60a5fa;
+}
+.nav-link.active {
+  color: #60a5fa;
+  font-weight: 700;
+}
+
 .logo-container {
   display: flex;
   align-items: center;
@@ -236,7 +280,7 @@ tr:hover { background: rgba(255, 255, 255, 0.02); }
 /* Modals */
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; pointer-events: none; transition: all 0.3s; }
 .modal-overlay.active { opacity: 1; pointer-events: all; backdrop-filter: blur(4px); }
-.modal-content { background: var(--bg-color); width: 90%; max-width: 500px; border-radius: 12px; border: 1px solid var(--panel-border); padding: 2rem; box-shadow: var(--glass-shadow); transform: translateY(-20px); transition: all 0.3s; }
+.modal-content { background: var(--bg-color); width: 90%; max-width: 500px; border-radius: 12px; border: 1px solid var(--panel-border); padding: 2rem; box-shadow: var(--glass-shadow); transform: translateY(-20px); transition: all 0.3s; outline: none; }
 .modal-overlay.active .modal-content { transform: translateY(0); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
 .close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; transition: color 0.2s; }
@@ -252,15 +296,19 @@ tr:hover { background: rgba(255, 255, 255, 0.02); }
 /* Tooltips */
 .stat-metric { position: relative; }
 .info-icon {
+    /* Resting state is --text-muted at full opacity (~7.5:1 against the dark
+       background — meets WCAG AA for normal text). The opacity-dimming this
+       used to have at rest dropped that to ~3.3:1, below the 4.5:1 minimum,
+       for what is an interactive (hover-triggers-a-tooltip) glyph, not
+       decorative. Reserve the visual change for :hover instead. */
     font-size: 0.75rem;
     color: var(--text-muted);
     cursor: help;
     margin-left: 4px;
-    opacity: 0.6;
-    transition: opacity 0.2s;
+    transition: color 0.2s;
     vertical-align: middle;
 }
-.info-icon:hover { opacity: 1; color: var(--secondary); }
+.info-icon:hover { color: var(--secondary); }
 
 .metric-tooltip {
     position: absolute;
@@ -288,4 +336,40 @@ tr:hover { background: rgba(255, 255, 255, 0.02); }
 .tooltip-title { font-weight: 700; color: white; margin-bottom: 0.5rem; display: block; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.25rem; }
 .tooltip-standing { display: block; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(255,255,255,0.1); font-weight: 600; }
 .standing-label { color: var(--secondary); }
+
+/* Loading spinner. Previously named .loader-spinner and defined only inside
+   training_calendar.html's own <style> block; index.html references a
+   .loader div (used in 3 places) that had no matching CSS anywhere, so it
+   rendered as an invisible blank instead of a spinner. Shared here as
+   .loader — see agent_prompting/improvement_plan.md Section 4. */
+.loader {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Entrance animation for the auth pages' centered card. Previously
+   redeclared identically in login.html/register.html/setup.html/
+   strava_auth.html. */
+@keyframes fade-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Date input's calendar-picker icon is black by default, invisible against
+   this app's dark inputs. Previously redeclared identically in the same 4
+   auth templates (only register.html/setup.html actually have a date
+   input, but consolidating here regardless since a future page hitting
+   this same problem shouldn't have to add a 5th copy). */
+input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
+}
 

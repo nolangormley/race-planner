@@ -2,25 +2,9 @@
 
 {% block split_styles %}
 <style>
-:root {
-    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.4);
-    --panel-bg: rgba(15, 23, 42, 0.6);
-    --panel-border: rgba(255, 255, 255, 0.08);
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --input-bg: rgba(0,0,0,0.3);
-    --body-bg: #0f172a;
-}
-[data-theme="light"] {
-    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.2);
-    --panel-bg: rgba(255, 255, 255, 0.9);
-    --panel-border: rgba(0, 0, 0, 0.1);
-    --text-primary: #0f172a;
-    --text-secondary: #64748b;
-    --input-bg: rgba(255,255,255,0.8);
-    --body-bg: #f8fafc;
-}
-body { background-color: var(--body-bg); color: var(--text-primary); }
+/* Design tokens and the theme-aware body background now live once in
+   style.css/base.html instead of being redeclared per-page — see
+   agent_prompting/improvement_plan.md Section 4. */
 
 .profile-grid {
     display: grid;
@@ -181,10 +165,6 @@ body { background-color: var(--body-bg); color: var(--text-primary); }
     opacity: 0.5;
 }
 </style>
-<script>
-    const savedThemeInit = localStorage.getItem('theme');
-    if (savedThemeInit === 'light') document.documentElement.setAttribute('data-theme', 'light');
-</script>
 {% endblock %}
 
 {% block content %}
@@ -490,13 +470,7 @@ async function saveIdentity() {
     }
 }
 
-// Escape untrusted text (race names, etc. are free-text user input) before
-// it's interpolated into an HTML string.
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// escapeHtml() is defined once, shared, in app.js.
 
 // ---- Race Calendar ----
 async function fetchRaces() {
@@ -537,7 +511,7 @@ async function fetchRaces() {
                     </div>
                     <div style="display: flex; gap: 0.5rem; align-items: center;">
                         ${countdown}
-                        <button class="btn-edit" style="color: #f43f5e; border-color: rgba(244,63,94,0.3); padding: 0.3rem 0.6rem;" onclick="deleteRace(${r.id})" title="Delete Race">✕</button>
+                        <button class="btn-edit" style="color: #f43f5e; border-color: rgba(244,63,94,0.3); padding: 0.3rem 0.6rem;" onclick="deleteRace(${r.id})" title="Delete Race" aria-label="Delete race">✕</button>
                     </div>
                 </div>
             `;
@@ -618,8 +592,10 @@ function renderViewStats() {
 async function loadAccountStats() {
     try {
         const res = await fetch('/api/activities');
-        if (!res.ok) return;
+        if (!res.ok) throw new Error(`activities fetch failed: ${res.status}`);
         const acts = await res.json();
+        // No activities yet is a normal, expected state (not an error) - leave
+        // the "—" placeholders from the template in place.
         if (!Array.isArray(acts) || acts.length === 0) return;
 
         const totalRuns = acts.filter(a => a.type === 'Run').length;
@@ -632,7 +608,11 @@ async function loadAccountStats() {
         document.getElementById('stat-total-runs').textContent = totalRuns;
         document.getElementById('stat-total-dist').textContent = totalMiles;
         document.getElementById('stat-earliest').textContent = earliest;
-    } catch (e) { /* silent */ }
+    } catch (e) {
+        // Leave the "—" placeholders in place, but surface the failure for
+        // debugging instead of swallowing it silently.
+        console.error('Failed to load account stats:', e);
+    }
 }
 
 // ---- Strava Sync ----

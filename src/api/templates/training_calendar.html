@@ -2,34 +2,9 @@
 
 {% block split_styles %}
 <style>
-:root {
-    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.4);
-    --panel-bg: rgba(15, 23, 42, 0.6);
-    --panel-border: rgba(255, 255, 255, 0.08);
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --input-bg: rgba(0,0,0,0.3);
-    --body-bg: #0f172a;
-    --danger: #f43f5e;
-    --success: #10b981;
-    --warning: #f59e0b;
-}
-
-[data-theme="light"] {
-    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.2);
-    --panel-bg: rgba(255, 255, 255, 0.9);
-    --panel-border: rgba(0, 0, 0, 0.1);
-    --text-primary: #0f172a;
-    --text-secondary: #64748b;
-    --input-bg: rgba(255,255,255,0.8);
-    --body-bg: #f8fafc;
-}
-
-body {
-    background-color: var(--body-bg);
-    color: var(--text-primary);
-    transition: background-color 0.3s, color 0.3s;
-}
+/* Design tokens and the theme-aware body background now live once in
+   style.css/base.html instead of being redeclared per-page — see
+   agent_prompting/improvement_plan.md Section 4. */
 
 /* Layout */
 .page-header {
@@ -391,9 +366,14 @@ body {
     min-height: 100px;
 }
 
-.day-cell:hover {
+.day-cell:hover, .day-cell:focus-visible {
     border-color: rgba(59, 130, 246, 0.5);
     background: rgba(59, 130, 246, 0.05);
+}
+
+.day-cell:focus-visible, .workout-item:focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 2px;
 }
 
 .day-cell.other-month {
@@ -505,6 +485,10 @@ body {
     box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     transform: translateY(20px);
     transition: transform 0.3s;
+    /* Focused programmatically on open purely so screen readers announce
+       the dialog and Tab starts inside it - not a control the user clicks,
+       so it doesn't need its own visible focus ring. */
+    outline: none;
 }
 
 .modal-overlay.active .modal-content {
@@ -607,19 +591,7 @@ body {
     background: rgba(244, 63, 94, 0.2);
 }
 
-.loader-spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid rgba(255,255,255,0.3);
-    border-top-color: white;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    display: inline-block;
-}
-
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
+/* .loader (spinner) now lives once in style.css. */
 
 /* Scrollbar styling for chat and calendar */
 ::-webkit-scrollbar {
@@ -800,7 +772,7 @@ body {
     font-size: 0.85rem;
 }
 
-.ai-summary-loading .loader-spinner {
+.ai-summary-loading .loader {
     width: 16px;
     height: 16px;
 }
@@ -867,7 +839,7 @@ body {
                 </svg>
                 <h3>AI Coach</h3>
             </div>
-            <button onclick="clearChat()" title="Clear Chat History" style="background: transparent; border: none; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; padding: 4px; border-radius: 4px; transition: background 0.2s, color 0.2s;">
+            <button onclick="clearChat()" title="Clear Chat History" aria-label="Clear chat history" style="background: transparent; border: none; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; padding: 4px; border-radius: 4px; transition: background 0.2s, color 0.2s;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 6h18"></path>
                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -882,7 +854,7 @@ body {
         </div>
         <form class="chat-input-container" id="chat-form">
             <input type="text" class="chat-input" id="chat-input" placeholder="Message AI Coach..." autocomplete="off">
-            <button type="submit" class="chat-send-btn" id="chat-submit-btn">
+            <button type="submit" class="chat-send-btn" id="chat-submit-btn" aria-label="Send message">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <line x1="22" y1="2" x2="11" y2="13"></line>
                     <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
@@ -900,13 +872,13 @@ body {
             </div>
             
             <div class="month-nav">
-                <button class="nav-btn" onclick="prevMonth()">
+                <button class="nav-btn" onclick="prevMonth()" aria-label="Previous month">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="15 18 9 12 15 6"></polyline>
                     </svg>
                 </button>
                 <div class="month-title" id="month-display">Month Year</div>
-                <button class="nav-btn" onclick="nextMonth()">
+                <button class="nav-btn" onclick="nextMonth()" aria-label="Next month">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="9 18 15 12 9 6"></polyline>
                     </svg>
@@ -937,11 +909,11 @@ body {
             <div class="day-sidebar-header">
                 <div class="sidebar-metric">
                     <div class="sidebar-metric-value planned" id="sidebar-planned">--</div>
-                    <div class="sidebar-metric-label">Planned mi</div>
+                    <div class="sidebar-metric-label">Planned <span id="sidebar-planned-unit">mi</span></div>
                 </div>
                 <div class="sidebar-metric">
                     <div class="sidebar-metric-value actual" id="sidebar-actual">--</div>
-                    <div class="sidebar-metric-label">Actual mi</div>
+                    <div class="sidebar-metric-label">Actual <span id="sidebar-actual-unit">mi</span></div>
                 </div>
                 <div class="sidebar-metric">
                     <div class="sidebar-metric-value ratio" id="sidebar-ratio">--</div>
@@ -957,10 +929,10 @@ body {
 
 <!-- Workout Modal -->
 <div class="modal-overlay" id="workout-modal">
-    <div class="modal-content" style="max-width: 550px;">
+    <div class="modal-content" style="max-width: 550px;" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
         <div class="modal-header">
             <h3 id="modal-title">Workout Details</h3>
-            <button class="close-btn" onclick="closeModal()">&times;</button>
+            <button class="close-btn" onclick="closeModal()" aria-label="Close">&times;</button>
         </div>
 
         <!-- Overview View (default) -->
@@ -1002,7 +974,7 @@ body {
                 </div>
                 <div id="ai-summary-content">
                     <div class="ai-summary-loading">
-                        <div class="loader-spinner"></div>
+                        <div class="loader"></div>
                         Analyzing workout...
                     </div>
                 </div>
@@ -1121,7 +1093,11 @@ body {
 <script>
 
     const userId = {{ user.id }};
-    
+    // Previously this page hardcoded miles everywhere and never read the
+    // Units preference set on the Profile page (dashboard.html/streams.html
+    // both already do) — see agent_prompting/improvement_plan.md Section 4.
+    const isMetric = localStorage.getItem('units') === 'metric';
+
     // State
     let currentDate = new Date();
     let currentMode = 'interactive';
@@ -1140,6 +1116,27 @@ body {
     const daysGridEl = document.getElementById('days-grid');
     const monthDisplayEl = document.getElementById('month-display');
     const modalEl = document.getElementById('workout-modal');
+
+    // Tracks whichever element had focus before the modal opened, so it can
+    // be restored on close (keyboard users would otherwise land back at the
+    // top of the page/body instead of where they were).
+    let modalTriggerEl = null;
+
+    function activateModal() {
+        modalTriggerEl = document.activeElement;
+        modalEl.classList.add('active');
+        // Move focus into the dialog itself so screen readers announce it
+        // and Tab starts cycling through its controls, not the page behind it.
+        modalEl.querySelector('.modal-content')?.focus();
+    }
+
+    // Escape closes the modal from anywhere inside it, matching the
+    // close/cancel buttons it already has.
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modalEl.classList.contains('active')) {
+            closeModal();
+        }
+    });
 
     // View switching
     function switchToView(viewName) {
@@ -1269,15 +1266,26 @@ body {
         const cell = document.createElement('div');
         cell.className = `day-cell ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}`;
         cell.dataset.date = dateStr;
-        
+        cell.tabIndex = 0;
+        cell.setAttribute('role', 'button');
+        cell.setAttribute('aria-label', `Add or view workout for ${dateStr}`);
+
         const num = document.createElement('div');
         num.className = 'day-number';
         num.textContent = dayNum;
         cell.appendChild(num);
-        
-        cell.addEventListener('click', (e) => {
+
+        const activateCell = (e) => {
             if (e.target.closest('.workout-item')) return; // handled by item click
             openModalForDate(dateStr);
+        };
+        cell.addEventListener('click', activateCell);
+        cell.addEventListener('keydown', (e) => {
+            if (e.target.closest('.workout-item')) return; // handled by item's own keydown
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                activateCell(e);
+            }
         });
 
         return cell;
@@ -1315,6 +1323,26 @@ body {
         }
     }
 
+    // Wires up a workout-item div (mouse-only by default, since it's a div
+    // not a button) so it's also focusable and operable from the keyboard.
+    // `handler` receives the triggering event, same as a plain click handler.
+    function makeWorkoutItemInteractive(item, ariaLabel, handler) {
+        item.tabIndex = 0;
+        item.setAttribute('role', 'button');
+        item.setAttribute('aria-label', ariaLabel);
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handler(e);
+        });
+        item.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                handler(e);
+            }
+        });
+    }
+
     function populateEntries() {
         // Clear old items
         document.querySelectorAll('.workout-item').forEach(el => el.remove());
@@ -1336,10 +1364,7 @@ body {
                     <div class="workout-type-tag">${badgeHtml} ${entry.workout_type || 'Workout'}</div>
                     <div class="workout-desc-snippet">${entry.approximate_distance || entry.training_focus || 'Details'}</div>
                 `;
-                item.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    openModalForEntry(entry);
-                });
+                makeWorkoutItemInteractive(item, `${entry.workout_type || 'Workout'} details for ${entry.date}`, () => openModalForEntry(entry));
                 cell.appendChild(item);
             }
         });
@@ -1364,10 +1389,7 @@ body {
                     <div class="workout-type-tag">${act.type || 'Activity'}</div>
                     <div class="workout-desc-snippet">${formatActivityDistance(act)}${attachHint}</div>
                 `;
-                item.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    openModalForActivity(act);
-                });
+                makeWorkoutItemInteractive(item, `${act.type || 'Activity'} details for ${dateStr}`, () => openModalForActivity(act));
                 cell.appendChild(item);
             }
         });
@@ -1375,6 +1397,10 @@ body {
 
     function formatActivityDistance(act) {
         if (act.distance) {
+            if (isMetric) {
+                const km = (act.distance / 1000).toFixed(2);
+                return `${km} km`;
+            }
             const miles = (act.distance * 0.000621371).toFixed(2);
             return `${miles} mi`;
         }
@@ -1402,7 +1428,7 @@ body {
         
         hideAiSummary();
         switchToView('add');
-        modalEl.classList.add('active');
+        activateModal();
     }
 
     // Open modal for existing training plan entry (defaults to overview)
@@ -1468,7 +1494,7 @@ body {
         
         hideAiSummary();
         switchToView('overview');
-        modalEl.classList.add('active');
+        activateModal();
     }
 
     // Open modal for viewing a completed activity
@@ -1518,7 +1544,7 @@ body {
         
         hideAiSummary();
         switchToView('overview');
-        modalEl.classList.add('active');
+        activateModal();
     }
 
     // Attach/detach activity to/from a training plan entry
@@ -1628,7 +1654,7 @@ body {
         // Show loading
         content.innerHTML = `
             <div class="ai-summary-loading">
-                <div class="loader-spinner"></div>
+                <div class="loader"></div>
                 Analyzing workout with your current fitness data...
             </div>
         `;
@@ -1638,7 +1664,7 @@ body {
             const data = await res.json();
             
             if (data.summary) {
-                content.innerHTML = `<div class="ai-summary-text">${escapeHtml(data.summary)}</div>`;
+                content.innerHTML = `<div class="ai-summary-text">${escapeHtml(data.summary, { preserveNewlines: true })}</div>`;
             } else {
                 content.innerHTML = '<div class="ai-summary-text" style="color: var(--text-secondary);">AI insight not available for this activity.</div>';
             }
@@ -1657,11 +1683,7 @@ body {
         btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><path d="M12 2a10 10 0 0 1 10 10 10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2z"/><path d="M12 8v4l3 3"/></svg> AI Overview`;
     }
 
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML.replace(/\n/g, '<br>');
-    }
+    // escapeHtml() is defined once, shared, in app.js.
 
     function closeModal() {
         modalEl.classList.remove('active');
@@ -1669,6 +1691,10 @@ body {
         currentActivityId = null;
         currentModalContext = null;
         aiOverviewVisible = false;
+        // Return focus to whatever day cell/workout item opened the modal,
+        // instead of dropping a keyboard user back at the top of the page.
+        modalTriggerEl?.focus();
+        modalTriggerEl = null;
     }
 
     async function saveEntry() {
@@ -1851,12 +1877,21 @@ body {
             const res = await fetch(`/api/mileage-summary/${userId}?start=${startOfMonth}&end=${endOfMonth}`);
             const data = await res.json();
             
-            const planned = data.planned_miles || 0;
-            const actual = data.actual_miles || 0;
-            const ratio = planned > 0 ? Math.min(100, Math.round((actual / planned) * 100)) : 0;
-            
+            const plannedMiles = data.planned_miles || 0;
+            const actualMiles = data.actual_miles || 0;
+            const ratio = plannedMiles > 0 ? Math.min(100, Math.round((actualMiles / plannedMiles) * 100)) : 0;
+
+            // The API always returns miles; convert for display when the
+            // user's saved unit preference is metric (previously this page
+            // never checked it at all).
+            const unitLabel = isMetric ? 'km' : 'mi';
+            const planned = isMetric ? plannedMiles * 1.60934 : plannedMiles;
+            const actual = isMetric ? actualMiles * 1.60934 : actualMiles;
+
             document.getElementById('sidebar-planned').textContent = planned.toFixed(1);
             document.getElementById('sidebar-actual').textContent = actual.toFixed(1);
+            document.getElementById('sidebar-planned-unit').textContent = unitLabel;
+            document.getElementById('sidebar-actual-unit').textContent = unitLabel;
             document.getElementById('sidebar-ratio').textContent = `${ratio}%`;
             
             // Build day-by-day list for this month
