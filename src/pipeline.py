@@ -466,10 +466,13 @@ def calculate_trimp_edwards(hr_series, max_hr):
     hr_array = np.array(hr_series)
     return ((np.sum((hr_array >= max_hr * 0.5) & (hr_array < max_hr * 0.6)) * 1) + (np.sum((hr_array >= max_hr * 0.6) & (hr_array < max_hr * 0.7)) * 2) + (np.sum((hr_array >= max_hr * 0.7) & (hr_array < max_hr * 0.8)) * 3) + (np.sum((hr_array >= max_hr * 0.8) & (hr_array < max_hr * 0.9)) * 4) + (np.sum(hr_array >= max_hr * 0.9) * 5)) / 60.0
 
-def calculate_time_in_zones(hr_series, max_hr):
-    if not hr_series: return [0,0,0,0,0]
-    hr_array = np.array(hr_series)
-    return [int(np.sum((hr_array >= max_hr * 0.5) & (hr_array < max_hr * 0.6))), int(np.sum((hr_array >= max_hr * 0.6) & (hr_array < max_hr * 0.7))), int(np.sum((hr_array >= max_hr * 0.7) & (hr_array < max_hr * 0.8))), int(np.sum((hr_array >= max_hr * 0.8) & (hr_array < max_hr * 0.9))), int(np.sum(hr_array >= max_hr * 0.9))]
+def calculate_time_in_zones(hr_series, max_hr, rest_hr=DEFAULT_REST_HR):
+    """Samples in five zones of heart rate reserve (Karvonen): below 60%,
+    60-70%, 70-80%, 80-90%, and 90% and up. Same reserve the TRIMP uses."""
+    if not hr_series: return [0, 0, 0, 0, 0]
+    reserve = (np.array(hr_series, dtype=float) - rest_hr) / max(1, max_hr - rest_hr)
+    counts = np.histogram(reserve, bins=[-np.inf, 0.6, 0.7, 0.8, 0.9, np.inf])[0]
+    return [int(count) for count in counts]
 
 def calculate_aerobic_decoupling(hr_times, hr_values, vel_times, vel_values):
     if not hr_values or not vel_values: return None
@@ -516,7 +519,7 @@ def run_analyze_effectiveness(db, progress=None):
     # excluded from training load entirely (previously indistinguishable
     # from a rest day).
     acts = con.execute("""
-        SELECT da.activity_id, da.name, da.start_date_local, da.max_heartrate, da.average_speed, ath.sex,
+        SELECT da.activity_id, da.name, da.start_date_local, da.athlete_id, da.average_speed, ath.sex,
                da.average_heartrate, da.moving_time
         FROM dim_activity da
         JOIN dim_athlete ath ON da.athlete_id = ath.athlete_id
@@ -524,9 +527,16 @@ def run_analyze_effectiveness(db, progress=None):
            OR (da.average_heartrate IS NOT NULL AND da.average_heartrate > 0)
     """).fetchall()
 
+    # Zones and intensity are relative to the athlete's max heart rate on
+    # record, the same figure the API uses. Each activity's own peak used to
+    # stand in for it, which made every easy run look like a threshold session.
+    athlete_max_hr = dict(con.execute(
+        "SELECT athlete_id, MAX(max_heartrate) FROM dim_activity WHERE max_heartrate > 100 GROUP BY athlete_id"
+    ).fetchall())
+
     processed = 0
     total = len(acts)
-    for i, (act_id, name, date, rep_max_hr, avg_speed, sex, avg_hr_summary, moving_time) in enumerate(acts):
+    for i, (act_id, name, date, athlete_id, avg_speed, sex, avg_hr_summary, moving_time) in enumerate(acts):
         progress('metrics', done=i, total=total)
         if i % 10 == 0:
             print(f"  Processing {i}/{total}: {name}...")
@@ -541,7 +551,7 @@ def run_analyze_effectiveness(db, progress=None):
             # and used to abort this entire function partway through.
             hr_data = [(v, t) for (v, t) in hr_data if v is not None]
 
-            user_max_hr = rep_max_hr if (rep_max_hr and rep_max_hr > 150) else DEFAULT_MAX_HR
+            user_max_hr = athlete_max_hr.get(athlete_id) or DEFAULT_MAX_HR
             # Sex-coefficient default: unknown/missing sex assumes male
             # (1.92). This used to default to female (1.67) here but male
             # elsewhere in the codebase for the same missing-data case —

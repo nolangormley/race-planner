@@ -203,3 +203,31 @@ def test_ingest_retries_the_activity_list_after_reauth(monkeypatch):
 
     assert strava.list_calls == 2
     assert count == 1
+
+
+# ---- heart rate zones: reserve-based, athlete-wide max ----
+
+def test_time_in_zones_uses_heart_rate_reserve():
+    from src.pipeline import calculate_time_in_zones
+    # Max 196, rest 60: reserve shares 0.44, 0.66, 0.81 and 0.96.
+    assert calculate_time_in_zones([120, 150, 170, 190], 196, 60) == [1, 1, 0, 1, 1]
+    assert calculate_time_in_zones([], 196, 60) == [0, 0, 0, 0, 0]
+
+
+def test_effectiveness_zones_use_the_athletes_max_not_the_activitys():
+    db = _make_db()
+    db.con.execute("UPDATE dim_activity SET max_heartrate = 173 WHERE activity_id = 100")
+    db.con.execute("""
+        INSERT INTO dim_activity (activity_id, athlete_id, type, start_date_local, moving_time, average_speed, max_heartrate)
+        VALUES (101, 1, 'Run', '2026-01-02 08:00:00', 600, 4.0, 196)
+    """)
+    db.insert_streams(100, {'time': {'data': list(range(10))}, 'heartrate': {'data': [150] * 10}})
+
+    run_analyze_effectiveness(db)
+
+    zones = db.con.execute(
+        "SELECT zone_1_sec, zone_2_sec, zone_3_sec, zone_4_sec, zone_5_sec FROM activity_effectiveness WHERE activity_id = 100"
+    ).fetchone()
+    # 150 bpm is 66% of reserve against the athlete's 196 max (zone 2); against
+    # the activity's own 173 peak it would have landed in zone 4.
+    assert zones == (0, 10, 0, 0, 0)

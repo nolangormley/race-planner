@@ -7,6 +7,7 @@ import { secondsTicks, fmtSecondsTick } from '../charts/core.js';
 
 const activityId = qs('#activity').dataset.activityId;
 const ZONE_NAMES = ['Recovery', 'Aerobic', 'Tempo', 'Threshold', 'Anaerobic'];
+// Shares of heart rate reserve (resting to max), the same model as the dashboard.
 const ZONE_RANGES = ['< 60%', '60–70%', '70–80%', '80–90%', '> 90%'];
 
 function setText(id, text) {

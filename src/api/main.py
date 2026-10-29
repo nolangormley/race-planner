@@ -46,7 +46,7 @@ from src.api.services.llm import (
     call_llm, get_llm_provider, LLMConfigError, cached_call,
     TRAINING_BENCHMARKS, NO_PSEUDOSCIENCE_CLAUSE, NEVER_CONTRADICT_STANDING_CLAUSE,
 )
-from src.api.deps import get_db_connection, DEFAULT_MAX_HR
+from src.api.deps import get_db_connection, DEFAULT_MAX_HR, DEFAULT_REST_HR
 from src.api.services.metrics import (
     get_performance_standing,
     calculate_training_status_logic,
@@ -815,13 +815,17 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
         # (or a future frontend change that forgets to renormalize) would
         # reproduce the same bug. See
         # agent_prompting/improvement_plan.md Section 3.
+        # Zones are shares of heart rate reserve (Karvonen), the same reserve
+        # the TRIMP in src/pipeline.py is built on.
+        reserve = hr_max - DEFAULT_REST_HR
+        zone_edges = [DEFAULT_REST_HR + share * reserve for share in (0.60, 0.70, 0.80, 0.90)]
         hr_query = """
         SELECT
             CASE
-                WHEN value < ? * 0.60 THEN 'Zone 1 (Recovery)'
-                WHEN value < ? * 0.70 THEN 'Zone 2 (Aerobic)'
-                WHEN value < ? * 0.80 THEN 'Zone 3 (Tempo)'
-                WHEN value < ? * 0.90 THEN 'Zone 4 (Threshold)'
+                WHEN value < ? THEN 'Zone 1 (Recovery)'
+                WHEN value < ? THEN 'Zone 2 (Aerobic)'
+                WHEN value < ? THEN 'Zone 3 (Tempo)'
+                WHEN value < ? THEN 'Zone 4 (Threshold)'
                 ELSE 'Zone 5 (Anaerobic)'
             END as zone,
             COUNT(*) as secs
@@ -830,7 +834,7 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
         WHERE a.athlete_id = ? AND a.start_date_local >= current_date - interval '30 days'
         GROUP BY 1 ORDER BY 1
         """
-        hr_data = con.execute(hr_query, [hr_max, hr_max, hr_max, hr_max, user_id]).fetchall()
+        hr_data = con.execute(hr_query, [*zone_edges, user_id]).fetchall()
         total_hr_secs = sum(row[1] for row in hr_data)
 
         load_query = """
@@ -879,6 +883,8 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
                 for row in load_data
             ],
             "weekly_volume": weekly_volume,
+            "hr_max": hr_max,
+            "hr_rest": DEFAULT_REST_HR,
         }
     except Exception as e:
         return {"error": str(e)}

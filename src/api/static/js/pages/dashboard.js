@@ -24,8 +24,9 @@ const charts = {};
 
 const RUN_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
 
+// Shares of heart rate reserve (resting to max), matching the TRIMP model.
 const ZONES = [
-  { label: 'Zone 1', sub: 'Recovery · under 60% max' },
+  { label: 'Zone 1', sub: 'Recovery · under 60%' },
   { label: 'Zone 2', sub: 'Aerobic · 60–70%' },
   { label: 'Zone 3', sub: 'Tempo · 70–80%' },
   { label: 'Zone 4', sub: 'Threshold · 80–90%' },
@@ -226,6 +227,9 @@ function renderHrZones() {
     return;
   }
   const byIndex = ZONES.map((zone, index) => zones.find((row) => row.zone.startsWith(`Zone ${index + 1}`)) || { time_seconds: 0, percentage: 0 });
+  if (state.analytics.hr_max) {
+    qs('#hr-sub').textContent = `Last 30 days, as a share of heart rate reserve (resting ${state.analytics.hr_rest}, max ${Math.round(state.analytics.hr_max)} bpm).`;
+  }
   charts.hr = barList(container, {
     ariaLabel: 'Share of time in each heart rate zone',
     labelWidth: 150,
