@@ -57,6 +57,13 @@ docker-compose up --build
 ```
 Access the dashboard at `http://localhost:8000`.
 
+> There are two Dockerfiles, and only one of them is what `docker-compose up`
+> actually uses. `src/api/Dockerfile` is what `docker-compose.yml` builds for
+> local dev (it runs `uvicorn --reload`). The root `Dockerfile` is a separate,
+> deploy-oriented image (used by Render — it reads the `$PORT` env var and
+> runs without `--reload`) and isn't referenced by docker-compose at all.
+> Edit whichever one matches what you're actually trying to change.
+
 ### Data Ingestion
 To sync your latest Strava activities and recalculate effectiveness metrics:
 ```bash

@@ -1,5 +1,5 @@
 import pytest
-from src.api.main import clean_json_response
+from src.api.services.llm import clean_json_response
 import json
 
 def test_clean_json_response_valid():
