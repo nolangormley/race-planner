@@ -1,0 +1,24 @@
+[Unit]
+Description=Race Planner web app
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=raceplanner
+WorkingDirectory=/opt/race-planner/app
+EnvironmentFile=/opt/race-planner/.env
+Environment=PYTHONPATH=/opt/race-planner/app PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/opt/race-planner/.venv/bin/alembic upgrade head
+ExecStart=/opt/race-planner/.venv/bin/uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/race-planner/app/data
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -2,25 +2,9 @@
 
 {% block split_styles %}
 <style>
-:root {
-    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.4);
-    --panel-bg: rgba(15, 23, 42, 0.6);
-    --panel-border: rgba(255, 255, 255, 0.08);
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --input-bg: rgba(0,0,0,0.3);
-    --body-bg: #0f172a;
-}
-[data-theme="light"] {
-    --accent-glow: 0 0 20px rgba(59, 130, 246, 0.2);
-    --panel-bg: rgba(255, 255, 255, 0.9);
-    --panel-border: rgba(0, 0, 0, 0.1);
-    --text-primary: #0f172a;
-    --text-secondary: #64748b;
-    --input-bg: rgba(255,255,255,0.8);
-    --body-bg: #f8fafc;
-}
-body { background-color: var(--body-bg); color: var(--text-primary); }
+/* Design tokens and the theme-aware body background now live once in
+   style.css/base.html instead of being redeclared per-page — see
+   agent_prompting/improvement_plan.md Section 4. */
 
 .profile-grid {
     display: grid;
@@ -181,10 +165,6 @@ body { background-color: var(--body-bg); color: var(--text-primary); }
     opacity: 0.5;
 }
 </style>
-<script>
-    const savedThemeInit = localStorage.getItem('theme');
-    if (savedThemeInit === 'light') document.documentElement.setAttribute('data-theme', 'light');
-</script>
 {% endblock %}
 
 {% block content %}
@@ -315,8 +295,10 @@ body { background-color: var(--body-bg); color: var(--text-primary); }
                 ✅ Connected
             </div>
             <div class="field-row"><span class="field-label">Athlete ID</span><span class="field-value">{{ user.strava_athlete_id }}</span></div>
-            <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
+            <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+                <button type="button" id="sync-strava-btn" onclick="syncStravaNow()" class="btn-save" style="cursor: pointer;">Sync Strava Now</button>
                 <a href="/strava-auth" class="btn-save" style="text-decoration: none; display: inline-block; text-align: center;">Re-authorize Strava</a>
+                <span id="sync-strava-msg" style="font-size: 0.85rem;"></span>
             </div>
         {% else %}
             <div class="strava-badge strava-disconnected" style="margin-bottom: 1.5rem;">
@@ -488,6 +470,8 @@ async function saveIdentity() {
     }
 }
 
+// escapeHtml() is defined once, shared, in app.js.
+
 // ---- Race Calendar ----
 async function fetchRaces() {
     const list = document.getElementById('race-calendar-list');
@@ -518,16 +502,16 @@ async function fetchRaces() {
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.85rem; background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: 8px;">
                     <div>
                         <div style="font-weight: 600; margin-bottom: 0.15rem;">
-                            ${r.name ? r.name + ' (' + r.race_length + ')' : r.race_length.toUpperCase()}
+                            ${r.name ? escapeHtml(r.name) + ' (' + escapeHtml(r.race_length) + ')' : escapeHtml(r.race_length.toUpperCase())}
                         </div>
                         <div style="font-size: 0.85rem; color: var(--text-secondary); display: flex; gap: 0.5rem; align-items: center;">
                             📅 ${dateStr}
-                            ${r.goal_time ? '• ⏱️ ' + r.goal_time : ''}
+                            ${r.goal_time ? '• ⏱️ ' + escapeHtml(r.goal_time) : ''}
                         </div>
                     </div>
                     <div style="display: flex; gap: 0.5rem; align-items: center;">
                         ${countdown}
-                        <button class="btn-edit" style="color: #f43f5e; border-color: rgba(244,63,94,0.3); padding: 0.3rem 0.6rem;" onclick="deleteRace(${r.id})" title="Delete Race">✕</button>
+                        <button class="btn-edit" style="color: #f43f5e; border-color: rgba(244,63,94,0.3); padding: 0.3rem 0.6rem;" onclick="deleteRace(${r.id})" title="Delete Race" aria-label="Delete race">✕</button>
                     </div>
                 </div>
             `;
@@ -608,8 +592,10 @@ function renderViewStats() {
 async function loadAccountStats() {
     try {
         const res = await fetch('/api/activities');
-        if (!res.ok) return;
+        if (!res.ok) throw new Error(`activities fetch failed: ${res.status}`);
         const acts = await res.json();
+        // No activities yet is a normal, expected state (not an error) - leave
+        // the "—" placeholders from the template in place.
         if (!Array.isArray(acts) || acts.length === 0) return;
 
         const totalRuns = acts.filter(a => a.type === 'Run').length;
@@ -622,7 +608,40 @@ async function loadAccountStats() {
         document.getElementById('stat-total-runs').textContent = totalRuns;
         document.getElementById('stat-total-dist').textContent = totalMiles;
         document.getElementById('stat-earliest').textContent = earliest;
-    } catch (e) { /* silent */ }
+    } catch (e) {
+        // Leave the "—" placeholders in place, but surface the failure for
+        // debugging instead of swallowing it silently.
+        console.error('Failed to load account stats:', e);
+    }
+}
+
+// ---- Strava Sync ----
+async function syncStravaNow() {
+    const btn = document.getElementById('sync-strava-btn');
+    const msg = document.getElementById('sync-strava-msg');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Syncing...';
+    msg.style.color = 'var(--text-secondary)';
+    msg.textContent = 'This can take a minute for a lot of new activity.';
+
+    try {
+        const res = await fetch(`/api/sync-strava/${userId}`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            msg.style.color = '#10b981';
+            msg.textContent = `✅ Synced — ${data.new_activities} new/updated ${data.new_activities === 1 ? 'activity' : 'activities'}.`;
+        } else {
+            msg.style.color = '#f43f5e';
+            msg.textContent = '❌ ' + (data.detail || 'Sync failed.');
+        }
+    } catch (e) {
+        msg.style.color = '#f43f5e';
+        msg.textContent = '❌ Connection error.';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
 }
 
 // ---- App Preferences Toggles ----

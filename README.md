@@ -9,7 +9,7 @@ A professional-grade training analytics platform and AI coaching engine built on
 *   **Deep Activity Analysis**:
     *   **Efficiency Factor (EF)**: Tracking aerobic efficiency over time.
     *   **Aerobic Decoupling (Pa:Hr)**: Measure how well your heart rate holds steady during endurance runs.
-    *   **Pace Zone Mapping**: Automatic calculation of physiological zones (Recovery to Anaerobic) based on your recent 6-week performance.
+    *   **Pace Zone Mapping**: Automatic calculation of physiological zones (Recovery to Anaerobic) based on your recent 90-day performance (see Methodology below for the exact algorithm).
 *   **Performance Metrics Warehouse**: All data is stored locally in a high-performance **DuckDB** warehouse for lightning-fast queries and long-term history tracking.
 *   **Modern Web UI**: A glass-morphic, responsive dashboard with interactive charts (Chart.js) and real-time AI executive summaries.
 
@@ -21,14 +21,21 @@ A professional-grade training analytics platform and AI coaching engine built on
     ```
 
 2.  **Configuration**:
-    Create a `.env` file in the root directory:
+    Create a `.env` file in the root directory (see `.env.example` for the full list of variables, including `SECRET_KEY`/`DATABASE_URL`):
     ```env
     STRAVA_CLIENT_ID=your_id
     STRAVA_CLIENT_SECRET=your_secret
     GROQ_API_KEY=your_key
     ```
 
-3.  **Authentication**:
+3.  **Database schema**:
+    The Postgres schema (users, races, training plans) is managed by Alembic, not created automatically at startup. Run:
+    ```bash
+    alembic upgrade head
+    ```
+    `docker-compose up`/the Dockerfiles run this automatically on container start; for local `uvicorn` development, run it once yourself first.
+
+4.  **Authentication**:
     Run the ingestion pipeline to authenticate with Strava and populate your warehouse:
     ```bash
     python src/pipeline.py
@@ -50,6 +57,13 @@ docker-compose up --build
 ```
 Access the dashboard at `http://localhost:8000`.
 
+> There are two Dockerfiles, and only one of them is what `docker-compose up`
+> actually uses. `src/api/Dockerfile` is what `docker-compose.yml` builds for
+> local dev (it runs `uvicorn --reload`). The root `Dockerfile` is a separate,
+> deploy-oriented image (used by Render — it reads the `$PORT` env var and
+> runs without `--reload`) and isn't referenced by docker-compose at all.
+> Edit whichever one matches what you're actually trying to change.
+
 ### Data Ingestion
 To sync your latest Strava activities and recalculate effectiveness metrics:
 ```bash
@@ -59,10 +73,10 @@ python src/pipeline.py
 ## 🏗 Project Structure
 
 *   **/src/api**: FastAPI backend and Jinja2 templates (Dashboard, Warehouse, Activity Analysis).
-*   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB.
+*   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB — including `run_analyze_effectiveness()`, which computes per-activity physiological metrics from activity streams.
+*   **/alembic**: Postgres schema migrations (`alembic upgrade head` to apply). The DuckDB warehouse's own schema is managed separately, inside `src/pipeline.py`'s `StravaDB.init_schema()`.
 *   **/data**: Contains the `strava_warehouse.duckdb` file.
-*   **analyze_effectiveness.py**: Core logic for calculating physiological metrics from activity streams.
 
 ## 📊 Methodology
 *   **Training Load**: Uses the Banister TRIMP model where `Fitness (CTL)` is a 42-day exponentially weighted moving average (EWMA) and `Fatigue (ATL)` is a 7-day EWMA.
-*   **Pace Zones**: Calculated using a proprietary algorithm that analyzes the 95th percentile of your speed over the last 6 weeks to estimate Threshold Pace.
+*   **Pace Zones**: Calculated (`calculate_pace_zones()` in `src/api/main.py`) from a 90-day rolling window: the threshold speed is the 80th percentile of speed samples in the 85–92% max-HR band (or, with fewer than 30 such samples, the 90th percentile of all speed samples as a fallback), then Coros-style zone bands are derived as percentages of that threshold pace.

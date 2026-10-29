@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Explicit, so `pytest` (not just `python -m pytest`) reliably finds `src`
+# on the path regardless of the working directory it's invoked from.
+pythonpath = ["."]

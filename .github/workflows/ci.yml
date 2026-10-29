@@ -1,0 +1,52 @@
+name: CI
+
+# Runs the test suite on every push/PR. Safe to run unattended: the tests
+# under tests/ (see pyproject.toml's testpaths) are pure/mocked and make no
+# network calls or billed API requests. The three scripts that DO call real
+# LLM APIs live under scripts/manual_check_*.py specifically so they're
+# never picked up by pytest collection — see
+# agent_prompting/improvement_plan.md Section 5.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest
+
+  # Server side of the deploy lives in deploy/ (see deploy/AGENTS.md).
+  deploy:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy to yasmodeus
+        run: git archive --format=tar.gz HEAD | ssh -o BatchMode=yes raceplanner@yasmodeus.andrew.cmu.edu

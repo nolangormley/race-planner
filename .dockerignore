@@ -1,0 +1,37 @@
+# Personal/production data — never bake this into an image
+data/
+*.duckdb
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# VCS
+.git/
+.gitignore
+
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Docs / logs not needed at runtime
+PROMPT_LOG.md
+REFLECTION.txt
+agent_prompting/

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
 
   api:
@@ -26,8 +24,15 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: raceplanner
-    ports:
-      - "5432:5432"
+    # No host port mapping: the api service reaches this over the internal
+    # compose network via the hostname `db` (see api's DATABASE_URL above),
+    # so publishing 5432 to the host was never actually needed — it just
+    # exposed Postgres externally with a default/guessable credential (see
+    # agent_prompting/improvement_plan.md Section 6) and collides with
+    # anything else on the host already using 5432. If you need to connect
+    # an external DB client, run `docker compose exec db psql -U user
+    # raceplanner` or temporarily add back a `ports:` mapping on a free
+    # host port (e.g. "5442:5432").
     volumes:
       - postgres_data:/var/lib/postgresql/data
 

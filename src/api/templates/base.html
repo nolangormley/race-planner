@@ -6,6 +6,19 @@
     <title>Race Planner</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <script>
+        // Applied in <head>, before <body> paints, to avoid a flash of the
+        // wrong theme. Previously duplicated in dashboard.html/profile.html
+        // only — every other page (training_calendar.html, streams.html,
+        // index.html, all 4 auth pages) never re-applied a saved theme at
+        // all, so it silently reverted on 6 of 9 pages. Living here once
+        // means every page that extends base.html gets it automatically.
+        (function () {
+            if (localStorage.getItem('theme') === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
     {% block split_styles %}{% endblock %}
 </head>
 <body>
@@ -20,9 +33,11 @@
         </a>
         <div>
             {% if user %}
-                <a href="/warehouse" style="margin-right: 15px; color: var(--text-secondary); text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: color 0.2s;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='var(--text-secondary)'">Activities</a>
-                <a href="/training-calendar" style="margin-right: 15px; color: var(--text-secondary); text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: color 0.2s;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='var(--text-secondary)'">Training Calendar</a>
-                <a href="/profile" style="margin-right: 15px; color: var(--text-secondary); text-decoration: none; font-weight: 600; transition: color 0.2s;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='var(--text-secondary)'">{{ user.name }}</a>
+                {% set nav_links = [('/warehouse', 'Activities'), ('/training-calendar', 'Training Calendar')] %}
+                {% for href, label in nav_links %}
+                <a href="{{ href }}" class="nav-link{% if request.url.path == href %} active{% endif %}" style="margin-right: 15px; text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: color 0.2s;">{{ label }}</a>
+                {% endfor %}
+                <a href="/profile" class="nav-link{% if request.url.path == '/profile' %} active{% endif %}" style="margin-right: 15px; text-decoration: none; font-weight: 600; transition: color 0.2s;">{{ user.name }}</a>
                 <a href="/logout" class="btn" style="padding: 0.5rem 1rem; border: 1px solid var(--panel-border)">Logout</a>
             {% else %}
                 <a href="/login" class="link">Login</a>
@@ -33,5 +48,11 @@
     <main class="container">
         {% block content %}{% endblock %}
     </main>
+
+    <!-- Shared toast notification target for showToast() in app.js -->
+    <div id="toast" class="toast">
+        <span id="toast-msg">Success!</span>
+    </div>
+    <script src="/static/app.js"></script>
 </body>
 </html>
