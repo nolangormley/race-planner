@@ -133,3 +133,101 @@ def test_run_analyze_effectiveness_excludes_activity_with_no_hr_data_at_all():
     # No stream, no average_heartrate — genuinely nothing to compute from.
     processed = run_analyze_effectiveness(db)
     assert processed == 0
+
+
+# ---- ingest_data: two passes, progress reporting ----
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def json(self):
+        return self.payload
+
+
+class _FakeStrava:
+    """Stands in for StravaManager: one page of activities, canned streams."""
+
+    def __init__(self, activities, fail_first_list=False):
+        self.activities = activities
+        self.fail_first_list = fail_first_list
+        self.list_calls = 0
+        self.stream_calls = []
+
+    def fetch_activities(self, access_token, count=50, page=1, after=None):
+        self.list_calls += 1
+        if self.fail_first_list and self.list_calls == 1:
+            raise Exception("Unauthorized")
+        return self.activities if page == 1 else []
+
+    def fetch_activity_streams(self, access_token, activity_id):
+        self.stream_calls.append(activity_id)
+        return {'time': {'data': [0, 1, 2]}, 'heartrate': {'data': [130, 131, 132]}}
+
+
+def _ingest(monkeypatch, strava, db, **kwargs):
+    import src.pipeline as pipeline
+    monkeypatch.setattr(pipeline.requests, "get", lambda *args, **kw: _FakeResponse({'id': 1, 'firstname': 'Test'}))
+    kwargs.setdefault("reauth_fn", lambda: None)
+    return pipeline.ingest_data(strava, db, "token", **kwargs)
+
+
+def test_ingest_only_fetches_streams_for_new_activities_and_reports_progress(monkeypatch):
+    db = _make_db()
+    db.insert_streams(100, {'time': {'data': [0, 1]}, 'heartrate': {'data': [120, 121]}})
+    strava = _FakeStrava([
+        {'id': 100, 'name': 'Already synced', 'type': 'Run', 'start_date_local': '2026-01-01T08:00:00Z'},
+        {'id': 101, 'name': 'New Run', 'type': 'Run', 'start_date_local': '2026-01-02T08:00:00Z'},
+    ])
+    events = []
+
+    count = _ingest(monkeypatch, strava, db, progress=lambda phase, **info: events.append((phase, info)))
+
+    assert count == 1
+    assert strava.stream_calls == [101]
+    assert events == [
+        ('listing', {'page': 1, 'found': 2}),
+        ('streams', {'done': 1, 'total': 1, 'name': 'New Run'}),
+    ]
+    assert db.activity_exists(101) and db.activity_has_streams(101)
+
+
+def test_ingest_retries_the_activity_list_after_reauth(monkeypatch):
+    db = _make_db()
+    strava = _FakeStrava(
+        [{'id': 102, 'name': 'Run', 'type': 'Run', 'start_date_local': '2026-01-03T08:00:00Z'}],
+        fail_first_list=True,
+    )
+
+    count = _ingest(monkeypatch, strava, db, reauth_fn=lambda: "fresh-token")
+
+    assert strava.list_calls == 2
+    assert count == 1
+
+
+# ---- heart rate zones: reserve-based, athlete-wide max ----
+
+def test_time_in_zones_uses_heart_rate_reserve():
+    from src.pipeline import calculate_time_in_zones
+    # Max 196, rest 60: reserve shares 0.44, 0.66, 0.81 and 0.96.
+    assert calculate_time_in_zones([120, 150, 170, 190], 196, 60) == [1, 1, 0, 1, 1]
+    assert calculate_time_in_zones([], 196, 60) == [0, 0, 0, 0, 0]
+
+
+def test_effectiveness_zones_use_the_athletes_max_not_the_activitys():
+    db = _make_db()
+    db.con.execute("UPDATE dim_activity SET max_heartrate = 173 WHERE activity_id = 100")
+    db.con.execute("""
+        INSERT INTO dim_activity (activity_id, athlete_id, type, start_date_local, moving_time, average_speed, max_heartrate)
+        VALUES (101, 1, 'Run', '2026-01-02 08:00:00', 600, 4.0, 196)
+    """)
+    db.insert_streams(100, {'time': {'data': list(range(10))}, 'heartrate': {'data': [150] * 10}})
+
+    run_analyze_effectiveness(db)
+
+    zones = db.con.execute(
+        "SELECT zone_1_sec, zone_2_sec, zone_3_sec, zone_4_sec, zone_5_sec FROM activity_effectiveness WHERE activity_id = 100"
+    ).fetchone()
+    # 150 bpm is 66% of reserve against the athlete's 196 max (zone 2); against
+    # the activity's own 173 peak it would have landed in zone 4.
+    assert zones == (0, 10, 0, 0, 0)

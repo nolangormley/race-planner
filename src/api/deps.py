@@ -27,3 +27,6 @@ def get_db_connection():
 # DEFAULT_MAX_HR is 192 — the two files' fallback values were never unified,
 # see agent_prompting/improvement_plan.md Section 2/6.)
 DEFAULT_MAX_HR = 190
+
+# Resting heart rate used for heart rate reserve until the profile stores one.
+DEFAULT_REST_HR = 60

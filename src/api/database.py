@@ -30,6 +30,7 @@ class User(Base):
     strava_access_token = Column(String, nullable=True)
     strava_refresh_token = Column(String, nullable=True)
     strava_athlete_id = Column(Integer, nullable=True)
+    strava_last_synced_at = Column(DateTime, nullable=True)
 
     races = relationship("Race", back_populates="user", cascade="all, delete-orphan")
 
@@ -58,7 +59,6 @@ class TrainingPlan(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     entries = relationship("TrainingPlanEntry", back_populates="plan", cascade="all, delete-orphan")
-    chat_messages = relationship("ChatMessage", back_populates="plan", cascade="all, delete-orphan")
     user = relationship("User")
 
 
@@ -79,19 +79,6 @@ class TrainingPlanEntry(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     plan = relationship("TrainingPlan", back_populates="entries")
-
-
-class ChatMessage(Base):
-    """AI conversation history for a training plan."""
-    __tablename__ = "chat_messages"
-
-    id = Column(Integer, primary_key=True, index=True)
-    plan_id = Column(Integer, ForeignKey("training_plans.id"), index=True)
-    role = Column(String, nullable=False)   # 'user' or 'assistant'
-    content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    plan = relationship("TrainingPlan", back_populates="chat_messages")
 
 
 # Schema is managed by Alembic (see /alembic and alembic.ini at the repo

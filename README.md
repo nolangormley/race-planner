@@ -5,13 +5,13 @@ A professional-grade training analytics platform and AI coaching engine built on
 ## 🚀 Key Features
 
 *   **Training Load Analytics**: Visualize your Fitness (CTL), Fatigue (ATL), and Form (TSB) using the Banister impulse-response model.
-*   **AI-Powered Race Coaching**: Select a target race from your calendar, and our AI (via Groq/Llama 3) builds a periodized training block tailored to your current fitness levels.
+*   **Training Plan Calendar**: Plan your weeks on a month calendar, attach the Strava activity that completed each session, and see planned against actual distance.
 *   **Deep Activity Analysis**:
     *   **Efficiency Factor (EF)**: Tracking aerobic efficiency over time.
     *   **Aerobic Decoupling (Pa:Hr)**: Measure how well your heart rate holds steady during endurance runs.
     *   **Pace Zone Mapping**: Automatic calculation of physiological zones (Recovery to Anaerobic) based on your recent 90-day performance (see Methodology below for the exact algorithm).
 *   **Performance Metrics Warehouse**: All data is stored locally in a high-performance **DuckDB** warehouse for lightning-fast queries and long-term history tracking.
-*   **Modern Web UI**: A glass-morphic, responsive dashboard with interactive charts (Chart.js) and real-time AI executive summaries.
+*   **Web UI**: Server-rendered pages with a small dependency-free SVG chart module (see `src/api/static/js/charts/AGENTS.md`), dark and light themes, and a live progress bar for Strava syncs.
 
 ## 🛠 Setup
 

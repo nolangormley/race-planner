@@ -1,905 +1,153 @@
 {% extends "base.html" %}
 
-{% block split_styles %}
-<style>
-/* Design tokens (--panel-bg, --text-primary/secondary, --input-bg,
-   --accent-glow, etc.) and the theme-aware body background now live once in
-   style.css/base.html instead of being redeclared per-page — see
-   agent_prompting/improvement_plan.md Section 4. */
+{% block title %}Dashboard · Race Planner{% endblock %}
 
-.dashboard-container {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 1.5rem;
-    margin-top: 2rem;
-    padding-bottom: 3rem;
-    transition: all 0.3s ease;
-}
-
-.dashboard-container.layout-compact {
-    grid-template-columns: 1fr;
-}
-
-@media(max-width: 1024px) {
-    .dashboard-container { grid-template-columns: 1fr; }
-}
-
-/* Sidebar & Settings */
-.modern-sidebar {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-}
-
-.settings-card {
-    background: var(--panel-bg);
-    border: 1px solid var(--panel-border);
-    backdrop-filter: blur(10px);
-    border-radius: 16px;
-    padding: 1.5rem;
-    box-shadow: var(--accent-glow);
-    color: var(--text-primary);
-}
-
-.settings-card h3 {
-    margin-top: 0;
-    margin-bottom: 1.5rem;
-    font-size: 1.25rem;
-    background: linear-gradient(135deg, #60a5fa, #a78bfa);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.form-group { margin-bottom: 1rem; }
-.form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    color: var(--text-secondary);
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-.form-group input, .form-group select {
-    width: 100%;
-    padding: 0.75rem;
-    background: var(--input-bg);
-    border: 1px solid var(--panel-border);
-    border-radius: 8px;
-    color: var(--text-primary);
-    font-size: 0.95rem;
-    transition: all 0.2s;
-}
-
-.btn-update {
-    width: 100%;
-    padding: 0.75rem;
-    margin-top: 0.5rem;
-    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-    border: none;
-    border-radius: 8px;
-    color: white;
-    font-weight: 600;
-    cursor: pointer;
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-
-/* Skeletons */
-.pulsing-skeleton {
-    background: linear-gradient(90deg, rgba(148, 163, 184, 0.1) 25%, rgba(148, 163, 184, 0.2) 50%, rgba(148, 163, 184, 0.1) 75%);
-    background-size: 200% 100%;
-    animation: pulse-skele 1.5s infinite;
-    border-radius: 8px;
-}
-
-@keyframes pulse-skele {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-}
-
-.sk-text { height: 1rem; margin-bottom: 0.5rem; width: 100%; }
-.sk-text.w-80 { width: 80%; }
-.sk-text.w-60 { width: 60%; }
-.sk-box { width: 100%; height: 100%; min-height: 40px; }
-
-/* AI Insight */
-.ai-module {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%);
-    border: 1px solid rgba(139, 92, 246, 0.3);
-}
-
-.insight-text { font-size: 0.95rem; line-height: 1.6; color: var(--text-primary); }
-.insight-text ul { padding-left: 1.2rem; margin-top: 0.5rem; }
-.insight-text li { margin-bottom: 0.5rem; }
-
-/* Main Content Area */
-.main-charts { display: flex; flex-direction: column; gap: 1.5rem; }
-.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-@media(max-width: 768px) { .chart-grid { grid-template-columns: 1fr; } }
-
-.chart-card {
-    background: var(--panel-bg);
-    border: 1px solid var(--panel-border);
-    backdrop-filter: blur(10px);
-    border-radius: 16px;
-    padding: 1.5rem;
-    position: relative;
-    color: var(--text-primary);
-}
-
-.chart-card h3 {
-    margin-top: 0; color: var(--text-primary); font-size: 1.1rem; margin-bottom: 1.5rem;
-}
-
-.chart-container-large { height: 350px; width: 100%; position: relative; }
-.chart-container-small { height: 280px; width: 100%; position: relative; }
-
-/* Stats Row */
-.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
-.stat-metric {
-    background: rgba(0,0,0,0.1);
-    border: 1px solid var(--panel-border);
-    padding: 1.2rem;
-    border-radius: 12px;
-    text-align: center;
-    min-height: 100px;
-}
-.stat-metric h4 {
-    font-size: 2rem; margin: 0;
-    min-height: 38px;
-}
-.stat-metric p { margin: 0; font-size: 0.8rem; text-transform: uppercase; color: var(--text-secondary); margin-top: 0.5rem; }
-
-/* Calendar */
-.calendar-view {
-    background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 16px; padding: 1.5rem;
-}
-.calendar-grid { display: grid; gap: 1rem; }
-
-.workout-card {
-    background: var(--input-bg);
-    border: 1px solid rgba(59, 130, 246, 0.2);
-    border-left: 4px solid #3b82f6;
-    border-radius: 8px;
-    padding: 1rem;
-    transition: all 0.2s;
-    color: var(--text-primary);
-}
-
-.workout-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
-.workout-date { font-weight: bold; color: #60a5fa; }
-.workout-type { font-size: 0.85rem; background: rgba(59, 130, 246, 0.2); padding: 0.2rem 0.5rem; border-radius: 4px; color: #3b82f6; }
-.workout-desc { font-size: 0.9rem; color: var(--text-secondary); }
-
-/* Empty State Illustration */
-.empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    width: 100%;
-    position: absolute;
-    top: 0; left: 0;
-    background: var(--panel-bg);
-    border-radius: 12px;
-    z-index: 10;
-}
-.empty-illustration svg { width: 120px; height: 120px; opacity: 0.8; margin-bottom: 1rem; }
-.empty-state h4 { color: var(--text-primary); font-size: 1.25rem; margin-bottom: 0.25rem; }
-.empty-state p { color: var(--text-secondary); font-size: 0.9rem; text-align: center; max-width: 80%; }
-.empty-state button { margin-top: 1rem; padding: 0.5rem 1rem; border-radius: 6px; border: none; background: #3b82f6; color: white; cursor: pointer; }
-
-</style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+{% block styles %}
+<link rel="stylesheet" href="/static/css/pages/dashboard.css">
 {% endblock %}
 
 {% block content %}
-<div class="dashboard-header" style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: flex-end;">
+<div class="page-head">
     <div>
-        <h1 style="font-size: 2.5rem; margin-bottom: 0.5rem;">Athlete Dashboard</h1>
-        <p style="color: var(--text-secondary);" id="header-subtitle"><span class="pulsing-skeleton sk-text w-60" style="display:inline-block"></span></p>
+        <h1>Dashboard</h1>
+        <p class="sub" id="dash-sub"><span class="skeleton">Loading your next race and training status</span></p>
+    </div>
+    <div class="page-actions">
+        <div class="seg" id="units-toggle" role="group" aria-label="Distance units">
+            <button type="button" data-units="imperial">mi</button>
+            <button type="button" data-units="metric">km</button>
+        </div>
     </div>
 </div>
 
 {% if not user.strava_athlete_id %}
-<div class="glass-panel" style="text-align: center; padding: 3rem;">
-    <h2>Strava connection pending!</h2>
-    <p>We need to sync with Strava to build your stats.</p>
-    <a href="/strava-auth" class="btn btn-strava">Connect Strava Now</a>
+<div class="card">
+    <div class="empty">
+        <strong>Connect Strava to see your training</strong>
+        Fitness, fatigue, zones and weekly volume are all built from your synced activities.
+        <div><a href="/strava-auth" class="btn btn-strava">Connect Strava</a></div>
+    </div>
 </div>
 {% else %}
 
-<div class="dashboard-container" id="dashboard-main">
-    <!-- Sidebar -->
-    <aside class="modern-sidebar">
-        <div class="settings-card">
-            <h3 style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.4rem;">Target Race Goal
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.7;" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V15"/></svg>
-            </h3>
-            <div class="form-group" style="margin-bottom: 0;">
-                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.4;">Select a race from your calendar for the AI to build a customized training schedule.</p>
-                <div class="custom-select-wrapper">
-                    <select id="targetRaceSelect" onchange="fetchSchedule()" style="
-                        width: 100%; 
-                        padding: 1rem; 
-                        background: rgba(0,0,0,0.2); 
-                        border: 1px solid var(--panel-border); 
-                        border-radius: 12px; 
-                        color: var(--text-primary); 
-                        font-weight: 500; 
-                        appearance: none;
-                        cursor: pointer;
-                        text-overflow: ellipsis;
-                    ">
-                        <option value="">Loading your races...</option>
-                    </select>
-                </div>
-                <div id="no-races-msg" style="display: none; margin-top: 0.75rem; font-size: 0.85rem; color: #f43f5e; background: rgba(244, 63, 94, 0.1); padding: 0.75rem; border-radius: 8px;">
-                     No upcoming races found. <a href="/profile" style="color: #fb7185; font-weight: 600; text-decoration: none;">Add a race →</a>
-                </div>
+<section class="grid grid-4" id="stats" aria-label="Training status">
+    {% set tiles = [
+        ('fitness', 'Fitness', 'Chronic training load (CTL): a 42-day weighted average of daily training stress. Higher means a bigger aerobic engine.'),
+        ('fatigue', 'Fatigue', 'Acute training load (ATL): a 7-day weighted average of training stress. Rises fast after hard days.'),
+        ('form', 'Form', 'Training stress balance (TSB): fitness minus fatigue. Positive means fresh, negative means you are carrying load.'),
+        ('vo2', 'VO2 max', 'Estimated maximal oxygen uptake from your heart rate and pace data, in ml/kg/min.')
+    ] %}
+    {% for key, label, help in tiles %}
+    <div class="card stat" id="stat-{{ key }}">
+        <div class="stat-label">
+            <span>{{ label }}</span>
+            <span class="info-tip" tabindex="0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                <span class="tip" role="tooltip">{{ help }}</span>
+            </span>
+        </div>
+        <div class="stat-value"><span class="skeleton">00</span></div>
+        <div class="stat-delta"></div>
+        <div class="stat-spark"><svg aria-hidden="true"></svg></div>
+        <div class="stat-foot"></div>
+    </div>
+    {% endfor %}
+</section>
+
+<section class="card mt-4">
+    <div class="card-head">
+        <div>
+            <h2 class="card-title">Fitness and form</h2>
+            <div class="card-sub">Daily training load rolled up as fitness (42-day) and fatigue (7-day). Form is the gap between them. The dashed line projects fitness two weeks ahead.</div>
+        </div>
+        <div class="card-actions">
+            <div class="seg" id="pmc-range" role="group" aria-label="Chart range">
+                <button type="button" data-days="42">6 weeks</button>
+                <button type="button" data-days="90">3 months</button>
             </div>
         </div>
+    </div>
+    <div id="pmc-chart" class="chart-slot"></div>
+</section>
 
-
-
-        <div class="settings-card ai-module">
-            <h3 style="color: #c084fc;">AI Executive Summary</h3>
-            <div id="ai-insight" class="insight-text">
-                <div class="pulsing-skeleton sk-text"></div>
-                <div class="pulsing-skeleton sk-text"></div>
-                <div class="pulsing-skeleton sk-text w-80"></div>
-                <div class="pulsing-skeleton sk-text w-60"></div>
+<section class="grid grid-2 mt-4">
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">Weekly run volume</h2>
+                <div class="card-sub">Last 12 weeks, Monday to Sunday. This week is highlighted.</div>
             </div>
         </div>
-    </aside>
+        <div id="volume-chart" class="chart-slot"></div>
+    </div>
 
-    <!-- Main Content -->
-    <main class="main-charts">
-        <div class="stats-row" id="top-stats">
-            <div class="stat-metric" id="stat-ctl">
-                <h4 id="fitness-val" style="background: linear-gradient(135deg, #3b82f6, #93c5fd); -webkit-background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
-                <p>Fitness (CTL) <span class="info-icon">ⓘ</span></p>
-                <div class="metric-tooltip">
-                    <span class="tooltip-title">Chronic Training Load</span>
-                    <span class="tooltip-desc">A 42-day rolling average of your daily training stress. Represents your overall aerobic engine and capacity.</span>
-                    <span class="tooltip-standing">Standing: <span class="standing-label" id="standing-ctl">Calculating...</span></span>
-                </div>
-            </div>
-            <div class="stat-metric" id="stat-atl">
-                <h4 id="fatigue-val" style="background: linear-gradient(135deg, #f43f5e, #fb7185); -webkit-background-clip: text; background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
-                <p>Fatigue (ATL) <span class="info-icon">ⓘ</span></p>
-                <div class="metric-tooltip">
-                    <span class="tooltip-title">Acute Training Load</span>
-                    <span class="tooltip-desc">A 7-day average of training stress. High ATL relative to CTL indicates significant recent strain.</span>
-                    <span class="tooltip-standing">Standing: <span class="standing-label" id="standing-atl">Calculating...</span></span>
-                </div>
-            </div>
-            <div class="stat-metric" id="stat-tsb">
-                <h4 id="form-val" style="background: linear-gradient(135deg, #10b981, #34d399); -webkit-background-clip: text; background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
-                <p>Form (TSB) <span class="info-icon">ⓘ</span></p>
-                <div class="metric-tooltip">
-                    <span class="tooltip-title">Training Stress Balance</span>
-                    <span class="tooltip-desc">Your Fitness (CTL) minus Fatigue (ATL). Used to time 'peaks' for race day.</span>
-                    <span class="tooltip-standing">Standing: <span class="standing-label" id="standing-tsb">Calculating...</span></span>
-                </div>
-            </div>
-            <div class="stat-metric" id="stat-vo2">
-                <h4 id="vo2-val" style="background: linear-gradient(135deg, #a855f7, #d8b4fe); -webkit-background-clip: text; background-clip: text; color: transparent;"><div class="pulsing-skeleton sk-box"></div></h4>
-                <p>VO2 Max Est. <span class="info-icon">ⓘ</span></p>
-                <div class="metric-tooltip">
-                    <span class="tooltip-title">Maximal Oxygen Uptake</span>
-                    <span class="tooltip-desc">Estimate of the maximum volume of oxygen you can utilize during intense exercise.</span>
-                    <span class="tooltip-standing">Standing: <span class="standing-label" id="standing-vo2">Calculating...</span></span>
-                </div>
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">Time in heart rate zones</h2>
+                <div class="card-sub" id="hr-sub">Last 30 days</div>
             </div>
         </div>
+        <div id="hr-chart" class="chart-slot"></div>
+    </div>
 
-        <div class="chart-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h3 style="margin: 0;">Performance Management Chart</h3>
-                <div id="pmc-window-toggle" style="display: flex; gap: 0.25rem;">
-                    <button class="pmc-win-btn" data-days="7" onclick="setPmcWindow(7)" style="padding: 0.3rem 0.75rem; border-radius: 6px; border: 1px solid var(--panel-border); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 0.8rem;">7d</button>
-                    <button class="pmc-win-btn active-win" data-days="42" onclick="setPmcWindow(42)" style="padding: 0.3rem 0.75rem; border-radius: 6px; border: 1px solid #3b82f6; background: rgba(59,130,246,0.15); color: #60a5fa; cursor: pointer; font-size: 0.8rem;">42d</button>
-                    <button class="pmc-win-btn" data-days="90" onclick="setPmcWindow(90)" style="padding: 0.3rem 0.75rem; border-radius: 6px; border: 1px solid var(--panel-border); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 0.8rem;">90d</button>
-                </div>
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">This week</h2>
+                <div class="card-sub" id="week-sub">Planned workouts against what you actually ran.</div>
             </div>
-            <div class="chart-container-large" id="pmc-container">
-                <div class="pulsing-skeleton" style="width:100%; height:100%; position:absolute; z-index:1;" id="pmc-skeleton"></div>
-                <canvas id="pmcChart"></canvas>
+            <div class="card-actions"><a href="/training-calendar" class="btn btn-sm btn-ghost">Open calendar</a></div>
+        </div>
+        <div id="week-plan"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">Recent activities</h2>
+                <div class="card-sub">Load is the Banister TRIMP for the session.</div>
+            </div>
+            <div class="card-actions"><a href="/warehouse" class="btn btn-sm btn-ghost">All activities</a></div>
+        </div>
+        <div id="recent"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">Pace zones</h2>
+                <div class="card-sub" id="pace-sub">From your recent runs and heart rate.</div>
             </div>
         </div>
+        <div id="pace-zones"></div>
+    </div>
 
-        <div class="chart-grid">
-            <div class="chart-card">
-                <h3>Heart Rate Zones</h3>
-                <div class="chart-container-small" id="hr-container">
-                    <div class="pulsing-skeleton" style="width:100%; height:100%; position:absolute; z-index:1;" id="hr-skeleton"></div>
-                    <canvas id="hrChart"></canvas>
-                </div>
-            </div>
-            <div class="chart-card">
-                <h3>30-Day Training Load</h3>
-                <div class="chart-container-small" id="load-container">
-                    <div class="pulsing-skeleton" style="width:100%; height:100%; position:absolute; z-index:1;" id="load-skeleton"></div>
-                    <canvas id="loadChart"></canvas>
-                </div>
-            </div>
-            <!-- Pace Zones Card -->
-            <div class="chart-card">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                    <h3 style="margin: 0;">Pace Zones</h3>
-                    <span class="tag" id="pace-zones-unit">Min/Mile</span>
-                </div>
-                <div class="table-container" style="margin-top: 0;">
-                    <table style="font-size: 0.9rem; border-collapse: separate; border-spacing: 0 0.5rem;">
-                        <tbody id="pace-zones-body">
-                            <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading Pace Zones...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Recent Activities Card -->
-            <div class="chart-card">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                    <h3 style="margin: 0;">Recent Activities</h3>
-                    <a href="/warehouse" class="tag" style="text-decoration: none; cursor: pointer; color: #60a5fa; border-color: rgba(59,130,246,0.5);">View Warehouse →</a>
-                </div>
-                <div class="table-container" style="margin-top: 0; overflow-x: auto;">
-                    <table style="width: 100%; font-size: 0.85rem; border-collapse: separate; border-spacing: 0 0.5rem;">
-                        <tbody id="recent-activities-body">
-                            <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading activities...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">Time by activity type</h2>
+                <div class="card-sub">Moving time, last 30 days.</div>
             </div>
         </div>
+        <div id="type-chart" class="chart-slot"></div>
+    </div>
 
-        <div class="calendar-view">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h3 style="margin: 0; font-size: 1.25rem;">Interactive Training Calendar</h3>
-                <button class="btn btn-update" style="width: auto; margin: 0;" onclick="fetchSchedule()">Refresh AI Plan</button>
+    <div class="card span-2 hidden" id="ai-card">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">Coach's note</h2>
+                <div class="card-sub">Generated from today's numbers. Refreshes hourly.</div>
             </div>
-            <p id="schedule-blurb" style="color: var(--text-secondary); font-style: italic; margin-bottom: 1rem;"></p>
-            
-            <div id="schedule-loading">
-                <div class="pulsing-skeleton sk-text" style="height: 60px;"></div>
-                <div class="pulsing-skeleton sk-text" style="height: 60px;"></div>
-                <div class="pulsing-skeleton sk-text" style="height: 60px;"></div>
-            </div>
-
-            <div class="calendar-grid" id="calendar-grid" style="display: none;"></div>
         </div>
-    </main>
-</div>
+        <div id="ai-note" class="ai-note"></div>
+    </div>
+</section>
+{% endif %}
+{% endblock %}
 
-<script>
-// Set Chart.js global defaults so all charts inherit white text in dark mode
-Chart.defaults.color = '#c9d1d9';
-Chart.defaults.font.family = 'Inter, sans-serif';
-Chart.defaults.font.size = 12;
-
-// escapeHtml() and showToast() are defined once, shared, in app.js.
-
-// Lightweight markdown → HTML converter for AI insight output.
-// The LLM's output is untrusted text (it can be influenced by user-controlled
-// profile fields and Strava activity data — see agent_prompting/improvement_plan.md),
-// so every piece of it is escaped before being placed into innerHTML. Never add
-// a raw-passthrough branch here again.
-function mdToHtml(text) {
-    if (!text) return '';
-
-    const lines = text.split('\n');
-    let html = '';
-    let inList = false;
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        // Strip out any asterisks or hashes just in case the LLM ignored the prompt
-        const cleanLine = line.replace(/[*#]/g, '').trim();
-
-        const bulletMatch = cleanLine.match(/^[-]\s+(.+)/);
-        if (bulletMatch) {
-            if (!inList) {
-                html += '<ul style="margin-top: 0.5rem; padding-left: 1.5rem;">';
-                inList = true;
-            }
-            html += `<li style="margin-bottom: 0.25rem;">${escapeHtml(bulletMatch[1])}</li>`;
-        } else {
-            if (inList) {
-                html += '</ul>';
-                inList = false;
-            }
-            // If it's a paragraph, add some bottom margin
-            html += `<p style="margin-bottom: 0.5rem;">${escapeHtml(cleanLine)}</p>`;
-        }
-    }
-
-    if (inList) html += '</ul>';
-    return html;
-}
-
-const userId = {{ user.id }};
-const athleteId = {{ user.strava_athlete_id or 'null' }};
-const userDOB = "{{ user.date_of_birth }}";
-const userSex = "{{ user.gender }}";
-const userWeight = {{ user.weight or 0 }};
-const userHeight = {{ user.height or 0 }};
-
-let isMetric = localStorage.getItem('units') === 'metric';
-let pmcChartInst, hrChartInst, loadChartInst;
-let allHistory = [];   // full 90-day history from API
-let allForecast = [];  // 14-day forecast from API
-let pmcWindow = parseInt(localStorage.getItem('pmcWindow') || '42');
-
-function setPmcWindow(days) {
-    pmcWindow = days;
-    localStorage.setItem('pmcWindow', days);
-    document.querySelectorAll('.pmc-win-btn').forEach(btn => {
-        const active = parseInt(btn.dataset.days) === days;
-        btn.style.background = active ? 'rgba(59,130,246,0.15)' : 'transparent';
-        btn.style.color = active ? '#60a5fa' : 'var(--text-secondary)';
-        btn.style.borderColor = active ? '#3b82f6' : 'var(--panel-border)';
-    });
-    if (allHistory.length > 0) renderPmcChart();
-}
-
-function showPaceZonesMessage(message) {
-    document.getElementById('pace-zones-body').innerHTML =
-        `<tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 2rem;">${message}</td></tr>`;
-}
-
-async function fetchPaceZones() {
-    document.getElementById('pace-zones-unit').textContent = isMetric ? 'Min/KM' : 'Min/Mile';
-    try {
-        const res = await fetch(`/pace_zones/${athleteId}`);
-        if(!res.ok) {
-            showPaceZonesMessage('Not enough activity history yet to calculate pace zones.');
-            return;
-        }
-        const data = await res.json();
-        const zones = data.pace_zones_min_per_mile;
-        const body = document.getElementById('pace-zones-body');
-        body.innerHTML = '';
-
-        const zoneOrder = ["Recovery", "Aerobic Endurance", "Aerobic Power", "Threshold", "Anaerobic Endurance", "Anaerobic Power"];
-        const colors = ["#94a3b8", "#10b981", "#3b82f6", "#f59e0b", "#f43f5e", "#a855f7"];
-
-        zoneOrder.forEach((z, i) => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td style="width: 10px; padding: 0;"><div style="width: 4px; height: 30px; background: ${colors[i]}; border-radius: 2px;"></div></td>
-                <td style="font-weight: 600; color: var(--text-main);">${z}</td>
-                <td style="text-align: right; font-family: 'Monaco', monospace; color: var(--text-secondary);">${zones[z]}</td>
-            `;
-            body.appendChild(row);
-        });
-    } catch(err) {
-        console.error(err);
-        showPaceZonesMessage('Could not load pace zones. Try refreshing the page.');
-    }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    const savedUnits = localStorage.getItem('units') || 'imperial';
-    const savedLayout = localStorage.getItem('layout') || 'default';
-
-    // Apply saved theme (inline script handles the initial set, but also set here for safety)
-    if (savedTheme === 'light') document.documentElement.setAttribute('data-theme', 'light');
-    else document.documentElement.removeAttribute('data-theme');
-
-    // Apply saved layout
-    if(savedLayout === 'compact') {
-        document.getElementById('dashboard-main').classList.add('layout-compact');
-    }
-
-    // Apply saved PMC window button active state
-    setPmcWindow(pmcWindow);
-    
-    fetchStats();
-    fetchDashboardRaces();
-    fetchPaceZones();
-});
-
-
-
-// showEmptyState() is defined once, shared, in app.js.
-
-async function fetchDashboardRaces() {
-    try {
-        const res = await fetch(`/api/races/${userId}`);
-        const sel = document.getElementById('targetRaceSelect');
-        const noRaceMsg = document.getElementById('no-races-msg');
-        
-        if (!res.ok) return;
-        const races = await res.json();
-        sel.innerHTML = '';
-        
-        if (races.length === 0) {
-            sel.style.display = 'none';
-            noRaceMsg.style.display = 'block';
-            document.getElementById('schedule-blurb').innerText = "Add a race to your calendar to generate an AI training schedule.";
-            document.getElementById('calendar-grid').style.display = 'none';
-            document.getElementById('schedule-loading').style.display = 'none';
-            return;
-        }
-
-        sel.style.display = 'block';
-        noRaceMsg.style.display = 'none';
-        
-        races.forEach(r => {
-            const opt = document.createElement('option');
-            opt.value = encodeURIComponent(JSON.stringify(r));
-            const dateStr = new Date(r.race_date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-            const raceType = r.race_length.charAt(0).toUpperCase() + r.race_length.slice(1);
-            opt.textContent = `${r.name ? r.name + ' (' + raceType + ')' : raceType} on ${dateStr}`;
-            sel.appendChild(opt);
-        });
-
-        // Trigger the schedule fetch for the first available race
-        fetchSchedule();
-    } catch(err) {
-        console.error(err);
-    }
-}
-
-async function fetchAnalytics() {
-    try {
-        const res = await fetch(`/analytics/${athleteId}`);
-        if(res.ok) {
-            const data = await res.json();
-            
-            const hrSkele = document.getElementById('hr-skeleton');
-            if(hrSkele) hrSkele.style.display = 'none';
-            const loadSkele = document.getElementById('load-skeleton');
-            if(loadSkele) loadSkele.style.display = 'none';
-
-            if(data.hr_zones && data.hr_zones.length > 0) {
-                const totalSecs = data.hr_zones.reduce((acc, z) => acc + z.time_seconds, 0);
-                if (totalSecs === 0) {
-                    showEmptyState('hr-container', { title: 'No Heart Rate Data', message: 'Wear a heart rate monitor on your next activity.' });
-                } else {
-                    const ctxHr = document.getElementById('hrChart').getContext('2d');
-                    if(hrChartInst) hrChartInst.destroy();
-                    hrChartInst = new Chart(ctxHr, {
-                        type: 'bar',
-                        data: {
-                            labels: data.hr_zones.map(z => z.zone),
-                            datasets: [{
-                                label: '% Time in Zone',
-                                data: data.hr_zones.map(z => ((z.time_seconds / totalSecs) * 100).toFixed(1)),
-                                backgroundColor: ['rgba(156, 163, 175, 0.6)', 'rgba(59, 130, 246, 0.6)', 'rgba(16, 185, 129, 0.6)', 'rgba(245, 158, 11, 0.6)', 'rgba(239, 68, 68, 0.6)'],
-                                borderColor: ['#9ca3af', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'],
-                                borderWidth: 1
-                            }]
-                        },
-                        options: { 
-                            responsive: true, maintainAspectRatio: false, 
-                            plugins: { legend: { display: false } },
-                            scales: {
-                                y: { max: 100, ticks: { callback: function(val) { return val + '%'; } } }
-                            }
-                        }
-                    });
-                }
-            } else {
-                showEmptyState('hr-container', { title: 'No Heart Rate Data', message: 'Wear a heart rate monitor on your next activity.' });
-            }
-
-            if(data.load_dist && data.load_dist.length > 0) {
-                const ctxLoad = document.getElementById('loadChart').getContext('2d');
-                if(loadChartInst) loadChartInst.destroy();
-                loadChartInst = new Chart(ctxLoad, {
-                    type: 'doughnut',
-                    data: {
-                        labels: data.load_dist.map(l => l.type),
-                        datasets: [{
-                            data: data.load_dist.map(l => l.distance),
-                            backgroundColor: ['#8b5cf6', '#3b82f6', '#ec4899', '#10b981'], borderWidth: 0
-                        }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, cutout: '70%' }
-                });
-            } else {
-                showEmptyState('load-container', { title: 'No Training Load', message: 'Log some activities to see your load distribution.' });
-            }
-        }
-    } catch(e) { console.error(e); }
-}
-
-function renderPmcChart() {
-    const history = allHistory.slice(-pmcWindow);
-    const labels = history.map(h => h.date.substring(5));
-
-    // Forecast: only include points after the last history date
-    const lastHistDate = history.length > 0 ? history[history.length - 1].date : null;
-    const forecastSlice = allForecast.filter(f => f.date > lastHistDate);
-    // Pad history length with nulls so forecast aligns on the chart
-    const forecastPadded = new Array(history.length).fill(null).concat(forecastSlice.map(f => f.projected_ctl));
-    const allLabels = labels.concat(forecastSlice.map(f => f.date.substring(5)));
-
-    const ctx = document.getElementById('pmcChart').getContext('2d');
-    if (pmcChartInst) pmcChartInst.destroy();
-    pmcChartInst = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: allLabels,
-            datasets: [
-                {
-                    label: 'Fitness (CTL)',
-                    data: history.map(h => h.fitness).concat(new Array(forecastSlice.length).fill(null)),
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    tension: 0.4, fill: true, pointRadius: 0, type: 'line', order: 1
-                },
-                {
-                    label: 'Projected CTL',
-                    data: forecastPadded,
-                    borderColor: 'rgba(147, 197, 253, 0.7)',
-                    backgroundColor: 'transparent',
-                    borderDash: [6, 3], tension: 0.4, pointRadius: 0, type: 'line', order: 2, borderWidth: 2
-                },
-                {
-                    label: 'Fatigue (ATL)',
-                    data: history.map(h => h.fatigue).concat(new Array(forecastSlice.length).fill(null)),
-                    borderColor: '#ec4899',
-                    tension: 0.4, borderDash: [5, 5], pointRadius: 0, type: 'line', order: 3
-                },
-                {
-                    label: 'Form (TSB)',
-                    data: history.map(h => h.form).concat(new Array(forecastSlice.length).fill(null)),
-                    backgroundColor: history.map(h => (h.form >= 0 ? 'rgba(16, 185, 129, 0.5)' : 'rgba(244, 63, 94, 0.4)')),
-                    borderColor: 'transparent',
-                    type: 'bar', order: 4
-                }
-            ]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-                legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 12, font: { size: 11 } } },
-                tooltip: {
-                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                    titleColor: '#94a3b8',
-                    bodyColor: '#f8fafc',
-                    borderColor: 'rgba(255,255,255,0.08)',
-                    borderWidth: 1,
-                    padding: 12,
-                    callbacks: {
-                        afterBody: function(items) {
-                            const tsbItem = items.find(i => i.dataset.label === 'Form (TSB)');
-                            if (!tsbItem) return '';
-                            const tsb = tsbItem.raw;
-                            if (tsb === null) return '';
-                            if (tsb > 10) return '\u2705 Rested — ready to perform';
-                            if (tsb > -10) return '\u26AA Balanced — maintain training';
-                            if (tsb > -30) return '\u26A0\uFE0F Fatigued — training stress building';
-                            return '\uD83D\uDD34 Overreached — consider recovery';
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { maxTicksLimit: 10, color: '#c9d1d9' } },
-                y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#c9d1d9' } }
-            }
-        }
-    });
-}
-
-async function fetchStats() {
-    try {
-        const res = await fetch(`/status/${athleteId}`);
-        if(res.ok) {
-            const data = await res.json();
-            
-            document.getElementById('fitness-val').innerText = Math.round(data.fitness_ctl);
-            document.getElementById('fatigue-val').innerText = Math.round(data.fatigue_atl);
-            document.getElementById('form-val').innerText = Math.round(data.form_tsb);
-            if(data.latest_vo2_max) document.getElementById('vo2-val').innerText = data.latest_vo2_max;
-
-            if(data.ai_insight) {
-                document.getElementById('ai-insight').innerHTML = mdToHtml(data.ai_insight);
-            }
-
-            const pmcSkele = document.getElementById('pmc-skeleton');
-            if(pmcSkele) pmcSkele.style.display = 'none';
-
-            allHistory = data.history || [];
-            allForecast = data.forecast || [];
-
-            if(data.history.length > 0) {
-                renderPmcChart();
-            } else {
-                showEmptyState('pmc-container', { title: 'No Activity History', message: 'Hit the road and upload some runs!' });
-            }
-
-            updateMetricStandings(data);
-        }
-    } catch(err) { console.error(err); }
-}
-
-function updateMetricStandings(data) {
-    const ctl = data.fitness_ctl || 0;
-    const atl = data.fatigue_atl || 0;
-    const tsb = data.form_tsb || 0;
-    const vo2 = data.latest_vo2_max || 0;
-
-    // CTL Standings
-    let ctlLbl = 'Developing';
-    if (ctl > 100) ctlLbl = 'Elite Pro';
-    else if (ctl > 70) ctlLbl = 'Advanced Enthusiast';
-    else if (ctl > 40) ctlLbl = 'Consistent Runner';
-    document.getElementById('standing-ctl').innerText = ctlLbl;
-
-    // ATL Standings
-    document.getElementById('standing-atl').innerText = atl > ctl * 1.5 ? 'High Fatigue' : 'Sustainable';
-
-    // TSB Standings
-    let tsbLbl = 'Balanced';
-    if (tsb > 15) tsbLbl = 'Fresh (Peaking)';
-    else if (tsb < -30) tsbLbl = 'High Overload';
-    else if (tsb < -10) tsbLbl = 'Optimal Training';
-    document.getElementById('standing-tsb').innerText = tsbLbl;
-
-    // VO2 Max Standings (Age/Gender Adjusted)
-    let vo2Lbl = 'Average';
-    const age = userDOB ? (new Date().getFullYear() - new Date(userDOB).getFullYear()) : 35;
-    const isMale = userSex.toLowerCase() === 'male';
-
-    if (vo2 > 0) {
-        if (isMale) {
-            if (vo2 > 60) vo2Lbl = 'Superior';
-            else if (vo2 > 52) vo2Lbl = 'Excellent';
-            else if (vo2 > 45) vo2Lbl = 'Good';
-        } else {
-            if (vo2 > 54) vo2Lbl = 'Superior';
-            else if (vo2 > 46) vo2Lbl = 'Excellent';
-            else if (vo2 > 39) vo2Lbl = 'Good';
-        }
-        // Age adjustment penalty
-        if (age > 50 && vo2 > 40) vo2Lbl = 'Superior for Age';
-    }
-    document.getElementById('standing-vo2').innerText = vo2Lbl;
-}
-
-async function fetchSchedule() {
-    const sel = document.getElementById('targetRaceSelect');
-    if (!sel || !sel.value || sel.style.display === 'none') {
-        return;
-    }
-    
-    document.getElementById('calendar-grid').style.display = 'none';
-    document.getElementById('schedule-loading').style.display = 'block';
-    
-    try {
-        const race = JSON.parse(decodeURIComponent(sel.value));
-        const dateStr = new Date(race.race_date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        const raceTypeNormal = race.race_length.charAt(0).toUpperCase() + race.race_length.slice(1);
-        document.getElementById('header-subtitle').innerText = `Training for: ${race.name || raceTypeNormal} on ${dateStr}`;
-        
-        const url = `/schedule/${athleteId}?race_date=${encodeURIComponent(race.race_date)}&race_type=${encodeURIComponent(race.race_length)}&goal_time=${encodeURIComponent(race.goal_time || '')}`;
-        const res = await fetch(url);
-        if(res.ok) {
-            const data = await res.json();
-            const sched = data.schedule;
-            
-            document.getElementById('schedule-loading').style.display = 'none';
-            document.getElementById('calendar-grid').style.display = 'grid';
-            
-            if(sched.error || !sched.plan) {
-                document.getElementById('schedule-blurb').innerText = "Failed to load plan. Check LLM setup.";
-                return;
-            }
-            
-            document.getElementById('schedule-blurb').innerText = sched.blurb || "Here is your customized plan:";
-            
-            const grid = document.getElementById('calendar-grid');
-            grid.innerHTML = '';
-            
-            Object.keys(sched.plan).sort().forEach((date, i) => {
-                const d = new Date(date);
-                const dayStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                const p = sched.plan[date];
-                
-                let dist = p.approximate_distance || '';
-                if(isMetric && dist.toLowerCase().includes('mile')) {
-                    const miles = parseFloat(dist);
-                    if(!isNaN(miles)) dist = (miles * 1.60934).toFixed(1) + ' km';
-                }
-
-                // NOTE: this card used to be draggable, but dragstart/drop
-                // never actually reordered or persisted anything (drop never
-                // read the data dragstart set) — a border-color flash was
-                // the only visible effect. Each card is keyed to a specific
-                // calendar date from the AI-generated schedule, which also
-                // isn't persisted anywhere reordering could write to, so
-                // removed rather than inventing new semantics for a preview
-                // that doesn't have a save step. See
-                // agent_prompting/improvement_plan.md Section 4.
-                const card = document.createElement('div');
-                card.className = 'workout-card';
-
-                card.innerHTML = `
-                    <div class="workout-header">
-                        <span class="workout-date"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:2px;" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ${dayStr}</span>
-                        <span class="workout-type">${p.type_of_workout}</span>
-                    </div>
-                    <div class="workout-desc">
-                        <strong style="color: var(--text-primary);">${dist} • ${p.training_focus || 'Focus'}</strong><br>
-                        ${p.description}
-                    </div>
-                `;
-                grid.appendChild(card);
-            });
-        }
-    } catch(err) { console.error(err); }
-}
-async function fetchRecentActivities() {
-    try {
-        const res = await fetch(`/api/activities?limit=5`);
-        if(!res.ok) return;
-        const activities = await res.json();
-        const tbody = document.getElementById('recent-activities-body');
-        
-        if (!activities || activities.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No activities found. Sync Strava to begin.</td></tr>';
-            return;
-        }
-
-        tbody.innerHTML = '';
-        activities.forEach(act => {
-            const date = new Date(act.start_date_local).toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
-            
-            // Format distance
-            let distStr = '';
-            if (isMetric) {
-                distStr = (act.distance / 1000).toFixed(1) + ' km';
-            } else {
-                distStr = (act.distance * 0.000621371).toFixed(1) + ' mi';
-            }
-
-            // Format pace
-            const paceConv = isMetric ? (1000 / 60) : (1609.34 / 60);
-            const minsPerUnit = paceConv / (act.average_speed || 1);
-            const m = Math.floor(minsPerUnit);
-            const s = Math.floor((minsPerUnit - m) * 60).toString().padStart(2, '0');
-            const unitLabel = isMetric ? '/km' : '/mi';
-            const paceStr = (act.average_speed > 0) ? `${m}:${s} ${unitLabel}` : '--';
-
-            const trimp = act.training_load ? Math.round(act.training_load) : '--';
-
-            const row = document.createElement('tr');
-            row.style.background = 'rgba(255,255,255,0.03)';
-            row.style.cursor = 'pointer';
-            row.onclick = () => window.location.href = `/workout_streams/${act.activity_id}`;
-            row.innerHTML = `
-                <td style="padding: 0.75rem; border-radius: 8px 0 0 8px;">
-                    <div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px;">${act.name}</div>
-                    <div style="font-size: 0.7rem; color: var(--text-secondary);">${date}</div>
-                </td>
-                <td style="padding: 0.75rem; text-align: center; color: var(--text-primary);">${distStr}</td>
-                <td style="padding: 0.75rem; text-align: center; color: var(--text-primary);">${paceStr}</td>
-                <td style="padding: 0.75rem; text-align: center; border-radius: 0 8px 8px 0;">
-                    <div style="font-weight: 700; color: #60a5fa;">${trimp}</div>
-                    <div style="font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;">TL</div>
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-    } catch(err) { console.error(err); }
-}
-
-fetchAnalytics();
-fetchRecentActivities();
-</script>
+{% block scripts %}
+{% if user.strava_athlete_id %}
+<script type="module" src="/static/js/pages/dashboard.js"></script>
 {% endif %}
 {% endblock %}

@@ -3,56 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Race Planner</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <title>{% block title %}Race Planner{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/components.css">
+    {% block styles %}{% endblock %}
     <script>
-        // Applied in <head>, before <body> paints, to avoid a flash of the
-        // wrong theme. Previously duplicated in dashboard.html/profile.html
-        // only — every other page (training_calendar.html, streams.html,
-        // index.html, all 4 auth pages) never re-applied a saved theme at
-        // all, so it silently reverted on 6 of 9 pages. Living here once
-        // means every page that extends base.html gets it automatically.
+        // Runs before first paint so the page never flashes the wrong theme.
         (function () {
-            if (localStorage.getItem('theme') === 'light') {
-                document.documentElement.setAttribute('data-theme', 'light');
-            }
+            var saved = localStorage.getItem('theme');
+            var light = saved === 'light' || (!saved && window.matchMedia('(prefers-color-scheme: light)').matches);
+            if (light) document.documentElement.setAttribute('data-theme', 'light');
         })();
     </script>
-    {% block split_styles %}{% endblock %}
 </head>
-<body>
-    <header>
-        <a href="/dashboard" class="logo-container" style="text-decoration: none; color: inherit; display: flex; align-items: center; gap: 12px; transition: transform 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
-            <div class="logo-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-                </svg>
-            </div>
-            <h2 style="margin: 0; font-size: 1.25rem; font-weight: 800; letter-spacing: -0.02em;">Race Planner</h2>
-        </a>
-        <div>
+{% set path = request.url.path %}
+<body
+    data-user-id="{{ user.id if user else '' }}"
+    data-athlete-id="{{ user.strava_athlete_id if user and user.strava_athlete_id else '' }}"
+    data-dob="{{ user.date_of_birth if user and user.date_of_birth else '' }}"
+    data-sex="{{ user.gender if user and user.gender else '' }}">
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a href="{{ '/dashboard' if user else '/login' }}" class="brand">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 9 11 13 15 20 7"/><polyline points="14 7 20 7 20 13"/></svg>
+                </span>
+                <span>Race Planner</span>
+            </a>
             {% if user %}
-                {% set nav_links = [('/warehouse', 'Activities'), ('/training-calendar', 'Training Calendar')] %}
-                {% for href, label in nav_links %}
-                <a href="{{ href }}" class="nav-link{% if request.url.path == href %} active{% endif %}" style="margin-right: 15px; text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: color 0.2s;">{{ label }}</a>
+            <nav class="nav" aria-label="Main">
+                {% set links = [('/dashboard', 'Dashboard', path == '/dashboard'),
+                                ('/training-calendar', 'Calendar', path == '/training-calendar'),
+                                ('/warehouse', 'Activities', path == '/warehouse' or path.startswith('/workout_streams'))] %}
+                {% for href, label, active in links %}
+                <a href="{{ href }}"{% if active %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
                 {% endfor %}
-                <a href="/profile" class="nav-link{% if request.url.path == '/profile' %} active{% endif %}" style="margin-right: 15px; text-decoration: none; font-weight: 600; transition: color 0.2s;">{{ user.name }}</a>
-                <a href="/logout" class="btn" style="padding: 0.5rem 1rem; border: 1px solid var(--panel-border)">Logout</a>
+            </nav>
+            <div class="topbar-right">
+                {% if user.strava_athlete_id %}
+                <span id="sync-status" class="sync-status"></span>
+                <button id="sync-btn" class="btn btn-sm" type="button">Sync Strava</button>
+                {% endif %}
+                <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme">
+                    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+                    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                </button>
+                <a href="/profile" class="user-link{% if path == '/profile' %} active{% endif %}">{{ user.name }}</a>
+                <a href="/logout" class="btn btn-ghost btn-sm">Log out</a>
+            </div>
             {% else %}
-                <a href="/login" class="link">Login</a>
+            <div class="topbar-right">
+                <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme">
+                    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+                    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                </button>
+            </div>
             {% endif %}
         </div>
     </header>
 
-    <main class="container">
+    <main class="page {% block page_class %}{% endblock %}">
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Shared toast notification target for showToast() in app.js -->
-    <div id="toast" class="toast">
-        <span id="toast-msg">Success!</span>
-    </div>
-    <script src="/static/app.js"></script>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/static/js/app.js"></script>
+    {% if user and user.strava_athlete_id %}
+    <script type="module">
+        import { initSync } from '/static/js/sync.js';
+        initSync();
+    </script>
+    {% endif %}
+    {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,0 +1,105 @@
+/* Design tokens. Dark is the default; [data-theme="light"] on <html> switches.
+   Chart colors come from a palette validated for color-vision deficiency
+   (see static/js/charts/AGENTS.md); keep series and status colors as they are. */
+:root {
+  color-scheme: dark;
+
+  --bg: #0e1013;
+  --surface: #161920;
+  --surface-2: #1d212a;
+  --surface-3: #242934;
+  --border: #262b35;
+  --border-strong: #363c49;
+
+  --text: #e8eaee;
+  --text-2: #a3a9b5;
+  --text-3: #6f7685;
+  --text-on-accent: #ffffff;
+
+  --accent: #3987e5;
+  --accent-hover: #4d95ea;
+  --accent-soft: rgba(57, 135, 229, 0.14);
+  --focus-ring: 0 0 0 3px rgba(57, 135, 229, 0.35);
+
+  --good: #0ca30c;
+  --good-soft: rgba(12, 163, 12, 0.16);
+  --warning: #fab219;
+  --warning-soft: rgba(250, 178, 25, 0.16);
+  --serious: #ec835a;
+  --serious-soft: rgba(236, 131, 90, 0.16);
+  --critical: #d03b3b;
+  --critical-soft: rgba(208, 59, 59, 0.16);
+  /* Status colors as text need more contrast than as marks. */
+  --good-ink: #3dbb3d;
+  --warning-ink: #fab219;
+  --serious-ink: #ec835a;
+  --critical-ink: #ef6b6b;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-neg: #e66767;
+  --series-muted: #4b5262;
+  --ramp-1: #9ec5f4;
+  --ramp-2: #6da7ec;
+  --ramp-3: #3987e5;
+  --ramp-4: #256abf;
+  --ramp-5: #184f95;
+  --grid: #232834;
+  --axis: #363c49;
+
+  --strava: #fc4c02;
+
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f2f4f7;
+  --surface-3: #e9ecf1;
+  --border: #e3e6eb;
+  --border-strong: #cdd2da;
+
+  --text: #15181d;
+  --text-2: #5b6170;
+  --text-3: #868c98;
+
+  --accent: #2a78d6;
+  --accent-hover: #1f66bd;
+  --accent-soft: rgba(42, 120, 214, 0.12);
+  --focus-ring: 0 0 0 3px rgba(42, 120, 214, 0.3);
+
+  --good-soft: rgba(12, 163, 12, 0.12);
+  --warning-soft: rgba(250, 178, 25, 0.18);
+  --serious-soft: rgba(236, 131, 90, 0.16);
+  --critical-soft: rgba(208, 59, 59, 0.12);
+  --good-ink: #006300;
+  --warning-ink: #8a5a00;
+  --serious-ink: #b2461b;
+  --critical-ink: #b83232;
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-neg: #e34948;
+  --series-muted: #c3c7cf;
+  --ramp-1: #86b6ef;
+  --ramp-2: #5598e7;
+  --ramp-3: #2a78d6;
+  --ramp-4: #1c5cab;
+  --ramp-5: #104281;
+  --grid: #eceef2;
+  --axis: #cdd2da;
+
+  --shadow-pop: 0 12px 32px rgba(20, 24, 32, 0.14);
+}
