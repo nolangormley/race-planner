@@ -1,0 +1,1 @@
+raceplanner ALL=(root) NOPASSWD: /usr/bin/systemctl restart race-planner
