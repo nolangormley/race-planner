@@ -36,8 +36,6 @@ class RaceCreate(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
-    # name flows into training_plan_chat's system prompt (via User.name) —
-    # length-capped for the same reason as SettingsUpdate above.
     name: str = Field(max_length=100)
     email: str = Field(max_length=254)
     date_of_birth: Optional[str] = None
@@ -46,11 +44,6 @@ class ProfileUpdate(BaseModel):
     weight: Optional[float] = None  # stored in kg
 
 
-# Training-plan entries get read back into training_plan_chat's system
-# prompt as a summary of the existing plan (entries_summary), so these
-# free-text fields get the same length-cap treatment as ProfileUpdate/
-# SettingsUpdate above — generous enough for genuine AI-generated workout
-# instructions, bounded against something unbounded reaching a prompt.
 class PlanEntryCreate(BaseModel):
     date: str
     workout_type: Optional[str] = Field(default=None, max_length=200)
@@ -74,7 +67,3 @@ class BulkEntriesCreate(BaseModel):
     entries: List[PlanEntryCreate]
     name: Optional[str] = None
     race_id: Optional[int] = None
-
-
-class ChatMessageCreate(BaseModel):
-    message: str = Field(max_length=4000)

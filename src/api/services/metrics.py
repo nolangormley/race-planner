@@ -276,6 +276,52 @@ def speed_to_pace_str(speed_ms):
     return f"{m}:{s:02d} /mi"
 
 
+METERS_PER_MILE = 1609.344
+
+
+def format_pace(seconds_per_mile):
+    minutes = int(seconds_per_mile // 60)
+    seconds = int(seconds_per_mile % 60)
+    return f"{minutes}'{seconds:02d}\""
+
+
+def pace_zones_from_threshold_speed(t_speed):
+    """Coros-style pace zones around a threshold speed in m/s.
+
+    Returns (labels, speeds): labels are min/mile strings, speeds are the
+    zone edges in m/s for chart shading. Zone edges as a share of threshold
+    pace: recovery slower than 140%, aerobic endurance 119-140%, aerobic
+    power 106-119%, threshold 94.5-106%, anaerobic endurance 85-94.5%,
+    anaerobic power faster than 85%.
+    """
+    t_pace_sec = METERS_PER_MILE / t_speed
+    p140 = t_pace_sec * 1.40
+    p119 = t_pace_sec * 1.19
+    p106 = t_pace_sec * 1.06
+    p0945 = t_pace_sec * 0.945
+    p085 = t_pace_sec * 0.85
+
+    # The upper bound loses one second so neighbouring zones do not overlap.
+    labels = {
+        "Recovery": f">{format_pace(p140)}",
+        "Aerobic Endurance": f"{format_pace(p119)}-{format_pace(p140)}",
+        "Aerobic Power": f"{format_pace(p106)}-{format_pace(p119 - 1)}",
+        "Threshold": f"{format_pace(p0945)}-{format_pace(p106 - 1)}",
+        "Anaerobic Endurance": f"{format_pace(p085)}-{format_pace(p0945 - 1)}",
+        "Anaerobic Power": f"<{format_pace(p085)}",
+    }
+    speed_at = lambda sec_per_mile: METERS_PER_MILE / sec_per_mile
+    speeds = {
+        "Recovery": {"min": 0, "max": speed_at(p140)},
+        "Aerobic Endurance": {"min": speed_at(p140), "max": speed_at(p119)},
+        "Aerobic Power": {"min": speed_at(p119), "max": speed_at(p106)},
+        "Threshold": {"min": speed_at(p106), "max": speed_at(p0945)},
+        "Anaerobic Endurance": {"min": speed_at(p0945), "max": speed_at(p085)},
+        "Anaerobic Power": {"min": speed_at(p085), "max": 10.0},
+    }
+    return labels, speeds
+
+
 def calculate_pace_zones(user_id: int):
     # NOTE: previously this connection was never closed on any code path in
     # this function (get_db_connection() with no matching finally). Wrapped
@@ -324,48 +370,7 @@ def calculate_pace_zones(user_id: int):
         # Fallback to general high end speed if no threshold data
         t_speed = float(df['speed'].quantile(0.90))
 
-    # Convert t_speed to pace in seconds per mile
-    t_pace_sec = 26.8224 / t_speed * 60  # convert m/s to seconds per mile (1609.34 / t_speed)
-
-    # Coros Percentages of Threshold Pace:
-    # Recovery: > 140%
-    # Aerobic Endurance: 119% - 140%
-    # Aerobic Power: 106% - 119%
-    # Threshold: 94.5% - 106%
-    # Anaerobic Endurance: 85% - 94.5%
-    # Anaerobic Power: < 85%
-
-    def format_pace(sec):
-        m = int(sec // 60)
-        s = int(sec % 60)
-        return f"{m}'{s:02d}\""
-
-    p140 = t_pace_sec * 1.40
-    p119 = t_pace_sec * 1.19
-    p106 = t_pace_sec * 1.06
-    p0945 = t_pace_sec * 0.945
-    p085 = t_pace_sec * 0.85
-
-    # We subtract 1 second from the upper bound to prevent overlap, just like Coros
-    result = {
-        "Recovery": f">{format_pace(p140)}",
-        "Aerobic Endurance": f"{format_pace(p119)}-{format_pace(p140)}",
-        "Aerobic Power": f"{format_pace(p106)}-{format_pace(p119 - 1)}",
-        "Threshold": f"{format_pace(p0945)}-{format_pace(p106 - 1)}",
-        "Anaerobic Endurance": f"{format_pace(p085)}-{format_pace(p0945 - 1)}",
-        "Anaerobic Power": f"<{format_pace(p085)}"
-    }
-
-    # Internal values for shading charts (in m/s)
-    # v = 26.8224 / sec
-    speeds = {
-        "Recovery": {"min": 0, "max": 26.8224/p140 if p140 > 0 else 0},
-        "Aerobic Endurance": {"min": 26.8224/p140 if p140 > 0 else 0, "max": 26.8224/p119 if p119 > 0 else 0},
-        "Aerobic Power": {"min": 26.8224/p119 if p119 > 0 else 0, "max": 26.8224/p106 if p106 > 0 else 0},
-        "Threshold": {"min": 26.8224/p106 if p106 > 0 else 0, "max": 26.8224/p0945 if p0945 > 0 else 0},
-        "Anaerobic Endurance": {"min": 26.8224/p0945 if p0945 > 0 else 0, "max": 26.8224/p085 if p085 > 0 else 0},
-        "Anaerobic Power": {"min": 26.8224/p085 if p085 > 0 else 0, "max": 10.0}
-    }
+    result, speeds = pace_zones_from_threshold_speed(t_speed)
 
     return {
         "user_id": user_id,

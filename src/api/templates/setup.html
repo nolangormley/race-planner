@@ -1,34 +1,36 @@
 {% extends "base.html" %}
 
+{% block title %}Your goal race · Race Planner{% endblock %}
+{% block page_class %}page-narrow{% endblock %}
+
 {% block content %}
-<div class="auth-container glass-panel" style="animation: fade-up 0.5s ease-out; max-width: 500px;">
-    <h1 style="text-align: center; margin-bottom: 2rem; font-size: 2rem;">Race Setup</h1>
-    
-    <p style="text-align: center;">Tell us about your upcoming goal race so we can customize your training.</p>
-
-    {% if error %}
-    <div style="background: rgba(244, 63, 94, 0.2); border: 1px solid var(--primary); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; text-align: center;">
-        {{ error }}
-    </div>
-    {% endif %}
-
-    <form action="/setup-race" method="POST">
-        <div class="form-group">
-            <label for="race_length">Race Length (e.g. 5K, 10K, Half Marathon)</label>
-            <input type="text" id="race_length" name="race_length" class="form-control" required placeholder="Half Marathon">
+<div class="auth">
+    <h1>Your goal race</h1>
+    <p class="sub">The dashboard counts down to it. You can add more races later from your profile.</p>
+    {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" action="/setup-race" class="card stack">
+        <div class="form-grid">
+            <div class="field">
+                <label for="race_length">Distance</label>
+                <select class="input" id="race_length" name="race_length" required>
+                    <option value="5k">5K</option>
+                    <option value="5 mile">5 mile</option>
+                    <option value="10k">10K</option>
+                    <option value="10 mile">10 mile</option>
+                    <option value="half marathon" selected>Half marathon</option>
+                    <option value="marathon">Marathon</option>
+                </select>
+            </div>
+            <div class="field">
+                <label for="race_date">Race date</label>
+                <input class="input" type="date" id="race_date" name="race_date" required>
+            </div>
+            <div class="field full">
+                <label for="race_goal_time">Goal time <span class="faint">(optional)</span></label>
+                <input class="input" type="text" id="race_goal_time" name="race_goal_time" placeholder="1:45:00" maxlength="20" pattern="[0-9]{1,2}:[0-5][0-9](:[0-5][0-9])?">
+            </div>
         </div>
-        
-        <div class="form-group">
-            <label for="race_date">Race Date</label>
-            <input type="date" id="race_date" name="race_date" class="form-control" required>
-        </div>
-        
-        <div class="form-group">
-            <label for="race_goal_time">Goal Time (optional)</label>
-            <input type="text" id="race_goal_time" name="race_goal_time" class="form-control" placeholder="1:45:00">
-        </div>
-
-        <button type="submit" class="btn btn-primary btn-block" style="margin-top: 2rem;">Continue to Strava</button>
+        <button class="btn btn-primary btn-block" type="submit">Continue to Strava</button>
     </form>
 </div>
 {% endblock %}

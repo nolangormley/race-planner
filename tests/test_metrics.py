@@ -67,3 +67,19 @@ def test_clean_val():
     assert clean_val(pd.NA) is None
     assert clean_val(np.nan) is None
     assert clean_val(None) is None
+
+
+def test_pace_zone_speeds_are_meters_per_second():
+    from src.api.services.metrics import pace_zones_from_threshold_speed, METERS_PER_MILE
+    # Threshold at 7:00/mile.
+    t_speed = METERS_PER_MILE / 420
+    labels, speeds = pace_zones_from_threshold_speed(t_speed)
+
+    assert labels["Threshold"] == "6'36\"-7'24\""
+    assert labels["Recovery"] == ">9'48\""
+    # Threshold zone edges sit either side of the threshold speed itself.
+    assert speeds["Threshold"]["min"] < t_speed < speeds["Threshold"]["max"]
+    assert speeds["Threshold"]["max"] == pytest.approx(METERS_PER_MILE / (420 * 0.945))
+    # Zones tile the speed axis without gaps.
+    assert speeds["Recovery"]["max"] == speeds["Aerobic Endurance"]["min"]
+    assert speeds["Anaerobic Endurance"]["max"] == speeds["Anaerobic Power"]["min"]

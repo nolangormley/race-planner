@@ -362,7 +362,11 @@ class StravaDB:
                 return True
         return False
 
-def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None):
+def _no_progress(phase, **info):
+    pass
+
+
+def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None, progress=None):
     """reauth_fn is called (with no arguments) if a request comes back 401
     mid-ingestion, and must return a fresh access_token (or None/raise to
     give up). Defaults to manager.run_oauth_flow — the CLI's interactive
@@ -371,9 +375,16 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None):
     non-interactive reauth_fn instead: run_oauth_flow would otherwise try to
     open a browser and block on a local HTTP server on whatever machine is
     running the API process, which can never receive a real callback there.
+
+    progress(phase, **info) is called as the ingest moves along:
+    ('listing', page=, found=) once per page of the activity list, then
+    ('streams', done=, total=, name=) once per activity whose streams are
+    fetched. The web app's sync progress bar is built on these calls.
     """
     if reauth_fn is None:
         reauth_fn = manager.run_oauth_flow
+    if progress is None:
+        progress = _no_progress
 
     after_ts = int((datetime.now() - timedelta(days=lookback_days)).timestamp())
     print(f"Limiting ingestion to activities after {datetime.fromtimestamp(after_ts)} ({lookback_days} days lookback)")
@@ -386,12 +397,14 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None):
     except Exception as e:
         print(f"Warning: Could not fetch athlete profile: {e}")
 
+    # Pass 1 lists every activity in the window, so pass 2 knows its total
+    # before it starts and the progress bar can show "n of N".
+    activities = []
     page = 1
-    processed_count = 0
     while True:
         print(f"Fetching activities page {page}...")
         try:
-            activities = manager.fetch_activities(access_token, count=50, page=page, after=after_ts)
+            batch = manager.fetch_activities(access_token, count=50, page=page, after=after_ts)
         except Exception as e:
             print(f"Error fetching activities on page {page}: {e}")
             if "Unauthorized" in str(e):
@@ -401,51 +414,47 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None):
                 continue
             break
 
-        if not activities:
+        if not batch:
             print("No more activities found.")
             break
 
-        print(f"Found {len(activities)} activities on page {page}.")
-        for act in activities:
-            act_id = act.get('id')
-            if act_id is None:
-                print(f"  Skipping malformed activity entry with no id: {act}")
-                continue
-            act_name = act.get('name', '(unnamed)')
-            exists = db.activity_exists(act_id)
-            has_streams = db.activity_has_streams(act_id)
-
-            if not exists or not has_streams:
-                if not exists:
-                    print(f"  New activity: {act_name} ({act_id})")
-                else:
-                    print(f"  Activity exists but missing streams: {act_name} ({act_id})")
-
-                db.upsert_activity(act)
-                try:
-                    streams = manager.fetch_activity_streams(access_token, act_id)
-                    if streams:
-                        db.insert_streams(act_id, streams)
-                        print(f"    Streams saved.")
-                except Exception as str_e:
-                    print(f"    Error fetching streams for {act_id}: {str_e}")
-                    if "Unauthorized" in str(str_e):
-                        print("    Token expired during stream fetch, re-authenticating...")
-                        access_token = reauth_fn()
-                        if access_token:
-                            streams = manager.fetch_activity_streams(access_token, act_id)
-                            if streams: db.insert_streams(act_id, streams)
-                processed_count += 1
-            else:
-                # Debug: skip message
-                # print(f"  Skipping {act_name} (already indexed)")
-                pass
-
-        if len(activities) < 50:
+        activities.extend(batch)
+        progress('listing', page=page, found=len(activities))
+        if len(batch) < 50:
             print("Reached last page of activities.")
             break
         page += 1
-    return processed_count
+
+    pending = []
+    for act in activities:
+        act_id = act.get('id')
+        if act_id is None:
+            print(f"  Skipping malformed activity entry with no id: {act}")
+            continue
+        if not db.activity_exists(act_id) or not db.activity_has_streams(act_id):
+            pending.append(act)
+
+    # Pass 2 makes one streams request per new (or stream-less) activity.
+    for position, act in enumerate(pending, start=1):
+        act_id = act['id']
+        act_name = act.get('name', '(unnamed)')
+        print(f"  Syncing {act_name} ({act_id})")
+        db.upsert_activity(act)
+        try:
+            streams = manager.fetch_activity_streams(access_token, act_id)
+            if streams:
+                db.insert_streams(act_id, streams)
+                print("    Streams saved.")
+        except Exception as str_e:
+            print(f"    Error fetching streams for {act_id}: {str_e}")
+            if "Unauthorized" in str(str_e):
+                print("    Token expired during stream fetch, re-authenticating...")
+                access_token = reauth_fn()
+                if access_token:
+                    streams = manager.fetch_activity_streams(access_token, act_id)
+                    if streams: db.insert_streams(act_id, streams)
+        progress('streams', done=position, total=len(pending), name=act_name)
+    return len(pending)
 
 def calculate_trimp_banister(duration_sec, avg_hr, max_hr, rest_hr, is_male):
     if max_hr <= rest_hr: return 0
@@ -475,13 +484,17 @@ def calculate_aerobic_decoupling(hr_times, hr_values, vel_times, vel_values):
     if ef1 == 0: return 0
     return ((ef1 - ef2) / ef1) * 100
 
-def run_analyze_effectiveness(db):
+def run_analyze_effectiveness(db, progress=None):
     """Computes per-activity TRIMP/EF/zones/decoupling into
     activity_effectiveness. This is the sole implementation of that math in
     the codebase (see calculate_training_status_logic in src/api/main.py,
     which now just aggregates this table's output) — unify any future change
     here rather than adding a second copy elsewhere.
+
+    progress('metrics', done=, total=) is called once per activity.
     """
+    if progress is None:
+        progress = _no_progress
     con = db.con
     # Upsert (activity_id is the PRIMARY KEY) instead of DROP+recreate: a
     # crash partway through used to lose every activity's previously-computed
@@ -514,6 +527,7 @@ def run_analyze_effectiveness(db):
     processed = 0
     total = len(acts)
     for i, (act_id, name, date, rep_max_hr, avg_speed, sex, avg_hr_summary, moving_time) in enumerate(acts):
+        progress('metrics', done=i, total=total)
         if i % 10 == 0:
             print(f"  Processing {i}/{total}: {name}...")
 
@@ -608,7 +622,7 @@ def run_analyze_training_load(db):
     return {"CTL": today['CTL'], "ATL": today['ATL'], "TSB": today['TSB']}
 
 
-def sync_athlete(refresh_token, lookback_days=180, db_path=None):
+def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None):
     """Runs one full ingest + effectiveness + training-load cycle for a
     single athlete, using their own stored refresh_token — this is what
     backs the web app's on-demand "Sync Strava Now" action
@@ -621,6 +635,10 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None):
     (the API route) is expected to turn that into a "reconnect Strava" error
     response rather than opening a browser.
 
+    progress(phase, **info) receives the phases 'auth', 'listing', 'streams',
+    'metrics' and 'load' in that order; see src.api.services.sync for the
+    consumer.
+
     NOTE: DuckDB allows only one read-write connection to a file at a time.
     A sync can take anywhere from a few seconds to a couple of minutes
     depending on how many new activities there are (one streams request
@@ -629,6 +647,9 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None):
     DuckDB constraint, not something this function works around — see
     agent_prompting/improvement_plan.md.
     """
+    if progress is None:
+        progress = _no_progress
+    progress('auth')
     manager = StravaManager()
     access_token, new_refresh_token = manager.refresh_access_token(refresh_token)
 
@@ -641,8 +662,10 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None):
 
     db = StravaDB(db_path=db_path or DB_PATH)
     try:
-        count = ingest_data(manager, db, access_token, lookback_days=lookback_days, reauth_fn=_reauth_unavailable)
-        run_analyze_effectiveness(db)
+        count = ingest_data(manager, db, access_token, lookback_days=lookback_days, reauth_fn=_reauth_unavailable, progress=progress)
+        progress('metrics')
+        run_analyze_effectiveness(db, progress=progress)
+        progress('load')
         run_analyze_training_load(db)
     finally:
         db.con.close()

@@ -1,0 +1,13 @@
+.chart-slot { min-height: 120px; }
+
+.week-table td:first-child { white-space: nowrap; color: var(--text); font-weight: 500; }
+.week-table tr.today td:first-child { color: var(--accent); }
+.week-table .status { text-align: right; }
+
+.ai-note { font-size: 13px; line-height: 1.55; color: var(--text-2); max-width: 760px; }
+.ai-note p { margin: 0 0 8px; }
+.ai-note ul { margin: 0; padding-left: 18px; }
+.ai-note li { margin-bottom: 4px; }
+
+.zone-table td:first-child { width: 36%; }
+.zone-table .zone-name { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 500; }

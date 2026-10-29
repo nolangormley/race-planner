@@ -1,0 +1,20 @@
+.stat-strip-card { padding: 14px 20px; }
+.stat-strip { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.stat-strip > div { padding: 2px 16px; border-left: 1px solid var(--border); min-width: 0; }
+.stat-strip > div:first-child { padding-left: 0; border-left: 0; }
+.stat-strip dt { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
+.stat-strip dd { margin-top: 2px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.stat-strip dd small { font-size: 12px; color: var(--text-2); font-weight: 500; margin-left: 2px; }
+@media (max-width: 1000px) {
+  .stat-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 14px; }
+  .stat-strip > div:nth-child(5) { padding-left: 0; border-left: 0; }
+}
+@media (max-width: 560px) {
+  .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-strip > div:nth-child(odd) { padding-left: 0; border-left: 0; }
+}
+
+.effort-hero { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+.effort-hero .value { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.effort-hero .label { font-size: 12px; color: var(--text-2); }
+.ai-note { font-size: 13px; line-height: 1.55; color: var(--text-2); white-space: pre-line; }

@@ -11,7 +11,7 @@ from datetime import datetime
 
 import bcrypt
 
-from .database import SessionLocal, User
+from .database import SessionLocal, User, Race
 
 load_dotenv()
 
@@ -176,6 +176,9 @@ def setup_race_post(
     user.race_length = race_length
     user.race_date = r_date
     user.race_goal_time = race_goal_time
+    # The dashboard and training plan read races from the races table, so
+    # the first-run race goes there too.
+    db.add(Race(user_id=user.id, race_length=race_length, race_date=r_date, goal_time=race_goal_time or None))
     db.commit()
 
     return RedirectResponse(url="/strava-auth", status_code=status.HTTP_302_FOUND)

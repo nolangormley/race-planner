@@ -1,0 +1,149 @@
+"""Background Strava syncs that the browser can watch.
+
+POST /api/sync-strava/{user_id} starts one job per user in a thread and returns
+at once. GET on the same path reads the job's snapshot, which the sync progress
+bar polls until the job is done. src.pipeline.sync_athlete reports its phases
+through the progress callback each job hands it; this module turns those calls
+into one percentage and one line of text.
+"""
+import logging
+import threading
+from datetime import datetime, timezone
+
+from src.pipeline import StravaAuthError
+
+logger = logging.getLogger("race_planner.sync")
+
+# Each phase owns a slice of the 0-100 bar. The streams phase gets the most
+# because it makes one Strava request per new activity.
+PHASE_SPAN = {
+    "auth": (0, 3),
+    "listing": (3, 10),
+    "streams": (10, 70),
+    "metrics": (70, 95),
+    "load": (95, 100),
+}
+
+PHASE_LABEL = {
+    "auth": "Refreshing Strava access",
+    "listing": "Fetching your activity list",
+    "streams": "Downloading activity streams",
+    "metrics": "Computing training metrics",
+    "load": "Calculating training load",
+    "done": "Sync complete",
+    "error": "Sync failed",
+}
+
+
+class SyncAlreadyRunning(Exception):
+    pass
+
+
+class SyncJob:
+    def __init__(self, user_id):
+        self.user_id = user_id
+        self.status = "running"
+        self.phase = "auth"
+        self.done = 0
+        self.total = 0
+        self.detail = ""
+        self.new_activities = None
+        self.error = None
+        self.error_kind = None
+        self.started_at = datetime.now(timezone.utc)
+        self.finished_at = None
+        self.lock = threading.Lock()
+
+    def update(self, phase, done=0, total=0, name="", page=0, found=0):
+        """The progress callback that sync_athlete calls."""
+        with self.lock:
+            self.phase = phase
+            self.done = done
+            self.total = total
+            if phase == "listing":
+                self.detail = f"page {page}, {found} activities found"
+            else:
+                self.detail = name
+
+    def finish(self, new_activities):
+        with self.lock:
+            self.status = "done"
+            self.phase = "done"
+            self.new_activities = new_activities
+            self.detail = ""
+            self.finished_at = datetime.now(timezone.utc)
+
+    def fail(self, error, kind="error"):
+        with self.lock:
+            self.status = "error"
+            self.phase = "error"
+            self.error = error
+            self.error_kind = kind
+            self.finished_at = datetime.now(timezone.utc)
+
+    def percent(self):
+        if self.status == "done":
+            return 100
+        start, end = PHASE_SPAN.get(self.phase, (0, 0))
+        if self.total:
+            return round(start + (end - start) * min(self.done, self.total) / self.total)
+        return start
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "status": self.status,
+                "phase": self.phase,
+                "label": PHASE_LABEL[self.phase],
+                "detail": self.detail,
+                "done": self.done,
+                "total": self.total,
+                "percent": self.percent(),
+                "new_activities": self.new_activities,
+                "error": self.error,
+                "error_kind": self.error_kind,
+                "started_at": self.started_at.isoformat(),
+                "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            }
+
+
+class SyncRegistry:
+    """One live job per user. A finished job stays until the next one starts,
+    so a page that loads right after a sync can still show its result."""
+
+    def __init__(self):
+        self.jobs = {}
+        self.lock = threading.Lock()
+
+    def get(self, user_id):
+        return self.jobs.get(user_id)
+
+    def start(self, user_id, run_sync, on_success):
+        """run_sync(progress) does the sync and returns (new_refresh_token, count).
+        on_success(new_refresh_token) runs in the worker thread when run_sync
+        returns, before the job is marked done."""
+        with self.lock:
+            current = self.jobs.get(user_id)
+            if current and current.status == "running":
+                raise SyncAlreadyRunning()
+            job = SyncJob(user_id)
+            self.jobs[user_id] = job
+        worker = threading.Thread(
+            target=self.run, args=(job, run_sync, on_success), daemon=True, name=f"strava-sync-{user_id}"
+        )
+        worker.start()
+        return job
+
+    def run(self, job, run_sync, on_success):
+        try:
+            new_refresh_token, count = run_sync(job.update)
+            on_success(new_refresh_token)
+            job.finish(count)
+        except StravaAuthError as exc:
+            job.fail(str(exc), kind="auth")
+        except Exception as exc:
+            logger.exception("Strava sync failed for user %s", job.user_id)
+            job.fail(str(exc))
+
+
+registry = SyncRegistry()

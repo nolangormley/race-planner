@@ -9,14 +9,11 @@ from typing import Optional, List
 import duckdb
 import pandas as pd
 import numpy as np
-from datetime import datetime, date
-import calendar
-import json
+from datetime import datetime, date, timedelta
 import logging
 import os
 import secrets
 import random
-import requests
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
@@ -37,15 +34,16 @@ ACTIVITY_TABLES_TO_DELETE = (
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.metrics import get_target_category
-from src.pipeline import sync_athlete, StravaAuthError
+from src.pipeline import sync_athlete
 from src.api.auth_routes import router as auth_router, get_current_user, get_current_user_from_session
-from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry, ChatMessage
+from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry
 from src.api.schemas import (
     WorkoutCreate, SettingsUpdate, RaceCreate, ProfileUpdate,
-    PlanEntryCreate, PlanEntryUpdate, BulkEntriesCreate, ChatMessageCreate,
+    PlanEntryCreate, PlanEntryUpdate, BulkEntriesCreate,
 )
+from src.api.services.sync import registry as sync_registry, SyncAlreadyRunning
 from src.api.services.llm import (
-    call_llm, get_llm_provider, clean_json_response, LLMConfigError, cached_call,
+    call_llm, get_llm_provider, LLMConfigError, cached_call,
     TRAINING_BENCHMARKS, NO_PSEUDOSCIENCE_CLAUSE, NEVER_CONTRADICT_STANDING_CLAUSE,
 )
 from src.api.deps import get_db_connection, DEFAULT_MAX_HR
@@ -122,6 +120,17 @@ os.makedirs(os.path.join(BASE_DIR, "templates"), exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+
+@app.middleware("http")
+async def revalidate_static_files(request: Request, call_next):
+    # The front end is plain ES modules with no build step or hashed file
+    # names, so a deploy must not leave browsers on a cached old version.
+    # no-cache keeps the files cached but revalidates them (ETag) on each load.
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 # ==========================================
@@ -223,145 +232,60 @@ def get_user_activities(user_id: int, limit: Optional[int] = 100, current_user: 
     finally:
         con.close()
 
-@app.post("/api/sync-strava/{user_id}")
-def sync_strava(user_id: int, current_user: User = Depends(get_current_user)):
-    """Manually triggers a Strava sync for the logged-in user, using their
-    own stored refresh token (captured at /strava-callback). This is the
-    only thing that connects a web user's Strava login to the DuckDB
-    warehouse — before this route existed, /strava-callback stored tokens
-    that were never read anywhere else, and the warehouse could only be
-    populated by running src/pipeline.py by hand against a single
-    developer's STRAVA_REFRESH_TOKEN in .env (see
-    agent_prompting/improvement_plan.md Section 2).
+def record_sync_result(user_id, new_refresh_token):
+    """Runs in the sync worker thread once sync_athlete returns."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if new_refresh_token:
+            user.strava_refresh_token = new_refresh_token
+        user.strava_last_synced_at = datetime.utcnow()
+        db.commit()
+    finally:
+        db.close()
 
-    This runs synchronously (it's a plain `def` route, so FastAPI runs it in
-    its thread pool rather than blocking the event loop) — for an account
-    with a lot of new activity this can take a while, and while it's
-    running, other requests that need to write to the DuckDB warehouse may
-    block or fail, since DuckDB only allows one read-write connection to a
-    file at a time. Fine for a manual, deliberate "Sync Now" click on a
-    small personal app; a background job queue would be the fix if this
-    ever needs to run automatically/frequently or the warehouse ever
-    supports many concurrent users.
+
+def sync_state(user_id, last_synced_at):
+    job = sync_registry.get(user_id)
+    return {
+        "job": job.snapshot() if job else None,
+        "last_synced_at": last_synced_at.isoformat() + "Z" if last_synced_at else None,
+    }
+
+
+@app.post("/api/sync-strava/{user_id}", status_code=202)
+def start_strava_sync(user_id: int, current_user: User = Depends(get_current_user)):
+    """Starts a background Strava sync for the logged-in user. The sync runs
+    in a thread (see src.api.services.sync) and reports its progress through
+    GET on the same path, which the UI polls to drive its progress bar.
+
+    DuckDB allows one read-write connection per file, but every connection
+    opened in this process shares one database instance, so dashboard reads
+    keep working while the sync writes.
     """
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to sync Strava data for this user")
-
     if not current_user.strava_refresh_token:
         raise HTTPException(status_code=400, detail="Strava isn't connected for this account yet — visit /strava-auth first.")
 
+    refresh_token = current_user.strava_refresh_token
     try:
-        new_refresh_token, new_activity_count = sync_athlete(current_user.strava_refresh_token)
-    except StravaAuthError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Strava sync failed: {e}")
+        sync_registry.start(
+            user_id,
+            run_sync=lambda progress: sync_athlete(refresh_token, progress=progress),
+            on_success=lambda new_token: record_sync_result(user_id, new_token),
+        )
+    except SyncAlreadyRunning:
+        raise HTTPException(status_code=409, detail="A sync is already running for this account.")
+    return sync_state(user_id, current_user.strava_last_synced_at)
 
-    if new_refresh_token:
-        db = SessionLocal()
-        try:
-            user = db.query(User).filter(User.id == current_user.id).first()
-            user.strava_refresh_token = new_refresh_token
-            db.commit()
-        finally:
-            db.close()
 
-    return {"message": "Sync complete", "new_activities": new_activity_count}
-
-# Mileage summary endpoint – planned vs actual mileage for a user
-@app.get("/api/mileage-summary/{user_id}")
-def get_mileage_summary(user_id: int, start: str = None, end: str = None, current_user: User = Depends(get_current_user)):
-    """Return planned vs actual mileage for the user.
-
-    Args:
-        user_id: User/athlete ID
-        start: Start date filter (YYYY-MM-DD), defaults to start of current month
-        end: End date filter (YYYY-MM-DD), defaults to end of current month
-    """
+@app.get("/api/sync-strava/{user_id}")
+def strava_sync_status(user_id: int, current_user: User = Depends(get_current_user)):
     if user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this user's mileage summary")
+        raise HTTPException(status_code=403, detail="Not authorized to view this user's sync status")
+    return sync_state(user_id, current_user.strava_last_synced_at)
 
-    if not current_user.strava_athlete_id:
-        return {"planned_miles": 0, "actual_miles": 0, "planned_days": 0, "completed_days": 0, "rest_days": 0}
-    athlete_id = current_user.strava_athlete_id
-
-    # Determine date range
-    if not (start and end):
-        today = date.today()
-        start = today.replace(day=1).isoformat()
-        last_day = calendar.monthrange(today.year, today.month)[1]
-        end = today.replace(day=last_day).isoformat()
-
-    try:
-        start_date = datetime.strptime(start, '%Y-%m-%d').date()
-        end_date = datetime.strptime(end, '%Y-%m-%d').date()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="start/end must be YYYY-MM-DD dates.")
-
-    db = SessionLocal()
-    con = get_db_connection()
-    try:
-        # TrainingPlan/TrainingPlanEntry live in Postgres (via SQLAlchemy),
-        # not the DuckDB warehouse — this used to query them through the
-        # DuckDB connection, which has no such tables and raised a Catalog
-        # Error on every single call. See
-        # agent_prompting/improvement_plan.md Section 6.
-        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
-
-        planned = 0.0
-        planned_days = 0
-        completed_days = 0
-        rest_days = 0
-        if plan:
-            # Planned mileage is the full plan's total (unfiltered by date,
-            # matching the original behavior); day counts below ARE
-            # filtered to the requested range.
-            for entry in db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).all():
-                if entry.approximate_distance:
-                    try:
-                        num = float(entry.approximate_distance.split()[0])
-                        if 'km' in entry.approximate_distance.lower():
-                            num = num * 0.621371
-                        planned += num
-                    except (ValueError, IndexError):
-                        pass
-
-            ranged_entries = db.query(TrainingPlanEntry).filter(
-                TrainingPlanEntry.plan_id == plan.id,
-                TrainingPlanEntry.date.between(start_date, end_date)
-            ).all()
-            for entry in ranged_entries:
-                if entry.workout_type and entry.workout_type.lower() == 'rest':
-                    rest_days += 1
-                else:
-                    planned_days += 1
-                if entry.is_completed:
-                    completed_days += 1
-
-        # Actual mileage still comes from the DuckDB warehouse (distance in
-        # meters -> miles).
-        activities = con.execute(
-            "SELECT distance FROM dim_activity WHERE athlete_id = ? AND start_date_local::DATE BETWEEN ? AND ?",
-            [athlete_id, start, end]
-        ).fetchall()
-        actual_meters = sum(row[0] for row in activities if row[0])
-        actual_miles = actual_meters * 0.000621371
-
-        return {
-            "planned_miles": round(planned, 2),
-            "actual_miles": round(actual_miles, 2),
-            "planned_days": planned_days,
-            "completed_days": completed_days,
-            "rest_days": rest_days
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Mileage summary error")
-        raise HTTPException(status_code=500, detail="Internal server error.")
-    finally:
-        con.close()
-        db.close()
 @app.get("/api/activities/{activity_id}")
 def get_activity(activity_id: int, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
@@ -853,120 +777,6 @@ def get_vo2max(user_id: int, current_user: User = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="No stream data found to calculate VO2 Max for this user.")
     return vo2max_data
 
-def get_ai_training_plan(stats, race_date: str, race_type: str, goal_time: Optional[str] = None, pace_zones: Optional[dict] = None):
-    try:
-        current_date_str = stats.get('date', datetime.now().strftime('%Y-%m-%d'))
-
-        prompt = (
-            f"The athlete is racing a {race_type} on {race_date}.\n"
-        )
-        if goal_time:
-            prompt += f"Their goal time is {goal_time}.\n"
-        else:
-            prompt += "They have not provided a goal time. Please recommend a challenging but realistic goal time based on their current fitness level (especially VO2 max and Threshold pace) and include it in your response.\n"
-
-        prompt += (
-            f"Today's date is {current_date_str}.\n"
-            f"Please create a daily training plan from tomorrow until the race date.\n\n"
-            f"Current fitness stats to consider:\n"
-            f"- Fitness (CTL): {stats.get('fitness_ctl', 'N/A')}\n"
-            f"- Fatigue (ATL): {stats.get('fatigue_atl', 'N/A')}\n"
-            f"- Form (TSB): {stats.get('form_tsb', 'N/A')}\n"
-            f"- Estimated VO2 Max: {stats.get('latest_vo2_max', 'N/A')}\n"
-            f"- 7-Day Efficiency Factor: {stats.get('efficiency_factor_7d', 'N/A')}\n"
-            f"- 7-Day Aerobic Decoupling: {stats.get('aerobic_decoupling_7d', 'N/A')}%\n\n"
-            f"Based on these metrics, tailor the difficulty and volume of the plan. "
-            f"If fatigue is high, perhaps start with recovery. If fitness is high, challenge them appropriately.\n"
-        )
-
-        if pace_zones and "pace_zones_min_per_mile" in pace_zones:
-            prompt += "\nUse the following exact pace zones based on their recent data when recommending how fast they should run:\n"
-            for z_name, z_range in pace_zones["pace_zones_min_per_mile"].items():
-                prompt += f"- {z_name}: {z_range}\n"
-            prompt += "\nMake sure to explicitly mention these paces in the workout 'description' so the user knows what speed to run at. Just use the mean of the pace zone range when providing the pace in the description.\n\n"
-
-        weight_str = f"weighs {stats.get('weight_lbs')}lbs" if stats.get('weight_lbs') else "weighs 220lbs"
-        sex_str = stats.get('sex', 'male')
-        if sex_str == 'M': sex_str = 'male'
-        elif sex_str == 'F': sex_str = 'female'
-
-        system_prompt = (
-            f"You are an expert running coach. Your athlete is {sex_str} and {weight_str}. "
-            f"{TRAINING_BENCHMARKS}"
-            f"{NO_PSEUDOSCIENCE_CLAUSE}"
-            "Do not schedule more than one hard/quality session (Tempo, Long Run, Interval, Race) per day — pair hard days with Easy Run or Rest so the week has real recovery. "
-            "You must respond STRICTLY with a valid JSON object. Do not include markdown formatting like ```json or any text outside the JSON framework. "
-            "The JSON object must have three keys:\n"
-            "1. 'blurb': a short introductory and motivating message about the plan.\n"
-            "2. 'recommended_goal_time': a string recommending a goal time based on their metrics. If they provided a goal time, just restate it.\n"
-            "3. 'plan': a dictionary where keys are the dates in 'YYYY-MM-DD' format, and values are objects with keys: "
-            "'type_of_workout' (e.g., Easy Run, Tempo, Long Run, Rest), 'training_focus' (the purpose of the workout), "
-            "'approximate_distance' (e.g., '5 miles'), and 'description' (detailed instructions).\n"
-            "CRITICAL TOKEN LIMIT: Do not generate more than 60 days of workouts at once. If the user asks for a plan longer than 8 weeks, generate the first 8 weeks and explain in your 'blurb' that you generated the first phase and they can ask you to generate the next phase later."
-        )
-
-        provider = get_llm_provider()
-        if provider not in ("groq", "deepseek", "gemini"):
-            return {"error": "This feature currently requires the LLM_PROVIDER to be set to groq, deepseek, or gemini in order to return properly formatted JSON."}
-
-        model = "llama-3.3-70b-versatile" if provider == "groq" else None
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
-        try:
-            content = call_llm(messages, model=model, json_mode=True, max_tokens=8192, timeout=300)
-        except LLMConfigError as e:
-            return {"error": str(e)}
-        except requests.exceptions.HTTPError as e:
-            return {"error": str(e)}
-
-        content_clean = clean_json_response(content)
-        try:
-            return json.loads(content_clean)
-        except json.JSONDecodeError:
-            return {"error": "Failed to parse JSON response from LLM", "raw_content": content_clean}
-
-    except Exception as e:
-        print(f"Error getting AI training plan: {e}")
-        return {"error": str(e)}
-
-@app.get("/schedule/{user_id}")
-def get_race_schedule(user_id: int, race_date: str, race_type: str, goal_time: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    # user_id here is the Strava athlete_id (see /status/{user_id} above).
-    if user_id != current_user.strava_athlete_id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's schedule")
-    # Validations
-    try:
-        datetime.strptime(race_date, '%Y-%m-%d')
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid race_date format. Must be YYYY-MM-DD.")
-        
-    valid_race_types = ["5k", "5 mile", "10k", "10 mile", "half marathon", "marathon"]
-    if race_type.lower() not in valid_race_types:
-        raise HTTPException(status_code=400, detail=f"Invalid race_type. Must be one of: {', '.join(valid_race_types)}")
-        
-    status = calculate_training_status_logic(user_id)
-    if not status:
-        # Fallback to an empty stats dict if they have no training history
-        status = {"user_id": user_id}
-        
-    pace_zones = calculate_pace_zones(user_id)
-        
-    plan = get_ai_training_plan(status, race_date, race_type, goal_time, pace_zones)
-    
-    if "error" in plan:
-        raise HTTPException(status_code=500, detail=plan["error"])
-        
-    return {
-        "user_id": user_id,
-        "race_date": race_date,
-        "race_type": race_type,
-        "goal_time": goal_time,
-        "pace_zones": pace_zones,
-        "schedule": plan
-    }
-
 @app.get("/pace_zones/{user_id}")
 def get_pace_zones(user_id: int, current_user: User = Depends(get_current_user)):
     # user_id here is the Strava athlete_id (see /status/{user_id} above).
@@ -1024,12 +834,36 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
         total_hr_secs = sum(row[1] for row in hr_data)
 
         load_query = """
-        SELECT type, SUM(distance) as total_dist
+        SELECT type, SUM(distance) as total_dist, SUM(moving_time) as total_time, COUNT(*) as activities
         FROM dim_activity
         WHERE athlete_id = ? AND start_date_local >= current_date - interval '30 days'
         GROUP BY type
+        ORDER BY total_time DESC
         """
         load_data = con.execute(load_query, [user_id]).fetchall()
+
+        # Run volume per week for the last 12 weeks (Monday-based), with
+        # empty weeks filled in so the chart's x-axis is continuous.
+        weekly_rows = con.execute("""
+        SELECT date_trunc('week', start_date_local)::DATE as week_start,
+               SUM(distance) as distance, SUM(moving_time) as moving_time, COUNT(*) as runs
+        FROM dim_activity
+        WHERE athlete_id = ? AND type = 'Run'
+          AND start_date_local >= date_trunc('week', current_date) - interval '11 weeks'
+        GROUP BY 1
+        """, [user_id]).fetchall()
+        by_week = {row[0]: row for row in weekly_rows}
+        this_week = date.today() - timedelta(days=date.today().weekday())
+        weekly_volume = []
+        for weeks_back in range(11, -1, -1):
+            week_start = this_week - timedelta(weeks=weeks_back)
+            row = by_week.get(week_start)
+            weekly_volume.append({
+                "week_start": str(week_start),
+                "distance": row[1] if row else 0,
+                "moving_time": row[2] if row else 0,
+                "runs": row[3] if row else 0,
+            })
 
         return {
             "hr_zones": [
@@ -1040,7 +874,11 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
                 }
                 for row in hr_data
             ],
-            "load_dist": [{"type": row[0], "distance": row[1]} for row in load_data]
+            "load_dist": [
+                {"type": row[0], "distance": row[1], "moving_time": row[2], "activities": row[3]}
+                for row in load_data
+            ],
+            "weekly_volume": weekly_volume,
         }
     except Exception as e:
         return {"error": str(e)}
@@ -1234,13 +1072,11 @@ def get_training_plan(user_id: int, current_user: User = Depends(get_current_use
     try:
         plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
         if not plan:
-            return {"plan": None, "entries": [], "chat_messages": []}
+            return {"plan": None, "entries": []}
         entries = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).order_by(TrainingPlanEntry.date).all()
-        messages = db.query(ChatMessage).filter(ChatMessage.plan_id == plan.id).order_by(ChatMessage.id).all()
         return {
             "plan": _plan_to_dict(plan),
             "entries": [_entry_to_dict(e) for e in entries],
-            "chat_messages": [{"id": m.id, "role": m.role, "content": m.content, "created_at": str(m.created_at)} for m in messages],
         }
     finally:
         db.close()
@@ -1344,7 +1180,9 @@ def update_plan_entry(entry_id: int, update: PlanEntryUpdate, current_user: User
             entry.description = update.description
         if update.is_completed is not None:
             entry.is_completed = update.is_completed
-        if update.strava_activity_id is not None:
+        # Sent explicitly as null to detach an activity, so test for the
+        # field being present rather than non-null.
+        if 'strava_activity_id' in update.model_fields_set:
             entry.strava_activity_id = update.strava_activity_id
         db.commit()
         return _entry_to_dict(entry)
@@ -1373,188 +1211,5 @@ def delete_plan_entry(entry_id: int, current_user: User = Depends(get_current_us
         db.delete(entry)
         db.commit()
         return {"message": "Entry deleted"}
-    finally:
-        db.close()
-
-
-@app.post("/api/training-plan/{user_id}/chat")
-def training_plan_chat(user_id: int, msg: ChatMessageCreate, current_user: User = Depends(get_current_user)):
-    """Send a message to the AI to modify the training plan and persist the conversation."""
-    if user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this training plan")
-    db = SessionLocal()
-    try:
-        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
-        if not plan:
-            plan = TrainingPlan(user_id=user_id, name="My Training Plan")
-            db.add(plan)
-            db.commit()
-            db.refresh(plan)
-
-        entries = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).order_by(TrainingPlanEntry.date).all()
-        entries_summary = "\n".join(
-            [f"  - {str(e.date)}: {e.workout_type} ({e.approximate_distance or 'N/A'}) — {e.description or ''}" for e in entries]
-        ) if entries else "  (No entries yet — this is a blank plan.)"
-
-        history = db.query(ChatMessage).filter(ChatMessage.plan_id == plan.id).order_by(ChatMessage.id.desc()).limit(20).all()
-        history = list(reversed(history))
-
-        user = db.query(User).filter(User.id == user_id).first()
-        user_info = ""
-        if user:
-            user_info = f"Athlete: {user.name}, Gender: {user.gender or 'N/A'}, Weight: {user.weight or 'N/A'} kg."
-            if user.race_date and user.race_length:
-                user_info += f" Racing a {user.race_length} on {user.race_date}."
-
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        system_prompt = (
-            f"You are an expert running coach AI assistant helping to build and modify a training calendar. {user_info}\n"
-            f"Today's date is {today_str}.\n"
-            f"The current training plan has these entries:\n{entries_summary}\n\n"
-            f"{NO_PSEUDOSCIENCE_CLAUSE}"
-            "Do not schedule more than one hard/quality session (Tempo, Long Run, Interval, Race) per day — pair hard days with Easy Run or Rest so the week has real recovery.\n"
-            "When the user asks you to modify the plan, respond with a JSON object that has:\n"
-            "1. 'message': a friendly conversational reply explaining what you've done or recommending changes.\n"
-            "2. 'plan_updates': (optional) an object where keys are 'YYYY-MM-DD' dates and values are objects with keys: "
-            "'workout_type', 'training_focus', 'approximate_distance', 'description'. "
-            "Only include dates you are adding or changing. To remove a day, set 'workout_type' to 'Delete'.\n"
-            "3. 'replace_all': (optional) boolean — if true, the full new plan will be in 'full_plan' instead of 'plan_updates'.\n"
-            "4. 'full_plan': (optional) same structure as plan_updates but represents the complete new plan.\n"
-            "If the user is just chatting (no plan changes needed), only include 'message'.\n"
-            "CRITICAL TOKEN LIMIT: Do not generate more than 60 days of workouts at once. If the user asks for a plan longer than 8 weeks, generate the first 8 weeks and explain in your message that you generated the first phase and they can ask you to generate the next phase.\n"
-            "CRITICAL: Always respond with valid JSON only. Do not wrap the JSON in ```json blocks or markdown. Output raw JSON."
-        )
-
-        messages_payload = [{"role": "system", "content": system_prompt}]
-        for h in history:
-            messages_payload.append({"role": h.role, "content": h.content})
-        messages_payload.append({"role": "user", "content": msg.message})
-
-        user_msg = ChatMessage(plan_id=plan.id, role="user", content=msg.message)
-        db.add(user_msg)
-        db.commit()
-
-        provider = get_llm_provider()
-        if provider not in ("groq", "deepseek", "gemini"):
-            ai_reply = "AI chat requires LLM_PROVIDER=groq, deepseek, or gemini to be set."
-            ai_msg = ChatMessage(plan_id=plan.id, role="assistant", content=ai_reply)
-            db.add(ai_msg)
-            db.commit()
-            return {"message": ai_reply, "plan_updates": None, "entries": [_entry_to_dict(e) for e in entries]}
-
-        model = "llama-3.3-70b-versatile" if provider == "groq" else None
-        try:
-            content = call_llm(messages_payload, model=model, json_mode=True, max_tokens=8192, timeout=300)
-        except LLMConfigError as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-        content_clean = clean_json_response(content)
-
-        try:
-            parsed = json.loads(content_clean)
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse JSON. Raw content: {content}")
-            ai_reply = "Sorry, I couldn't process that properly."
-            ai_msg = ChatMessage(plan_id=plan.id, role="assistant", content=ai_reply)
-            db.add(ai_msg)
-            db.commit()
-            return {"message": ai_reply, "entries": [_entry_to_dict(e) for e in db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).order_by(TrainingPlanEntry.date).all()]}
-
-        ai_reply = parsed.get("message", "Done.")
-        ai_msg = ChatMessage(plan_id=plan.id, role="assistant", content=ai_reply)
-        db.add(ai_msg)
-        db.commit()
-
-        if parsed.get("replace_all") and "full_plan" in parsed:
-            db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).delete()
-            db.commit()
-            for date_str, w in parsed["full_plan"].items():
-                if w.get("workout_type", "").lower() == "delete":
-                    continue
-                try:
-                    entry = TrainingPlanEntry(
-                        plan_id=plan.id,
-                        date=datetime.strptime(date_str, '%Y-%m-%d').date(),
-                        workout_type=w.get("workout_type"),
-                        training_focus=w.get("training_focus"),
-                        approximate_distance=w.get("approximate_distance"),
-                        description=w.get("description"),
-                    )
-                    db.add(entry)
-                except Exception:
-                    pass
-            db.commit()
-
-        elif parsed.get("plan_updates"):
-            for date_str, w in parsed["plan_updates"].items():
-                try:
-                    date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    if w.get("workout_type", "").lower() == "delete":
-                        db.query(TrainingPlanEntry).filter(
-                            TrainingPlanEntry.plan_id == plan.id,
-                            TrainingPlanEntry.date == date_obj
-                        ).delete()
-                    else:
-                        existing = db.query(TrainingPlanEntry).filter(
-                            TrainingPlanEntry.plan_id == plan.id,
-                            TrainingPlanEntry.date == date_obj
-                        ).first()
-                        if existing:
-                            existing.workout_type = w.get("workout_type", existing.workout_type)
-                            existing.training_focus = w.get("training_focus", existing.training_focus)
-                            existing.approximate_distance = w.get("approximate_distance", existing.approximate_distance)
-                            existing.description = w.get("description", existing.description)
-                        else:
-                            entry = TrainingPlanEntry(
-                                plan_id=plan.id,
-                                date=date_obj,
-                                workout_type=w.get("workout_type"),
-                                training_focus=w.get("training_focus"),
-                                approximate_distance=w.get("approximate_distance"),
-                                description=w.get("description"),
-                            )
-                            db.add(entry)
-                except Exception:
-                    pass
-            db.commit()
-
-        all_entries = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).order_by(TrainingPlanEntry.date).all()
-        return {
-            "message": ai_reply,
-            "entries": [_entry_to_dict(e) for e in all_entries],
-        }
-
-    except HTTPException:
-        # Deliberate, safe-to-show errors raised above (e.g. "GROQ_API_KEY
-        # not set") — pass through as-is rather than falling into the
-        # generic handler below and losing the specific message.
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        logger.exception("Training plan chat error")
-        raise HTTPException(status_code=500, detail="Internal server error.")
-    finally:
-        db.close()
-
-
-@app.delete("/api/training-plan/{user_id}/chat")
-def clear_training_plan_chat(user_id: int, current_user: User = Depends(get_current_user)):
-    """Clear the AI chat history for the user's training plan."""
-    if user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this training plan")
-    db = SessionLocal()
-    try:
-        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
-        if not plan:
-            return {"message": "No active plan"}
-            
-        db.query(ChatMessage).filter(ChatMessage.plan_id == plan.id).delete()
-        db.commit()
-        return {"message": "Chat history cleared"}
-    except Exception as e:
-        db.rollback()
-        logger.exception("Clear training plan chat error")
-        raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         db.close()
