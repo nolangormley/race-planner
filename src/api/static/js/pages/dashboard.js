@@ -22,6 +22,8 @@ const state = {
 };
 const charts = {};
 
+const RUN_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
+
 const ZONES = [
   { label: 'Zone 1', sub: 'Recovery · under 60% max' },
   { label: 'Zone 2', sub: 'Aerobic · 60–70%' },
@@ -278,8 +280,10 @@ function renderPaceZones() {
 }
 
 // ---- This week ----
+// Only runs count toward a planned running session; a ride on the same
+// day is shown elsewhere but does not complete it.
 function activitiesOn(dateString) {
-  return state.activities.filter((activity) => activity.start_date_local?.slice(0, 10) === dateString);
+  return state.activities.filter((activity) => RUN_TYPES.has(activity.type) && activity.start_date_local?.slice(0, 10) === dateString);
 }
 
 function renderWeek() {
