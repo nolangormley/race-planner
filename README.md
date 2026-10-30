@@ -85,6 +85,22 @@ With a push subscription, Strava calls `/api/strava/webhook` whenever an activit
 
 Strava validates the URL during `create`, so the app must already be reachable there. Events are not signed; an event can only start a sync for a known athlete or remove one activity, which the next sync restores if it still exists on Strava.
 
+
+## Repairing the warehouse
+
+Stream tables that were migrated with a rename in an earlier version keep a foreign-key reference to their old name inside DuckDB, and every delete on them fails at commit (`Table with name stream_x_new does not exist`). That breaks the activity Delete button and webhook deletes. Rebuild the file once, with the app stopped:
+
+```bash
+sudo systemctl stop race-planner
+sudo -u raceplanner /opt/race-planner/.venv/bin/python scripts/rebuild_warehouse.py data/strava_warehouse.duckdb
+# check the printed row counts, then swap:
+sudo -u raceplanner mv data/strava_warehouse.duckdb data/strava_warehouse.duckdb.bak
+sudo -u raceplanner mv data/strava_warehouse.rebuilt.duckdb data/strava_warehouse.duckdb
+sudo systemctl start race-planner
+```
+
+The rebuild copies every table into a fresh schema (about 4 s for 400 activities) and leaves the original untouched until you swap it.
+
 ## 🏗 Project Structure
 
 *   **/src/api**: FastAPI backend and Jinja2 templates (Dashboard, Warehouse, Activity Analysis).
