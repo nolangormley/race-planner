@@ -154,4 +154,5 @@ def test_build_plan_fills_the_calendar_to_race_day(app_server, registered_user, 
     race_chip = page.locator(f'.cal-cell[data-date="{race_day.isoformat()}"] .chip')
     race_chip.wait_for()
     assert "Race" in race_chip.text_content()
-    assert page.locator(".cal-cell .chip").count() >= 20          # the race month is planned day by day
+    page.click("#cal-prev")
+    page.locator(".cal-cell:not(.other) .chip").nth(27).wait_for()   # the month before the race is planned day by day
