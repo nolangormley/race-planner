@@ -27,7 +27,7 @@
 {% set path = request.url.path %}
 <body
     data-user-id="{{ user.id if user else '' }}"
-    data-athlete-id="{{ user.strava_athlete_id if user and user.strava_athlete_id else '' }}"
+    data-athlete-id="{{ user.athlete_id if user else '' }}"
     data-dob="{{ user.date_of_birth if user and user.date_of_birth else '' }}"
     data-sex="{{ user.gender if user and user.gender else '' }}">
     <header class="topbar">

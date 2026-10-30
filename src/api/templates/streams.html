@@ -18,7 +18,9 @@
             <p class="sub" id="act-sub"></p>
         </div>
         <div class="page-actions">
+            {% if not imported %}
             <a id="strava-link" class="btn btn-sm" target="_blank" rel="noopener" href="https://www.strava.com/activities/{{ activity_id }}">View on Strava</a>
+            {% endif %}
         </div>
     </div>
 

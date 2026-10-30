@@ -20,14 +20,12 @@ def hr_profile(user_id: int, current_user: User = Depends(get_current_user)):
     """The resting and max heart rate in use, and where each comes from."""
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this profile")
-    detected = from_coros = None
-    if current_user.strava_athlete_id:
-        con = get_db_connection()
-        try:
-            detected = detected_max_hr(con, current_user.strava_athlete_id)
-            from_coros = coros_resting_hr(con, current_user.strava_athlete_id)
-        finally:
-            con.close()
+    con = get_db_connection()
+    try:
+        detected = detected_max_hr(con, current_user.athlete_id)
+        from_coros = coros_resting_hr(con, current_user.athlete_id)
+    finally:
+        con.close()
     return {
         "resting_hr": current_user.resting_hr,
         "max_hr": current_user.max_hr,
@@ -70,7 +68,7 @@ def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = De
                 setattr(user, field, getattr(profile, field))
                 hr_changed = True
         db.commit()
-        max_hr, athlete_id = user.max_hr, user.strava_athlete_id
+        max_hr = user.max_hr
         con = get_db_connection()
         try:
             resting_hr = resolve_resting_hr(con, user)
@@ -88,7 +86,7 @@ def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = De
     # so a change recomputes the warehouse in the background. The UI shows it
     # with the same progress panel as a sync.
     recompute_started = False
-    if hr_changed and athlete_id:
+    if hr_changed:
         try:
             sync_registry.start(
                 user_id,

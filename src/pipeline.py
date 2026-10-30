@@ -43,6 +43,16 @@ STREAMS_TO_FETCH = ["time", "heartrate", "velocity_smooth", "cadence", "watts", 
 DEFAULT_MAX_HR = 192
 DEFAULT_REST_HR = 60
 
+# Every warehouse table keyed by activity_id apart from dim_activity, which
+# they all reference. Deleting or moving an activity handles these first.
+# A new activity-keyed table goes here (tests/test_warehouse_maintenance.py
+# fails until it does).
+ACTIVITY_CHILD_TABLES = (
+    "stream_altitude", "stream_cadence", "stream_heartrate", "stream_moving",
+    "stream_temperature", "stream_velocity", "stream_watts", "activity_effectiveness",
+    "best_efforts", "activity_laps", "activity_intervals", "activity_structure",
+)
+
 
 class StravaAuthError(Exception):
     """Raised when a specific stored Strava refresh_token is invalid/revoked

@@ -6,11 +6,11 @@
 <div class="page-head">
     <div>
         <h1>Activities</h1>
-        <p class="sub">Everything synced from Strava, plus your workout library.</p>
+        <p class="sub">Everything synced from Strava or imported from files, plus your workout library.</p>
     </div>
     <div class="page-actions">
         <div class="seg" id="tabs" role="tablist" aria-label="Section">
-            <button type="button" role="tab" data-tab="activities" aria-pressed="true">Synced activities</button>
+            <button type="button" role="tab" data-tab="activities" aria-pressed="true">Activities</button>
             <button type="button" role="tab" data-tab="workouts" aria-pressed="false">Workout library</button>
         </div>
     </div>
@@ -19,13 +19,15 @@
 <section class="card" id="tab-activities">
     <div class="card-head">
         <div>
-            <h2 class="card-title">Synced activities</h2>
+            <h2 class="card-title">Activities</h2>
             <div class="card-sub" id="activities-sub">Loading</div>
         </div>
         <div class="card-actions">
             <select id="type-filter" class="input input-sm" aria-label="Filter by activity type">
                 <option value="">All types</option>
             </select>
+            <button type="button" class="btn btn-sm" id="import-btn">Import files</button>
+            <input type="file" id="import-input" accept=".fit,.gpx" multiple hidden>
         </div>
     </div>
     <div class="table-wrap">

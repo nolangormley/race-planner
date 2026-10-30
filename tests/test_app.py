@@ -31,6 +31,7 @@ def test_every_router_is_mounted(app):
         ("DELETE", "/api/activities/{activity_id}"),
         ("GET", "/api/activities/{activity_id}/intervals"),
         ("GET", "/api/activities/{activity_id}/streams"),
+        ("POST", "/api/activities/import"),
         ("POST", "/api/sync-strava/{user_id}"),
         ("GET", "/api/sync-strava/{user_id}"),
         ("GET", "/api/workouts"),
