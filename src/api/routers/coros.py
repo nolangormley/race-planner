@@ -26,8 +26,8 @@ def own_user(db, user_id, current_user):
 def status_of(user, con):
     linked = bool(user.coros_access_token)
     nights = 0
-    if linked and user.strava_athlete_id:
-        nights = con.execute("SELECT COUNT(*) FROM coros_daily WHERE athlete_id = ?", [user.strava_athlete_id]).fetchone()[0]
+    if linked:
+        nights = con.execute("SELECT COUNT(*) FROM coros_daily WHERE athlete_id = ?", [user.athlete_id]).fetchone()[0]
     return {
         "linked": linked,
         "region": user.coros_region,
@@ -35,7 +35,7 @@ def status_of(user, con):
         "synced_at": user.coros_synced_at.isoformat() if user.coros_synced_at else None,
         "error": user.coros_error,
         "nights": nights,
-        "resting_hr": coros_resting_hr(con, user.strava_athlete_id) if linked and user.strava_athlete_id else None,
+        "resting_hr": coros_resting_hr(con, user.athlete_id) if linked else None,
     }
 
 
@@ -65,8 +65,6 @@ def link_coros(user_id: int, body: CorosLink, current_user: User = Depends(get_c
     db, con = SessionLocal(), get_db_connection()
     try:
         user = own_user(db, user_id, current_user)
-        if not user.strava_athlete_id:
-            raise HTTPException(status_code=400, detail="Connect Strava first; COROS readings are stored with your Strava athlete.")
         try:
             session = login(body.email, body.password, body.region)
         except CorosAuthError as error:
@@ -119,8 +117,8 @@ def recovery(user_id: int, days: int = 42, current_user: User = Depends(get_curr
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     empty = {"days": [], "latest": None, "resting_hr_7d": None, "hrv_7d": None, "sleep_7d_min": None}
-    athlete_id = current_user.strava_athlete_id
-    if not athlete_id or not current_user.coros_access_token:
+    athlete_id = current_user.athlete_id
+    if not current_user.coros_access_token:
         return empty
     days = max(7, min(days, 365))
     con = get_db_connection()
@@ -167,8 +165,8 @@ def readiness_today(user_id: int, current_user: User = Depends(get_current_user)
     its trend, with the reasons and a hint when a hard session is planned."""
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    athlete_id = current_user.strava_athlete_id
-    if not athlete_id or not current_user.coros_access_token:
+    athlete_id = current_user.athlete_id
+    if not current_user.coros_access_token:
         return {"available": False}
     db = SessionLocal()
     try:

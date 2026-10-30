@@ -2,9 +2,10 @@
 real app, fake Strava and a fresh database. Tests run in file order: the
 sync test fills the warehouse that the page tests then look at."""
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import requests
+from playwright.sync_api import expect
 
 from e2e.conftest import login
 
@@ -52,14 +53,14 @@ def test_sync_button_runs_a_sync_with_progress_and_fills_the_dashboard(app_serve
 
     # The page reloads its own data on the strava:synced event; no reload needed.
     page.wait_for_function("document.querySelector('#stat-fitness .stat-value').textContent.trim() !== '–'", timeout=30000)
-    page.wait_for_selector("#recent tbody tr")
     assert "Synced" in page.text_content("#sync-status")
-    assert page.locator("#pmc-chart svg path").count() > 0
-    assert page.locator("#hr-chart svg .cat-label").count() == 5     # five zone rows, bars only where time was spent
-    assert page.locator("#hr-chart svg .bar").count() >= 2
-    assert page.locator("#recent tbody tr").count() == 3
-    assert page.locator("#predictions tbody tr").count() >= 4
-    assert page.locator("#volume-chart svg .bar").count() >= 3
+    # Each card reloads from its own request, so wait for each one instead of counting once.
+    page.locator("#pmc-chart svg path").first.wait_for()
+    expect(page.locator("#hr-chart svg .cat-label")).to_have_count(5)     # five zone rows, bars only where time was spent
+    page.locator("#hr-chart svg .bar").nth(1).wait_for()
+    expect(page.locator("#recent tbody tr")).to_have_count(3)
+    page.locator("#predictions tbody tr").nth(3).wait_for()
+    page.locator("#volume-chart svg .bar").nth(2).wait_for()
 
 
 def test_every_page_renders_without_errors(app_server, registered_user, page):
@@ -84,7 +85,8 @@ def test_calendar_entry_can_be_added_edited_and_removed(app_server, registered_u
     login(page, app_server)
     page.goto(f"{app_server}/training-calendar")
     page.wait_for_load_state("networkidle")
-    cell = page.locator(".cal-cell:not(.other)").nth(20)
+    # A day without a synced run: clicking a run's chip opens the activity instead.
+    cell = page.locator(".cal-cell:not(.other):not(:has(.chip.activity))").nth(20)
     date_key = cell.get_attribute("data-date")
     cell.click()
     page.wait_for_selector("#entry-modal.open")
@@ -92,7 +94,7 @@ def test_calendar_entry_can_be_added_edited_and_removed(app_server, registered_u
     page.fill("#entry-distance", "7 miles")
     page.click("#entry-save")
     page.locator("#entry-modal.open").wait_for(state="hidden")
-    chip = page.locator(f'.cal-cell[data-date="{date_key}"] .chip')
+    chip = page.locator(f'.cal-cell[data-date="{date_key}"] .chip:not(.activity)')
     chip.wait_for()
     assert "Tempo" in chip.text_content()
 
@@ -104,11 +106,11 @@ def test_calendar_entry_can_be_added_edited_and_removed(app_server, registered_u
     page.wait_for_selector(f'.cal-cell[data-date="{date_key}"] .chip.done')
 
     page.once("dialog", lambda dialog: dialog.accept())
-    page.locator(f'.cal-cell[data-date="{date_key}"] .chip').click()
+    chip.click()
     page.wait_for_selector("#entry-modal.open")
     page.click("#entry-delete")
     page.locator("#entry-modal.open").wait_for(state="hidden")
-    selector = f'.cal-cell[data-date="{date_key}"] .chip'
+    selector = f'.cal-cell[data-date="{date_key}"] .chip:not(.activity)'
     page.wait_for_function("selector => document.querySelector(selector) === null", arg=selector)
 
 
@@ -223,3 +225,104 @@ def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered
     assert "1:45:00" in rows.nth(13).text_content()             # the finish time does not move
     assert page.locator("#pace-band tr").count() == 14
 
+
+def wait_for_idle_sync(page, app_server, user_id, seconds=60):
+    """The last sync job once nothing is running (the COROS link above may
+    have started a recompute)."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        job = page.request.get(f"{app_server}/api/sync-strava/{user_id}").json()["job"]
+        if not job or job["status"] != "running":
+            return job
+        time.sleep(0.5)
+    raise AssertionError("a sync was still running")
+
+
+def test_activity_page_shows_what_the_structure_pass_found(app_server, registered_user, page):
+    login(page, app_server)
+    run = page.request.get(f"{app_server}/api/activities").json()[0]
+    assert run["structure_checked"]                                   # the sync ran the pass
+    structure = page.request.get(f"{app_server}/api/activities/{run['activity_id']}/intervals").json()
+    # The fake runs hold one ten-minute faster stretch: too short for a
+    # tempo and too few reps for intervals, so the card stays hidden.
+    assert structure["detected"] and structure["kind"] is None and structure["reps"] == []
+    page.goto(f"{app_server}/workout_streams/{run['activity_id']}")
+    page.wait_for_selector("#streams-chart svg path")
+    page.wait_for_load_state("networkidle")
+    assert "hidden" in page.get_attribute("#structure-card", "class")
+    assert page.locator("#streams-chart .x-band").count() == 0
+
+
+def test_a_sync_marks_the_planned_run_it_matches_done(app_server, registered_user, page):
+    login(page, app_server)
+    user_id = page.evaluate("document.body.dataset.userId")
+    latest = page.request.get(f"{app_server}/api/activities").json()[0]
+    created = page.request.post(f"{app_server}/api/training-plan/{user_id}/entry", data={
+        "date": latest["start_date_local"][:10], "workout_type": "Easy Run", "approximate_distance": "5 miles",
+    })
+    assert created.ok, created.text()
+
+    wait_for_idle_sync(page, app_server, user_id)
+    started = page.request.post(f"{app_server}/api/sync-strava/{user_id}")
+    assert started.status == 202, started.text()
+    job = wait_for_idle_sync(page, app_server, user_id)
+    assert job["status"] == "done", job
+
+    entries = page.request.get(f"{app_server}/api/training-plan/{user_id}").json()["entries"]
+    entry = next(item for item in entries if item["id"] == created.json()["id"])
+    assert entry["is_completed"]
+    assert entry["strava_activity_id"] == latest["activity_id"]          # an 11-digit Strava id
+
+
+def gpx_track(start, name, points=400, spacing_s=3):
+    """A straight 3.2 m/s run north with heart rate, as a GPX document."""
+    rows = []
+    for index in range(points):
+        moment = start + timedelta(seconds=index * spacing_s)
+        rows.append(
+            f'<trkpt lat="{40.44 + index * 0.0000863:.7f}" lon="-79.9959"><time>{moment.strftime("%Y-%m-%dT%H:%M:%SZ")}</time>'
+            f'<extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>{148 + index % 6}</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions></trkpt>'
+        )
+    return ('<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="e2e" xmlns="http://www.topografix.com/GPX/1/1" '
+            'xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">'
+            f'<trk><name>{name}</name><type>running</type><trkseg>{"".join(rows)}</trkseg></trk></gpx>')
+
+
+def test_a_runner_without_strava_imports_a_gpx_file(app_server, page, tmp_path):
+    user = {"email": f"files{int(time.time())}@example.com", "password": "file-runner-123", "name": "File Runner"}
+    response = requests.post(f"{app_server}/register", data={
+        **user, "date_of_birth": "1991-03-04", "gender": "Female", "height": "1.65", "weight": "58",
+    }, allow_redirects=False)
+    assert response.status_code == 302, response.text
+    login(page, app_server, user)
+    page.wait_for_selector("#connect-prompt")
+
+    start = (datetime.now(timezone.utc) - timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0)
+    track = tmp_path / "riverfront.gpx"
+    track.write_text(gpx_track(start, "Riverfront loop"))
+    page.goto(f"{app_server}/warehouse")
+    page.wait_for_load_state("networkidle")
+    page.set_input_files("#import-input", str(track))
+    page.wait_for_selector("#toast.show")
+    assert "1 imported" in page.text_content("#toast")
+    page.wait_for_selector("#activities-body tr:has-text('Riverfront loop')")
+
+    page.set_input_files("#import-input", str(track))
+    page.wait_for_function("document.querySelector('#toast').textContent.includes('Already imported')")
+
+    page.goto(f"{app_server}/dashboard")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_selector("#recent tr:has-text('Riverfront loop')")
+
+
+def test_coros_switched_off_leaves_out_the_cards_and_the_routes(app_without_coros, registered_user, page):
+    login(page, app_without_coros)
+    user_id = page.evaluate("document.body.dataset.userId")
+    page.goto(f"{app_without_coros}/profile")
+    page.wait_for_load_state("networkidle")
+    assert page.locator("#coros-card").count() == 0
+    page.goto(f"{app_without_coros}/dashboard")
+    page.wait_for_load_state("networkidle")
+    assert page.locator("#recovery-card").count() == 0
+    for path in (f"/api/coros/{user_id}", f"/api/recovery/{user_id}", f"/api/readiness/{user_id}"):
+        assert page.request.get(f"{app_without_coros}{path}").status == 404

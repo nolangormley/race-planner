@@ -1,4 +1,4 @@
-"""Synced Strava activities: list, detail, streams, effectiveness, AI note, delete."""
+"""Synced and imported activities: list, detail, streams, effectiveness, AI note, delete."""
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 import numpy as np
@@ -8,6 +8,8 @@ from src.api.auth_routes import get_current_user
 from src.api.database import User
 from src.api.services.coach import get_ai_insight
 from src.api.deps import get_db_connection
+from src.pipeline import ACTIVITY_CHILD_TABLES
+from src.structure_pass import stored_structure
 from src.api.services.metrics import (
     calculate_training_status_logic,
 )
@@ -16,29 +18,15 @@ logger = logging.getLogger("race_planner.api")
 router = APIRouter()
 
 
-# Fixed allowlist for delete_activity's per-table DELETE loop below. `table`
-# is never user input today, but interpolating it into an f-string SQL
-# statement is exactly the shape a real injection would take if that ever
-# changed — asserting against this constant enforces the safety in code
-# rather than by convention alone.
-# Every table keyed by activity_id, with dim_activity last: the others
-# reference it, so it can only go once they are empty for the activity.
-ACTIVITY_TABLES_TO_DELETE = (
-    "stream_altitude", "stream_cadence", "stream_heartrate", "stream_moving",
-    "stream_temperature", "stream_velocity", "stream_watts", "activity_effectiveness",
-    "best_efforts", "activity_laps",
-    "dim_activity"
-)
-
 def delete_activity_rows(con, activity_id):
-    """Removes an activity from every warehouse table. Returns the tables
-    that failed, so the caller can decide how bad that is."""
+    """Removes an activity from every warehouse table: the child tables in
+    src.pipeline.ACTIVITY_CHILD_TABLES, then dim_activity, which they
+    reference. Returns the tables that failed, so the caller can decide how
+    bad that is."""
     failed_tables = []
-    for table in ACTIVITY_TABLES_TO_DELETE:
-        # table is never user input, but an f-string table name is exactly
-        # the shape a SQL injection would take, so the allowlist is enforced
-        # in code rather than by convention.
-        assert table in ACTIVITY_TABLES_TO_DELETE
+    # Table names come only from that fixed tuple: an f-string table name is
+    # the shape a SQL injection would take if one ever came from input.
+    for table in ACTIVITY_CHILD_TABLES + ("dim_activity",):
         try:
             con.execute(f"DELETE FROM {table} WHERE activity_id = ?", [activity_id])
         except Exception as e:
@@ -56,14 +44,17 @@ def get_activities(limit: Optional[int] = 50, current_user: User = Depends(get_c
         query = """
         SELECT
             da.*,
-            ae.trimp_banister as training_load
+            ae.trimp_banister as training_load,
+            ast.kind AS structure_kind,
+            ast.activity_id IS NOT NULL AS structure_checked
         FROM dim_activity da
         LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
+        LEFT JOIN activity_structure ast ON ast.activity_id = da.activity_id
         WHERE da.athlete_id = ?
         ORDER BY da.start_date DESC
         LIMIT ?
         """
-        activities = con.execute(query, [current_user.strava_athlete_id, limit]).fetchall()
+        activities = con.execute(query, [current_user.athlete_id, limit]).fetchall()
         columns = [desc[0] for desc in con.description]
         return [dict(zip(columns, row)) for row in activities]
     except Exception as e:
@@ -76,14 +67,12 @@ def get_activities(limit: Optional[int] = 50, current_user: User = Depends(get_c
 @router.get("/api/user-activities/{user_id}")
 def get_user_activities(user_id: int, limit: Optional[int] = 100, current_user: User = Depends(get_current_user)):
     """Return recent activities for the given user (athlete).
-    user_id here is the local User.id - we look up the strava_athlete_id.
+    user_id here is the local User.id - we look up the warehouse athlete id.
     """
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this user's activities")
 
-    athlete_id = current_user.strava_athlete_id
-    if not athlete_id:
-        return []
+    athlete_id = current_user.athlete_id
 
     con = get_db_connection()
     try:
@@ -113,7 +102,7 @@ def get_activity(activity_id: int, current_user: User = Depends(get_current_user
         # so this doesn't reveal whether the id belongs to someone else.
         activity = con.execute(
             "SELECT * FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
-            [activity_id, current_user.strava_athlete_id]
+            [activity_id, current_user.athlete_id]
         ).fetchone()
         if not activity:
             raise HTTPException(status_code=404, detail="Activity not found")
@@ -135,7 +124,7 @@ def get_activity_streams(activity_id: int, current_user: User = Depends(get_curr
         # ownership has to be checked against dim_activity separately.
         owner_row = con.execute(
             "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
-            [activity_id, current_user.strava_athlete_id]
+            [activity_id, current_user.athlete_id]
         ).fetchone()
         if not owner_row:
             raise HTTPException(status_code=404, detail="Activity not found")
@@ -202,7 +191,7 @@ def get_activity_effectiveness(activity_id: int, current_user: User = Depends(ge
         LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
         WHERE da.activity_id = ? AND da.athlete_id = ?
         """
-        row = con.execute(query, [activity_id, current_user.strava_athlete_id]).fetchone()
+        row = con.execute(query, [activity_id, current_user.athlete_id]).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Activity not found")
 
@@ -238,7 +227,7 @@ def get_activity_ai_summary(activity_id: int, current_user: User = Depends(get_c
         LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
         WHERE da.activity_id = ? AND da.athlete_id = ?
         """
-        row = con.execute(query, [activity_id, current_user.strava_athlete_id]).fetchone()
+        row = con.execute(query, [activity_id, current_user.athlete_id]).fetchone()
         if not row: raise HTTPException(status_code=404, detail="Activity not found")
         cols = [desc[0] for desc in con.description]
         stats = dict(zip(cols, row))
@@ -271,7 +260,7 @@ def delete_activity(activity_id: int, current_user: User = Depends(get_current_u
     try:
         owner_row = con.execute(
             "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
-            [activity_id, current_user.strava_athlete_id]
+            [activity_id, current_user.athlete_id]
         ).fetchone()
         if not owner_row:
             raise HTTPException(status_code=404, detail="Activity not found")
@@ -311,7 +300,7 @@ def get_activity_laps(activity_id: int, current_user: User = Depends(get_current
     try:
         owner_row = con.execute(
             "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
-            [activity_id, current_user.strava_athlete_id]
+            [activity_id, current_user.athlete_id]
         ).fetchone()
         if not owner_row:
             raise HTTPException(status_code=404, detail="Activity not found")
@@ -322,5 +311,24 @@ def get_activity_laps(activity_id: int, current_user: User = Depends(get_current
         """, [activity_id]).fetchall()
         columns = [desc[0] for desc in con.description]
         return [dict(zip(columns, row)) for row in rows]
+    finally:
+        con.close()
+
+
+@router.get("/api/activities/{activity_id}/intervals")
+def get_activity_intervals(activity_id: int, current_user: User = Depends(get_current_user)):
+    """The structure detected in a run (src/intervals.py): kind (intervals,
+    tempo or null), the reps with offsets in seconds from the start of the
+    streams, and the recoveries between them. detected is False until a
+    sync has looked at the run."""
+    con = get_db_connection()
+    try:
+        owner_row = con.execute(
+            "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
+            [activity_id, current_user.athlete_id]
+        ).fetchone()
+        if not owner_row:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        return stored_structure(con, activity_id)
     finally:
         con.close()

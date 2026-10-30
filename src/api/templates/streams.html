@@ -18,7 +18,9 @@
             <p class="sub" id="act-sub"></p>
         </div>
         <div class="page-actions">
+            {% if not imported %}
             <a id="strava-link" class="btn btn-sm" target="_blank" rel="noopener" href="https://www.strava.com/activities/{{ activity_id }}">View on Strava</a>
+            {% endif %}
         </div>
     </div>
 
@@ -40,10 +42,21 @@
                 <div class="card-head">
                     <div>
                         <h2 class="card-title">Streams</h2>
-                        <div class="card-sub" id="streams-sub">Heart rate, pace, cadence and elevation over elapsed time. Pace is smoothed over 15 seconds and shaded by your pace zones; lap starts are marked.</div>
+                        <div class="card-sub" id="streams-sub">Heart rate, pace, cadence and elevation over elapsed time. Pace is smoothed over 15 seconds and shaded by your pace zones; lap starts are marked, and detected reps are shaded grey.</div>
                     </div>
                 </div>
                 <div id="streams-chart" class="chart-slot"></div>
+            </section>
+            <section class="card hidden" id="structure-card">
+                <div class="card-head">
+                    <div>
+                        <h2 class="card-title">Detected structure</h2>
+                        <div class="card-sub" id="structure-sub">Found in the pace stream; the reps are shaded on the chart above.</div>
+                    </div>
+                    <span class="badge badge-accent" id="structure-kind"></span>
+                </div>
+                <p class="structure-summary" id="structure-summary"></p>
+                <div class="table-wrap" id="structure-reps"></div>
             </section>
             <section class="card hidden" id="splits-card">
                 <div class="card-head">

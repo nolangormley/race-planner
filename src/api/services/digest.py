@@ -214,7 +214,7 @@ def build_digest(db, user, now=None):
     today = now.date()
     this_week = week_start(today)
     last_week = this_week - timedelta(days=7)
-    athlete_id = user.strava_athlete_id
+    athlete_id = user.athlete_id
 
     week = previous = {"runs": 0, "distance_m": 0.0, "moving_s": 0.0, "climb_m": 0.0}
     records, status, recovery, today_energy = [], None, None, None

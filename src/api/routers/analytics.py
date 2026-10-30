@@ -24,10 +24,10 @@ router = APIRouter()
 
 @router.get("/status/{user_id}")
 def get_status(user_id: int, current_user: User = Depends(get_current_user)):
-    # NOTE: user_id here is the Strava athlete_id, not User.id (see
+    # NOTE: user_id here is the warehouse athlete id (User.athlete_id), not User.id (see
     # agent_prompting/improvement_plan.md — the two are used inconsistently
     # across this file's routes).
-    if user_id != current_user.strava_athlete_id:
+    if user_id != current_user.athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's status")
 
     status = calculate_training_status_logic(user_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
@@ -52,8 +52,8 @@ def get_status(user_id: int, current_user: User = Depends(get_current_user)):
 
 @router.get("/vo2max/{user_id}")
 def get_vo2max(user_id: int, current_user: User = Depends(get_current_user)):
-    # user_id here is the Strava athlete_id (see /status/{user_id} above).
-    if user_id != current_user.strava_athlete_id:
+    # user_id here is the warehouse athlete id (see /status/{user_id} above).
+    if user_id != current_user.athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's VO2max")
     vo2max_data = calculate_vo2max(user_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
     if not vo2max_data:
@@ -62,8 +62,8 @@ def get_vo2max(user_id: int, current_user: User = Depends(get_current_user)):
 
 @router.get("/pace_zones/{user_id}")
 def get_pace_zones(user_id: int, current_user: User = Depends(get_current_user)):
-    # user_id here is the Strava athlete_id (see /status/{user_id} above).
-    if user_id != current_user.strava_athlete_id:
+    # user_id here is the warehouse athlete id (see /status/{user_id} above).
+    if user_id != current_user.athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's pace zones")
     zones = calculate_pace_zones(user_id, hr_max=current_user.max_hr)
     if not zones:
@@ -72,8 +72,8 @@ def get_pace_zones(user_id: int, current_user: User = Depends(get_current_user))
 
 @router.get("/analytics/{user_id}")
 def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
-    # user_id here is the Strava athlete_id (see /status/{user_id} above).
-    if user_id != current_user.strava_athlete_id:
+    # user_id here is the warehouse athlete id (see /status/{user_id} above).
+    if user_id != current_user.athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's analytics")
     con = get_db_connection()
     try:
@@ -215,8 +215,8 @@ def get_predictions(user_id: int, current_user: User = Depends(get_current_user)
     of the distance and the distance itself; the fastest extrapolation wins,
     since a runner who never races only has training efforts to go on.
     """
-    # user_id here is the Strava athlete_id (see /status/{user_id} above).
-    if user_id != current_user.strava_athlete_id:
+    # user_id here is the warehouse athlete id (see /status/{user_id} above).
+    if user_id != current_user.athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's predictions")
 
     con = get_db_connection()
@@ -265,8 +265,8 @@ def get_efficiency(user_id: int, days: int = 180, current_user: User = Depends(g
     """Aerobic efficiency on easy runs: meters per minute per heartbeat, per
     run, with a rolling median. Easy means 60-82% of max heart rate and at
     least 20 minutes. A rising line at the same heart rate is real fitness."""
-    # user_id here is the Strava athlete_id (see /status/{user_id} above).
-    if user_id != current_user.strava_athlete_id:
+    # user_id here is the warehouse athlete id (see /status/{user_id} above).
+    if user_id != current_user.athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's efficiency")
     days = max(30, min(days, 730))
     con = get_db_connection()
@@ -309,8 +309,8 @@ def get_efficiency(user_id: int, days: int = 180, current_user: User = Depends(g
 def get_records(user_id: int, current_user: User = Depends(get_current_user)):
     """Personal records: the fastest mile, 5K, 10K and half marathon inside
     any run, all time and this year, from the best_efforts table."""
-    # user_id here is the Strava athlete_id (see /status/{user_id} above).
-    if user_id != current_user.strava_athlete_id:
+    # user_id here is the warehouse athlete id (see /status/{user_id} above).
+    if user_id != current_user.athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's records")
     labels = {distance: label for label, distance in BEST_EFFORT_DISTANCES_M.items()}
 
