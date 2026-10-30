@@ -1,6 +1,6 @@
 # templates
 
-Jinja2 pages rendered by the routes in `../main.py` and `../auth_routes.py`. `base.html` holds the document shell, the top bar (nav, Sync button, theme toggle, user links) and the `data-*` attributes on `<body>` that the page modules read. Pages fill `title`, `styles`, `content` and `scripts` blocks; auth pages also set `page_class` to `page-narrow`.
+Jinja2 pages rendered by `../routers/pages.py` and `../auth_routes.py`. `base.html` holds the document shell, the top bar (nav, Sync button, theme toggle, user links) and the `data-*` attributes on `<body>` that the page modules read. Pages fill `title`, `styles`, `content` and `scripts` blocks; auth pages also set `page_class` to `page-narrow`.
 
 - `dashboard.html`, `streams.html` (one activity), `index.html` (activities list and workout library), `training_calendar.html`, `profile.html`: logged-in pages. Their markup is placeholders that `../static/js/pages/*.js` fill.
 - `login.html`, `register.html`, `setup.html` (first race), `strava_auth.html`: the sign-up flow. Plain form posts; `register.html` has a small inline module that converts height and weight to meters and kilograms before submit.
