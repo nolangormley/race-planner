@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="module")
@@ -27,6 +30,7 @@ def test_every_router_is_mounted(app):
         ("POST", "/profile/{user_id}"),
         ("GET", "/api/hr-profile/{user_id}"),
         ("GET", "/api/readiness/{user_id}"),
+        ("GET", "/api/energy/{user_id}"),
         ("GET", "/api/activities"),
         ("DELETE", "/api/activities/{activity_id}"),
         ("GET", "/api/activities/{activity_id}/intervals"),
@@ -56,6 +60,18 @@ def test_every_router_is_mounted(app):
     }
     missing = expected - routes
     assert not missing, f"routes missing from the app: {sorted(missing)}"
+
+
+def test_energy_answers_only_for_the_signed_in_user(app):
+    from src.api.auth_routes import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, strava_athlete_id=None, coros_access_token=None)
+    try:
+        client = TestClient(app)
+        assert client.get("/api/energy/2").status_code == 403
+        assert client.get("/api/energy/1?days=3").json() == {"available": False}
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_removed_endpoints_stay_removed(app):

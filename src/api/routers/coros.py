@@ -6,12 +6,12 @@ import logging
 from src.coros import login, CorosAuthError, CorosError
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User, TrainingPlan, TrainingPlanEntry
-from src.api.deps import get_db_connection, DEFAULT_MAX_HR
+from src.api.deps import get_db_connection
 from src.api.schemas import CorosLink
 from src.api.services.coros_sync import sync_coros, unlink_coros, client_for
-from src.api.services.metrics import detected_max_hr, resolve_resting_hr, calculate_training_status_logic
-from src.api.services.readiness import readiness_for
+from src.api.services.readiness import energy_for
 from src.api.services.sync import queue_recompute
+from src.energy import DEFAULT_DAYS
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
@@ -162,27 +162,45 @@ def planned_workout_today(db, user_id, today):
 
 @router.get("/api/readiness/{user_id}")
 def readiness_today(user_id: int, current_user: User = Depends(get_current_user)):
-    """Today's go / normal / easy / rest call from last night's COROS
-    reading and today's form, with a hint when a hard session is planned."""
+    """Today's go / normal / easy / rest call from this morning's energy and
+    its trend, with the reasons and a hint when a hard session is planned."""
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     athlete_id = current_user.athlete_id
     if not current_user.coros_access_token:
         return {"available": False}
-    today = date.today()
-    con = get_db_connection()
-    try:
-        hr_max = current_user.max_hr or detected_max_hr(con, athlete_id) or DEFAULT_MAX_HR
-    finally:
-        con.close()
-    status = calculate_training_status_logic(athlete_id, hr_max, resolve_resting_hr(current_user))
     db = SessionLocal()
     try:
-        planned = planned_workout_today(db, user_id, today)
+        planned = planned_workout_today(db, user_id, date.today())
     finally:
         db.close()
     con = get_db_connection()
     try:
-        return readiness_for(con, athlete_id, status["form_tsb"] if status else None, today, planned)
+        result = energy_for(con, athlete_id, planned_workout=planned)
+    finally:
+        con.close()
+    if not result["available"] or not result["call"]:
+        return {"available": False}
+    return {
+        "available": True,
+        **result["call"],
+        "morning": result["morning"],
+        "current": result["current"],
+        "trend": result["trend"],
+        "reasons": result["reasons"],
+    }
+
+
+@router.get("/api/energy/{user_id}")
+def energy_curve(user_id: int, days: int = DEFAULT_DAYS, current_user: User = Depends(get_current_user)):
+    """Energy hour by hour over the last days (1 to 14) with the activities
+    that drained it, the nights that charged it and today's call."""
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    if not current_user.coros_access_token:
+        return {"available": False}
+    con = get_db_connection()
+    try:
+        return energy_for(con, current_user.athlete_id, days=max(1, min(days, 14)))
     finally:
         con.close()

@@ -13,7 +13,7 @@ Every estimator is a short, readable function (mostly in `src/metrics.py`), so y
 *   **Strava sync** with a live progress bar, or automatically through Strava webhooks.
 *   **FIT and GPX import**: add runs straight from your watch's files, with or without Strava.
 *   **Weekly digest email** on Monday mornings.
-*   **COROS (optional, unofficial)**: overnight resting heart rate and HRV, a daily readiness call, and the resting heart rate the zones use.
+*   **COROS (optional, unofficial)**: overnight resting heart rate and HRV, an hour-by-hour energy estimate with a daily call, and the resting heart rate the zones use.
 *   **Web UI**: server-rendered pages with a small dependency-free SVG chart module (see `src/api/static/js/charts/AGENTS.md`), dark and light themes, installable on a phone.
 
 ## Not medical or coaching advice
@@ -188,13 +188,34 @@ A thread in the app checks every half hour and sends after 06:00 server time on 
 
 ### COROS (unofficial)
 The COROS card on the profile page links a COROS Training Hub account and pulls the nightly readings the watch uploads: resting heart rate, overnight HRV with its baseline and training load. (Sleep is only in the phone app's API, which the app does not use because logging in there signs the phone app out; `scripts/coros_probe.py` prints the raw fields if you want to look for more.)
-They show up in the Recovery card on the dashboard together with a readiness call for today (Go, Normal, Easy or Rest, from last night's HRV against its baseline, resting heart rate against your usual and your form; a hard session planned on an Easy or Rest day gets a hint), and the 14-night median resting heart rate becomes the default for the heart-rate-reserve model whenever you have not typed a resting heart rate on your profile (a change of 2 bpm or more recomputes your metrics, as a profile change does).
+They show up in the Recovery card on the dashboard under an energy estimate (see Energy below), and the 14-night median resting heart rate becomes the default for the heart-rate-reserve model whenever you have not typed a resting heart rate on your profile (a change of 2 bpm or more recomputes your metrics, as a profile change does).
 Linking sends your email and password to COROS once, the way their web app does; only the session token is stored.
 The app syncs once a day after 05:00 server time and the card has **Sync now**.
 This uses the private API behind the Training Hub web app, not a public one: COROS can change it at any time, it rate-limits, and logging in to the Training Hub elsewhere can invalidate the stored session, in which case the card asks you to reconnect.
 
 Because of that, an install can switch COROS off with `COROS_ENABLED=false`.
 The profile card, the dashboard's Recovery card and the COROS routes are then left out, and the nightly pull stops; readings already stored stay in the warehouse.
+
+#### Energy
+The Recovery card leads with **Energy**: a 0 to 100 estimate of how charged you are, hour by hour over the last week, in the spirit of Garmin's Body Battery.
+It is an estimate, not a measurement.
+Each night recharges it by closing a share of the gap to 100: about 78% on a normal night, up to 90% on a good one and as little as 25% on a bad one.
+How good a night was comes from its HRV, on a log scale, and its resting heart rate, each against the mean and spread of the four weeks of nights before it.
+Only the part outside the smallest worthwhile change (half a standard deviation) counts, as in HRV-guided training (Plews et al. 2012 and 2013, Vesterinen et al. 2016), and HRV has twice the weight of resting heart rate, being the more sensitive marker (Altini and Plews 2021).
+A night is never part of its own baseline.
+Each activity drains 0.22 points per point of its Banister TRIMP, spread over its duration, so an easy 60-TRIMP run costs about 13 and a hard 150-TRIMP session about 33.
+Waking hours drain 2.5 points an hour.
+The level carries over from one day to the next and stays between 0 and 100.
+After a day with an easy run, a normal night refills to about 85 and a good one to about 93; a night with HRV 20% under baseline and resting heart rate 5 bpm up refills to about 49.
+The night is taken to run from 23:00 to 07:00, ending earlier when an activity starts before 07:00, and a measured sleep length is used whenever a source provides one.
+
+Today's call (Go, Normal, Easy or Rest) comes from this morning's level, 90 and up for Go and under 55 for Rest.
+A morning 10 or more under your usual one makes the call one step more cautious, as an HRV drop under your own recent reference does in Kiviniemi et al. (2007), but never Rest on its own.
+A hard session planned on an Easy or Rest day gets a hint under it in the week's plan, and the weekly digest reports the morning's energy and the call.
+
+What it cannot see: Garmin reads stress from heart rate variability all day long (Firstbeat's stress and recovery method), but COROS's web API gives one overnight HRV average and one resting heart rate a night.
+So daytime stress, naps, when you actually slept, illness, alcohol and activities without heart rate are invisible here, and waking hours drain at a flat rate instead.
+WHOOP Recovery, Oura Readiness and Garmin Training Readiness combine similar overnight inputs but publish no formula; this one is all in `src/energy.py`, with its constants and full references.
 
 ## Maintenance
 

@@ -37,3 +37,16 @@
   .stat .info-tip .tip { top: 40px; right: auto; left: 8px; }
   .grid-4 > :nth-child(even) .info-tip .tip { right: 8px; left: auto; }
 }
+
+/* Energy at the top of the recovery card: the level now, what moved it, the week hour by hour */
+.energy { padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.energy-now { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.energy-value { margin-top: 4px; font-size: 48px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
+.energy-value small { margin-left: 6px; font-size: 14px; font-weight: 500; letter-spacing: 0; color: var(--text-2); }
+.energy-reasons { max-width: 300px; margin: 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.4; color: var(--text-2); text-align: right; }
+.energy-reasons li + li { margin-top: 4px; }
+.energy-note { margin: 10px 0 0; font-size: 12px; line-height: 1.45; color: var(--text-3); }
+@media (max-width: 560px) {
+  .energy-now { flex-direction: column; gap: 10px; }
+  .energy-reasons { max-width: none; text-align: left; }
+}

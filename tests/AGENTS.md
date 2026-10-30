@@ -11,10 +11,12 @@ Unit tests (`pytest`, no network, no database server). DuckDB tests use `StravaD
 - `test_sync.py`: the background job registry and its progress snapshots.
 - `test_intervals.py`: the interval detector on synthetic streams (track reps, steady run, tempo, a short fast block, rolling hills at even effort, auto-pauses, standing rests, missing readings) and the warehouse pass.
 - `test_plan_match.py`: marking planned sessions done from synced runs, with SQLite in place of Postgres and an in-memory warehouse.
-- `test_app.py`: the route table, so a router that fails to mount or a removed endpoint that returns fails CI.
+- `test_energy.py`: the energy model's calibration targets (a normal or good night after an easy day refills to 80 to 95, a 60-TRIMP run costs 10 to 15 and a 150-TRIMP session 30 to 40, a bad night refills at least 15 less), monotonic recharge and drain, clamping to 0 and 100, missing readings and short histories, measured sleep, an early run ending the night, baselines without the judged night, the hourly series and the reasons.
+- `test_readiness.py`: the call's level thresholds and trend step, the session hint, and `energy_for` on an in-memory warehouse (baselines from earlier nights only, drains from activity TRIMP, a stale reading keeping the curve but no call).
+- `test_app.py`: the route table, so a router that fails to mount or a removed endpoint that returns fails CI, and `/api/energy` refusing another user's id.
 - `test_demo.py`: the demo's seeding (user, race, plan from the fake history's volume) against SQLite, and that seeding again replaces only the demo rows.
 - `test_fakes.py`: the fake Strava and COROS the browser tests and the demo use: the default runs unchanged, the varied history's span, kinds and streams agreeing with summaries, mile laps, paging, nights.
-- `test_digest.py`: when the weekly digest is due, the email text, and a scheduler pass sending once and stamping the user (SQLite in place of Postgres).
+- `test_digest.py`: when the weekly digest is due, the email text (with the morning's energy and today's call), and a scheduler pass sending once and stamping the user (SQLite in place of Postgres).
 - `test_pacing.py`: clock parsing, even and negative splits summing to the goal, the grade cost curve, a hilly profile slowing the climbs, GPX parsing of an inline course, the stretched-course warning, rejected files, and the prediction the goal falls back to.
 - `test_coros.py`: the COROS client against a fake HTTP session (login hashing, chunked daily fetch, auth and rate-limit errors), and the sync into an in-memory warehouse: nights stored, resting heart rate default and recompute trigger, expired sessions, unlink.
 - `test_webhook.py`, `test_password_reset.py`, `test_llm_parsing.py`: the webhook dispatcher, reset tokens, LLM response cleaning.

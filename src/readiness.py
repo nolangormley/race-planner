@@ -1,13 +1,18 @@
-"""Daily readiness: a deterministic go / normal / easy / rest call from
-last night's readings and today's form.
+"""Today's call, Go / Normal / Easy / Rest, from this morning's energy
+level (src.energy) and its trend against the usual morning.
 
-Each input that is present scores from -2 (clearly worse than usual) to
-+1 (as good as or better than usual) and the total picks the label. With
-no overnight reading there is no call: form on its own is already shown
-as the form tile.
+The morning level picks the band. A morning TREND_DROP or more under the
+usual one makes the call one step more cautious, but never Rest on its
+own: like Kiviniemi et al. (2007), a drop under the athlete's own recent
+reference means an easy day. A hard session planned on an Easy or Rest
+day gets a hint.
 """
 
 GO, NORMAL, EASY, REST = "Go", "Normal", "Easy", "Rest"
+GO_LEVEL = 90                # morning energy at or above which the call is Go
+NORMAL_LEVEL = 75
+EASY_LEVEL = 55              # under this the call is Rest
+TREND_DROP = 10              # points under the usual morning that count as a falling trend
 ADVICE = {
     GO: "Green light for quality work.",
     NORMAL: "Train as planned.",
@@ -18,79 +23,23 @@ BADGES = {GO: "good", NORMAL: "accent", EASY: "warning", REST: "serious"}
 HARD_SESSIONS = {"intervals", "tempo", "long run"}
 
 
-def hours_minutes(minutes):
-    hours, rest = divmod(int(round(minutes)), 60)
-    return f"{hours}h {rest:02d}m"
-
-
-def hrv_points(hrv, baseline):
-    if not hrv or not baseline:
-        return 0, None
-    ratio = hrv / baseline
-    if ratio >= 1.0:
-        return 1, "HRV at or above baseline"
-    if ratio >= 0.9:
-        return 0, None
-    under = f"HRV {round((1 - ratio) * 100)}% under baseline"
-    return (-1, under) if ratio >= 0.8 else (-2, under)
-
-
-def resting_hr_points(rhr, usual):
-    if not rhr or not usual:
-        return 0, None
-    delta = rhr - usual
-    if delta <= 0:
-        return 1, "resting heart rate at or under your usual"
-    if delta <= 3:
-        return 0, None
-    higher = f"resting heart rate +{delta:.0f} bpm"
-    return (-1, higher) if delta <= 6 else (-2, higher)
-
-
-def sleep_points(minutes):
-    if not minutes:
-        return 0, None
-    if minutes >= 420:
-        return 1, f"{hours_minutes(minutes)} in bed"
-    if minutes >= 360:
-        return 0, None
-    short = f"only {hours_minutes(minutes)} in bed"
-    return (-1, short) if minutes >= 300 else (-2, short)
-
-
-def form_points(tsb):
-    if tsb is None:
-        return 0, None
-    if tsb > 5:
-        return 1, f"form {tsb:+.0f}, fresh"
-    if tsb >= -10:
-        return 0, None
-    if tsb >= -30:
-        return -1, f"form {tsb:+.0f}, carrying load"
-    return -2, f"form {tsb:+.0f}, overreaching"
-
-
-def readiness(hrv=None, hrv_baseline=None, rhr=None, rhr_usual=None, sleep_min=None, tsb=None):
-    """The call for today, or None without any overnight reading."""
-    if not (hrv and hrv_baseline) and not (rhr and rhr_usual):
-        return None
-    parts = [hrv_points(hrv, hrv_baseline), resting_hr_points(rhr, rhr_usual), sleep_points(sleep_min), form_points(tsb)]
-    total = sum(points for points, _ in parts)
-    if total >= 2:
+def call(morning, trend):
+    """The call for a morning level and its trend (morning minus the usual
+    morning), with the advice, the badge class and the trend in words when
+    it changed the call."""
+    if morning >= GO_LEVEL:
         label = GO
-    elif total >= -1:
+    elif morning >= NORMAL_LEVEL:
         label = NORMAL
-    elif total >= -4:
+    elif morning >= EASY_LEVEL:
         label = EASY
     else:
         label = REST
-    return {
-        "label": label,
-        "score": total,
-        "reasons": [reason for points, reason in parts if reason and points != 0],
-        "advice": ADVICE[label],
-        "badge": BADGES[label],
-    }
+    reasons = []
+    if trend <= -TREND_DROP and label in (GO, NORMAL):
+        label = NORMAL if label == GO else EASY
+        reasons.append(f"woke {-trend} under your usual {morning - trend}")
+    return {"label": label, "advice": ADVICE[label], "badge": BADGES[label], "reasons": reasons}
 
 
 def session_hint(label, workout_type):
