@@ -13,7 +13,7 @@
 .zone-table .zone-name { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 500; }
 
 /* Recovery card: three small readings above the HRV and resting heart rate panels */
-.recovery-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.recovery-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .recovery-tiles:empty { display: none; }
 .recovery-tile { padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius); }
 .recovery-tile .stat-value { font-size: 22px; }

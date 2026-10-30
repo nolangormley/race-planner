@@ -72,7 +72,7 @@ def test_daily_rows_are_normalized_and_fetched_in_chunks():
     assert session.calls[0][1].startswith("https://teameuapi.coros.com/")
     assert session.calls[0][3]["accessToken"] == "tok"
     assert json.loads(session.calls[0][3]["yfheader"]) == {"userId": "42"}
-    assert rows[0] == {"day": date(2026, 1, 1), "rhr": 48.0, "hrv": 61.0, "hrv_baseline": 58.0, "time_in_bed_min": 430.0, "training_load": 55.0, "vo2max": None, "stamina": 80.0}
+    assert rows[0] == {"day": date(2026, 1, 1), "rhr": 48.0, "hrv": 61.0, "hrv_baseline": 58.0, "time_in_bed_min": None, "training_load": 55.0, "vo2max": None, "stamina": 80.0}
     assert rows[1]["day"] == date(2026, 4, 1) and rows[1]["rhr"] is None and rows[1]["hrv"] is None
 
 

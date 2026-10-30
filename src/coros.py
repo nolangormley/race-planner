@@ -96,13 +96,18 @@ def parse_day(value):
 
 
 def normalize_day(item):
-    """One dayList entry as our column names; missing or zero readings are None."""
+    """One dayList entry as our column names; missing or zero readings are None.
+
+    dayDetail carries no sleep duration we can trust: its `tib` field reads
+    like a training balance (values in the teens), not time in bed, so it
+    is not mapped. Sleep lives in the phone app's API, which we do not use
+    because logging in there signs the phone app out."""
     return {
         "day": parse_day(item["happenDay"]),
         "rhr": number(item.get("rhr")),
         "hrv": number(item.get("avgSleepHrv")),
         "hrv_baseline": number(item.get("sleepHrvBase")),
-        "time_in_bed_min": number(item.get("tib")),
+        "time_in_bed_min": None,
         "training_load": number(item.get("trainingLoad")),
         "vo2max": number(item.get("vo2max")),
         "stamina": number(item.get("staminaLevel")),
