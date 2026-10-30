@@ -3,8 +3,8 @@
 One `APIRouter` per concern, all mounted by `../main.py`. Each router does the session check through `get_current_user` (API) or `get_current_user_from_session` (pages) from `../auth_routes.py`, talks to Postgres through `SessionLocal` and to the DuckDB warehouse through `get_db_connection` in `../deps.py`.
 
 - `pages.py`: the server-rendered pages (`/dashboard`, `/training-calendar`, `/warehouse`, `/workout_streams/{id}`, `/profile`, `/races/{id}/pacing`). Markup only; data comes from the API routers below.
-- `activities.py`: synced Strava activities: list, per-user list, detail, streams, laps (the watch's splits), effectiveness, AI note, delete (with the fixed table allowlist).
-- `sync.py`: start a background Strava sync and read its progress (`src.api.services.sync`). `start_sync_for(user)` is the one place that builds a user's sync job; the webhook uses it too.
+- `activities.py`: synced Strava activities: list (each row carries `structure_kind` and `structure_checked` from the structure pass), per-user list, detail, streams, laps (the watch's splits), detected intervals (`GET /api/activities/{id}/intervals`), effectiveness, AI note, delete (with the fixed table allowlist).
+- `sync.py`: start a background Strava sync and read its progress (`src.api.services.sync`). `start_sync_for(user)` is the one place that builds a user's sync job; the webhook uses it too. `record_sync_result` stores the new token and then marks matching planned sessions done (`services/plan_match.py`).
 - `strava_webhook.py`: Strava's push subscription. `GET` answers the subscription handshake with `STRAVA_WEBHOOK_VERIFY_TOKEN`; `POST` takes activity create/update (queue a sync), delete (remove from the warehouse) and athlete deauthorization events. `scripts/strava_webhook.py` registers the subscription.
 - `workouts.py`: the workout library CRUD.
 - `analytics.py`: training status (with the coach's note), VO2 max, pace zones, dashboard analytics (HR zones, time by type, weekly volume), race predictions from best efforts with the VDOT ceiling (`/api/predictions`), aerobic efficiency on easy runs (`/api/efficiency`), personal records (`/api/records`).

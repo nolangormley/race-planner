@@ -427,6 +427,16 @@ function activitiesOn(dateString) {
   return state.activities.filter((activity) => RUN_TYPES.has(activity.type) && activity.start_date_local?.slice(0, 10) === dateString);
 }
 
+// A planned intervals or tempo session with runs that day, all of them
+// analysed (structure_checked), and none with that structure.
+function ranOffSession(entry, runs) {
+  const wanted = (entry.workout_type || '').toLowerCase();
+  if (wanted !== 'intervals' && wanted !== 'tempo') return false;
+  const analysed = runs.filter((activity) => activity.structure_checked);
+  const pending = runs.some((activity) => activity.type === 'Run' && !activity.structure_checked);
+  return analysed.length > 0 && !pending && !analysed.some((activity) => activity.structure_kind === wanted);
+}
+
 function renderWeek() {
   const container = qs('#week-plan');
   const today = new Date();
@@ -449,7 +459,9 @@ function renderWeek() {
     if (entry && !isRest) planned += 1;
     let status = '';
     if (entry && !isRest) {
-      if (entry.is_completed || runs.length) {
+      if (!entry.is_completed && ranOffSession(entry, runs)) {
+        status = '<span class="badge badge-warning">Ran, not the session</span>';
+      } else if (entry.is_completed || runs.length) {
         status = '<span class="badge badge-good">Done</span>';
         done += 1;
       } else if (past) status = '<span class="badge">Missed</span>';

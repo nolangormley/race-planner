@@ -11,7 +11,7 @@ from fastapi import FastAPI, Query
 
 ATHLETE_ID = 424242
 RUN_SECONDS = 2400
-HISTORY_ID_BASE = 9_100_000
+HISTORY_ID_BASE = 20_100_000_000      # past 32 bits, like real Strava ids
 METERS_PER_MILE = 1609.344
 # Strava's workout_type values for runs.
 EASY, RACE, LONG_RUN, WORKOUT = 0, 1, 2, 3
@@ -33,7 +33,7 @@ def synthetic_runs(count=3, span_days=None):
     for index in range(count):
         start = (now - timedelta(days=3 + 7 * index)).replace(hour=7, minute=30, second=0, microsecond=0)
         runs.append({
-            "id": 9_000_000 + index,
+            "id": 20_000_000_000 + index,      # real Strava ids no longer fit in 32 bits
             "name": f"E2E run {index + 1}",
             "type": "Run",
             "start_date": start.strftime("%Y-%m-%dT%H:%M:%SZ"),

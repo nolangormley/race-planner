@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Date, Float, ForeignKey, Text, DateTime, Boolean
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Date, Float, ForeignKey, Text, DateTime, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 
@@ -93,7 +93,7 @@ class TrainingPlanEntry(Base):
     approximate_distance = Column(String, nullable=True)  # e.g. "5 miles"
     description = Column(Text, nullable=True)
     is_completed = Column(Boolean, default=False)
-    strava_activity_id = Column(Integer, nullable=True)  # linked if completed
+    strava_activity_id = Column(BigInteger, nullable=True)  # linked if completed
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
