@@ -11,6 +11,7 @@ Every estimator is a short, readable function (mostly in `src/metrics.py`), so y
 *   **Activity analysis**: streams with laps and splits, detected interval and tempo sessions, time in heart-rate zones, aerobic decoupling, and an efficiency trend across your easy runs; planned sessions are marked done when a run matches them.
 *   **Race predictions and records**: predictions from your best efforts (Riegel), with the VDOT equivalent of your VO2 max as a ceiling, personal records, and a race-day pacing plan that follows the course's hills.
 *   **Strava sync** with a live progress bar, or automatically through Strava webhooks.
+*   **FIT and GPX import**: add runs straight from your watch's files, with or without Strava.
 *   **Weekly digest email** on Monday mornings.
 *   **COROS (optional, unofficial)**: overnight resting heart rate and HRV, a daily readiness call, and the resting heart rate the zones use.
 *   **Web UI**: server-rendered pages with a small dependency-free SVG chart module (see `src/api/static/js/charts/AGENTS.md`), dark and light themes, installable on a phone.
@@ -44,7 +45,7 @@ DATABASE_URL=postgresql://user:pass@localhost/raceplanner python scripts/demo.py
 ### What you need
 
 *   Python 3.12 and Postgres 15 or later.
-*   A Strava account, to register an API application.
+*   A Strava account, to register an API application. Without one you can still sign up and import FIT and GPX files.
 *   Optional: an SMTP account for password-reset and digest emails, a COROS account, an API key for one of the LLM providers (for the coach's note on the dashboard).
 
 ### 1. Register a Strava API application
