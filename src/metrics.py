@@ -1,5 +1,6 @@
 import pandas as pd
 import math
+import re
 import numpy as np
 
 def calculate_ctl_atl(loads, ctl_decay=42, atl_decay=7):
@@ -153,3 +154,88 @@ def vdot_from_race(distance_m, seconds):
     """The VDOT implied by a race result, the inverse of race_time_for_vdot."""
     minutes = seconds / 60
     return daniels_cost(distance_m / minutes) / daniels_fraction(minutes)
+
+
+# Planned-workout load, for projecting fitness and form along a training plan.
+# A session's TRIMP is the athlete's typical TRIMP per kilometre of easy
+# running, scaled by how hard the workout type is.
+WORKOUT_LOAD_FACTORS = {
+    "rest": 0.0, "recovery": 0.8, "easy run": 1.0, "long run": 1.1, "tempo": 1.35,
+    "intervals": 1.45, "race": 1.6, "cross training": 0.6, "strength": 0.4,
+}
+DEFAULT_WORKOUT_KM = {
+    "recovery": 6.0, "easy run": 8.0, "long run": 16.0, "tempo": 10.0, "intervals": 10.0,
+    "race": 10.0, "cross training": 8.0, "strength": 5.0,
+}
+METERS_PER_MILE = 1609.344
+
+
+def planned_distance_km(text):
+    """'6 miles', '8 km', '10K', '5 mi' to kilometres; None when there is no number.
+    A bare number is miles, matching the calendar's convention."""
+    if not text:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(k(?:m|ilomet\w*)?|mi(?:les?)?|m\b)?", str(text), re.IGNORECASE)
+    if not match:
+        return None
+    amount = float(match.group(1))
+    unit = (match.group(2) or "").lower()
+    if unit.startswith("k"):
+        return amount
+    if unit == "m":
+        return amount / 1000
+    return amount * METERS_PER_MILE / 1000
+
+
+def estimate_entry_load(workout_type, distance_km, trimp_per_km):
+    kind = (workout_type or "").strip().lower()
+    factor = WORKOUT_LOAD_FACTORS.get(kind, 1.0)
+    if factor == 0:
+        return 0.0
+    km = distance_km if distance_km else DEFAULT_WORKOUT_KM.get(kind, 8.0)
+    return trimp_per_km * factor * km
+
+
+def project_training_load(ctl, atl, daily_loads, ctl_decay=42, atl_decay=7):
+    """Steps fitness and fatigue forward one day per load, starting from the
+    current values. Returns a list of (ctl, atl, tsb) per day, where tsb is
+    the form going into that day (yesterday's fitness minus fatigue), the
+    same convention as the history."""
+    projected = []
+    for load in daily_loads:
+        tsb = ctl - atl
+        ctl = ctl + (load - ctl) / ctl_decay
+        atl = atl + (load - atl) / atl_decay
+        projected.append((ctl, atl, tsb))
+    return projected
+
+
+# Best efforts: the fastest time over a distance inside a run, from the
+# per-second velocity stream. The basis for race predictions, since a
+# runner's fastest real efforts say more than an aerobic ceiling does.
+BEST_EFFORT_DISTANCES_M = {"1 mile": 1609.344, "5K": 5000.0, "10K": 10000.0, "Half marathon": 21097.5}
+
+
+def best_effort_seconds(time_offsets, velocities, distance_m):
+    """Fastest time to cover distance_m within one activity, or None when the
+    activity is shorter. time_offsets are seconds, velocities m/s, aligned."""
+    times = np.asarray(time_offsets, dtype=float)
+    speeds = np.nan_to_num(np.asarray(velocities, dtype=float))
+    if len(times) < 2:
+        return None
+    gaps = np.diff(times, prepend=times[0])
+    gaps[gaps > 30] = 0  # a paused watch covers no distance
+    cumulative = np.cumsum(speeds * gaps)
+    if cumulative[-1] < distance_m:
+        return None
+    ends = np.searchsorted(cumulative, cumulative + distance_m, side="left")
+    valid = ends < len(times)
+    if not valid.any():
+        return None
+    durations = times[ends[valid]] - times[valid]
+    return float(durations.min())
+
+
+def riegel_prediction(seconds, from_distance_m, to_distance_m, exponent=1.06):
+    """Riegel (1981): race time scales with distance to the power 1.06."""
+    return seconds * (to_distance_m / from_distance_m) ** exponent

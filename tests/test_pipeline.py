@@ -252,3 +252,21 @@ def test_effectiveness_only_recomputes_when_something_changed():
     # A re-synced activity (newer updated_at) is recomputed.
     db.con.execute("UPDATE dim_activity SET updated_at = now() + INTERVAL 1 MINUTE WHERE activity_id = 100")
     assert run_analyze_effectiveness(db, max_hr=190, resting_hr=50) == 1
+
+
+# ---- best efforts pass ----
+
+def test_best_efforts_pass_is_incremental():
+    from src.pipeline import run_best_efforts
+    db = _make_db()
+    times = list(range(0, 1800))
+    speeds = [3.0] * 1800
+    speeds[600:1000] = [4.0] * 400
+    db.insert_streams(100, {'time': {'data': times}, 'velocity_smooth': {'data': speeds}})
+
+    assert run_best_efforts(db) == 1
+    mile = db.con.execute("SELECT seconds FROM best_efforts WHERE activity_id = 100 AND distance_m = 1609.344").fetchone()[0]
+    assert mile == pytest.approx(1609.344 / 4.0, abs=2)
+    # 5.4 km run: no 10K or half rows.
+    assert db.con.execute("SELECT count(*) FROM best_efforts WHERE activity_id = 100").fetchone()[0] == 2
+    assert run_best_efforts(db) == 0

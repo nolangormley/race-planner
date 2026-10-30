@@ -209,6 +209,7 @@ export function panelChart(container, initialSpec) {
     svgEl('path', {
       d: path, fill: 'none', stroke: colorOf(series.color), 'stroke-width': series.width || 2,
       'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'stroke-dasharray': series.dash ? '5 4' : null,
+      'stroke-opacity': series.opacity ?? null,
     }, group);
   }
 
@@ -226,8 +227,23 @@ export function panelChart(container, initialSpec) {
       const path = negative
         ? roundedBarPath(x, zero, barWidth, y - zero, 4, 'down')
         : roundedBarPath(x, y, barWidth, zero - y, 4, 'up');
-      svgEl('path', { d: path, fill: color, class: 'bar', 'data-index': index }, group);
+      svgEl('path', { d: path, fill: color, class: 'bar', 'data-index': index, 'fill-opacity': series.opacity ?? null }, group);
     });
+  }
+
+  // Vertical markers (race days) across every panel, labelled at the top.
+  function drawMarkers(group) {
+    const first = layout.panels[0];
+    const last = layout.panels[layout.panels.length - 1];
+    for (const marker of spec.markers || []) {
+      if (marker.x < layout.xScale.domain[0] || marker.x > layout.xScale.domain[1]) continue;
+      const x = layout.xScale(marker.x);
+      svgEl('line', { class: 'marker-line', x1: x, x2: x, y1: first.top - (first.panel.title ? 14 : 4), y2: last.bottom }, group);
+      if (marker.label) {
+        const text = svgEl('text', { class: 'marker-label', x: x + 5, y: first.top - (first.panel.title ? 18 : 8) }, group);
+        text.textContent = marker.label;
+      }
+    }
   }
 
   function drawEndLabels(group) {
@@ -302,6 +318,7 @@ export function panelChart(container, initialSpec) {
         else drawLine(group, series, entry);
       }
     });
+    drawMarkers(svgEl('g', {}, svg));
     drawEndLabels(svgEl('g', {}, svg));
     drawHover(svgEl('g', { class: 'hover-layer' }, svg));
     const hit = svgEl('rect', {

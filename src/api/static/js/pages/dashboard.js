@@ -20,6 +20,7 @@ const state = {
   plan: [],
   predictions: null,
   efficiency: null,
+  projection: null,
   pmcDays: Number(localStorage.getItem('pmcWindow') || 42),
 };
 const charts = {};
@@ -141,15 +142,42 @@ function renderVo2() {
 }
 
 // ---- Fitness and form chart ----
+// The future comes from the saved plan when there is one (fitness, fatigue
+// and form from the planned sessions, race days marked); otherwise the
+// server's linear fitness forecast.
+function futureDays(lastDate) {
+  const projection = state.projection;
+  if (projection?.has_plan) {
+    const nextRace = projection.races.find((race) => race.date > lastDate);
+    // Show through the next race (plus a few days) or four weeks, whichever is longer, up to 90 days.
+    const raceDays = nextRace ? daysUntil(nextRace.date) + 3 : 0;
+    const horizon = Math.min(90, Math.max(28, raceDays));
+    return projection.days.filter((day) => day.date > lastDate).slice(0, horizon)
+      .map((day) => ({ date: day.date, ctl: day.ctl, atl: day.atl, tsb: day.tsb, load: day.load, workout: day.workout_type }));
+  }
+  return state.status.forecast.filter((row) => row.date > lastDate).map((row) => ({ date: row.date, ctl: row.projected_ctl }));
+}
+
 function pmcSpec() {
   const history = state.status.history.slice(-state.pmcDays);
-  const lastDate = history[history.length - 1].date;
-  const forecast = state.status.forecast.filter((row) => row.date > lastDate);
-  const x = [...history, ...forecast].map((row) => parseDate(row.date).getTime());
-  const pad = (values) => values.concat(new Array(forecast.length).fill(null));
+  const last = history[history.length - 1];
+  const future = futureDays(last.date);
+  const planned = Boolean(state.projection?.has_plan);
+  const x = [...history, ...future].map((row) => parseDate(row.date).getTime());
+  const pad = (values) => values.concat(new Array(future.length).fill(null));
+  const lead = (value) => new Array(Math.max(0, history.length - 1)).fill(null).concat([value]);
   const form = pad(history.map((row) => row.form));
-  const projected = new Array(Math.max(0, history.length - 1)).fill(null)
-    .concat([history[history.length - 1].fitness], forecast.map((row) => row.projected_ctl));
+  const projectedForm = new Array(history.length).fill(null).concat(future.map((day) => day.tsb ?? null));
+  const races = (state.projection?.races || []).filter((race) => race.date > last.date);
+  const raceByDate = new Map(races.map((race) => [race.date, race]));
+  const series = [
+    { key: 'fitness', label: 'Fitness (CTL)', color: 'series-1', values: pad(history.map((row) => row.fitness)), area: true, endLabel: true },
+    { key: 'fatigue', label: 'Fatigue (ATL)', color: 'series-2', values: pad(history.map((row) => row.fatigue)), endLabel: true },
+    { key: 'projected', label: planned ? 'Planned fitness' : 'Projected fitness', color: 'series-1', values: lead(last.fitness).concat(future.map((day) => day.ctl)), dash: true },
+  ];
+  if (planned) {
+    series.push({ key: 'projectedAtl', label: 'Planned fatigue', color: 'series-2', values: lead(last.fatigue).concat(future.map((day) => day.atl)), dash: true });
+  }
   return {
     x,
     xTicks: (min, max) => dateTicks(min, max, 7),
@@ -159,20 +187,28 @@ function pmcSpec() {
     ariaLabel: 'Fitness, fatigue and form over time',
     legend: true,
     table: true,
-    note: (index) => (form[index] == null ? 'Projection' : readiness(form[index]).note),
+    markers: races.map((race) => ({ x: parseDate(race.date).getTime(), label: race.name })),
+    note: (index) => {
+      const date = [...history, ...future][index].date;
+      const race = raceByDate.get(date);
+      if (index < history.length) return readiness(form[index]).note;
+      const day = future[index - history.length];
+      const parts = [race ? `Race day: ${race.name}` : day.workout ? `Planned: ${day.workout}` : planned ? 'Planned: rest' : 'Projection'];
+      if (day.tsb != null) parts.push(readiness(day.tsb).note);
+      return parts.join(' · ');
+    },
     panels: [
       {
         kind: 'line', height: 190, yTicks: 4, includeZero: true, yFormat: (value) => String(Math.round(value)),
-        series: [
-          { key: 'fitness', label: 'Fitness (CTL)', color: 'series-1', values: pad(history.map((row) => row.fitness)), area: true, endLabel: true },
-          { key: 'fatigue', label: 'Fatigue (ATL)', color: 'series-2', values: pad(history.map((row) => row.fatigue)), endLabel: true },
-          { key: 'projected', label: 'Projected fitness', color: 'series-1', values: projected, dash: true },
-        ],
+        series,
       },
       {
         kind: 'columns', height: 84, title: 'Form (TSB)', yTicks: 3,
         yFormat: (value) => `${value > 0 ? '+' : ''}${Math.round(value)}`,
-        series: [{ key: 'form', label: 'Form (TSB)', color: 'series-1', negativeColor: 'series-neg', values: form }],
+        series: [
+          { key: 'form', label: 'Form (TSB)', color: 'series-1', negativeColor: 'series-neg', values: form },
+          ...(planned ? [{ key: 'plannedForm', label: 'Planned form', color: 'series-1', negativeColor: 'series-neg', values: projectedForm, opacity: 0.4 }] : []),
+        ],
       },
     ],
   };
@@ -180,10 +216,13 @@ function pmcSpec() {
 
 function renderPmc() {
   const container = qs('#pmc-chart');
-  if (!state.status.history.length) {
+  if (!state.status?.history?.length) {
     renderEmpty(container, 'No training history yet', 'Sync Strava to build your fitness curve.');
     return;
   }
+  qs('#pmc-sub').textContent = state.projection?.has_plan
+    ? 'Daily training load rolled up as fitness (42-day) and fatigue (7-day); form is the gap. The dashed lines follow your planned workouts forward (days with nothing planned count as rest), and race days are marked.'
+    : 'Daily training load rolled up as fitness (42-day) and fatigue (7-day). Form is the gap between them. The dashed line projects fitness two weeks ahead.';
   if (charts.pmc) charts.pmc.update(pmcSpec());
   else charts.pmc = panelChart(container, pmcSpec());
   qsa('#pmc-range button').forEach((button) => {
@@ -267,26 +306,29 @@ function renderTypeShare() {
 function renderPredictions(data) {
   const container = qs('#predictions');
   if (!data) {
-    renderEmpty(container, 'No prediction yet', 'Predictions need steady runs with heart rate.');
+    renderEmpty(container, 'No prediction yet', 'Predictions need runs with pace data in the last six months.');
     return;
   }
-  qs('#pred-sub').textContent = `From a VO2 max estimate of ${data.vdot.toFixed(1)}, via Daniels' VDOT tables. A ceiling for a well-executed race, not a promise.`;
-  const standard = data.predictions.map((row) => `
-    <tr><td class="primary">${escapeHtml(row.label)}</td><td class="num">${fmtClock(row.seconds)}</td><td class="num muted">${units.pace(row.distance_m / row.seconds)}</td><td></td></tr>`).join('');
-  const races = data.races.filter((race) => race.predicted_seconds).map((race) => {
+  qs('#pred-sub').textContent = data.vdot
+    ? `From your fastest efforts in the last six months, scaled with Riegel's formula. The faint time is the aerobic ceiling from a VO2 max of ${data.vdot.toFixed(1)}: what the engine allows with race-specific training.`
+    : "From your fastest efforts in the last six months, scaled with Riegel's formula.";
+  const cell = (row) => `
+    <td class="num">${fmtClock(row.seconds)}<span class="cell-sub">${units.pace(row.distance_m / row.seconds)}</span></td>
+    <td class="muted small">from your ${escapeHtml(row.from.label)} best, ${fmtClock(row.from.seconds)} on ${fmtDate(row.from.date)}</td>
+    <td class="num faint small">${row.ceiling_seconds ? fmtClock(row.ceiling_seconds) : ''}</td>`;
+  const races = data.races.filter((race) => race.seconds).map((race) => {
     let verdict = '';
     if (race.goal_seconds) {
-      const gap = race.goal_seconds - race.predicted_seconds;
+      const gap = race.goal_seconds - race.seconds;
       verdict = gap >= 0
         ? `<span class="badge badge-good">${fmtClock(Math.abs(gap))} inside goal</span>`
         : `<span class="badge badge-warning">${fmtClock(Math.abs(gap))} outside goal</span>`;
     }
-    return `<tr><td class="primary">${escapeHtml(race.name || race.race_length)}<span class="cell-sub">${escapeHtml(race.race_length)} · ${fmtDate(race.race_date)}${race.goal_time ? ` · goal ${escapeHtml(race.goal_time)}` : ''}</span></td><td class="num">${fmtClock(race.predicted_seconds)}</td><td class="num muted">${units.pace(RACE_DISTANCES[race.race_length.toLowerCase()] / race.predicted_seconds)}</td><td class="status">${verdict}</td></tr>`;
+    return `<tr><td class="primary">${escapeHtml(race.name || race.race_length)}<span class="cell-sub">${escapeHtml(race.race_length)} · ${fmtDate(race.race_date)}${race.goal_time ? ` · goal ${escapeHtml(race.goal_time)}` : ''} ${verdict}</span></td>${cell(race)}</tr>`;
   }).join('');
-  container.innerHTML = `<table class="table table-compact"><thead><tr><th>Distance</th><th class="num">Predicted</th><th class="num">Pace</th><th></th></tr></thead><tbody>${races}${standard}</tbody></table>`;
+  const standard = data.predictions.map((row) => `<tr><td class="primary">${escapeHtml(row.label)}</td>${cell(row)}</tr>`).join('');
+  container.innerHTML = `<table class="table table-compact"><thead><tr><th>Distance</th><th class="num">Predicted</th><th>Based on</th><th class="num">Ceiling</th></tr></thead><tbody>${races}${standard}</tbody></table>`;
 }
-
-const RACE_DISTANCES = { '5k': 5000, '5 mile': 8046.72, '10k': 10000, '10 mile': 16093.44, 'half marathon': 21097.5, 'marathon': 42195 };
 
 // ---- Aerobic efficiency ----
 function renderEfficiency(data) {
@@ -515,6 +557,11 @@ async function loadPlanAndActivities() {
   renderRecent();
 }
 
+async function loadProjection() {
+  state.projection = await fetchJson(`/api/projection/${userId}`).catch(() => null);
+  if (state.status?.history?.length) renderPmc();
+}
+
 async function loadPredictions() {
   state.predictions = await fetchJson(`/api/predictions/${athleteId}`).catch(() => null);
   renderPredictions(state.predictions);
@@ -526,7 +573,7 @@ async function loadEfficiency() {
 }
 
 function loadAll() {
-  loadStatus().then(loadVo2);
+  loadStatus().then(loadVo2).then(loadProjection);
   loadAnalytics();
   loadPaceZones();
   loadPlanAndActivities();

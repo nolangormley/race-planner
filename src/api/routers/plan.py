@@ -8,6 +8,11 @@ from src.api.database import SessionLocal, User, TrainingPlan, TrainingPlanEntry
 from src.api.schemas import PlanEntryCreate, PlanEntryUpdate, BulkEntriesCreate
 
 logger = logging.getLogger("race_planner.api")
+from datetime import date, timedelta
+from src.api.deps import get_db_connection
+from src.api.database import Race
+from src.api.services.metrics import calculate_training_status_logic
+from src.metrics import planned_distance_km, estimate_entry_load, project_training_load
 router = APIRouter()
 
 
@@ -186,3 +191,77 @@ def delete_plan_entry(entry_id: int, current_user: User = Depends(get_current_us
         return {"message": "Entry deleted"}
     finally:
         db.close()
+
+
+@router.get("/api/projection/{user_id}")
+def get_projection(user_id: int, current_user: User = Depends(get_current_user)):
+    """Fitness, fatigue and form projected day by day along the saved plan.
+
+    Each planned session's load is the athlete's median TRIMP per kilometre
+    of running over the last 90 days, scaled by workout type (see
+    src.metrics.estimate_entry_load). Days without an entry count as rest.
+    The projection runs to the last planned day or the next race, whichever
+    is later, at least two weeks and at most 120 days ahead.
+    """
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this projection")
+    athlete_id = current_user.strava_athlete_id
+    if not athlete_id:
+        return {"has_plan": False, "days": [], "races": []}
+
+    db = SessionLocal()
+    try:
+        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
+        entries = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).all() if plan else []
+        races = db.query(Race).filter(Race.user_id == user_id, Race.race_date >= date.today()).order_by(Race.race_date).all()
+        race_rows = [{"date": str(race.race_date), "name": race.name or race.race_length, "race_length": race.race_length} for race in races]
+    finally:
+        db.close()
+
+    today = date.today()
+    future = [entry for entry in entries if entry.date > today]
+    if not future:
+        return {"has_plan": False, "days": [], "races": race_rows}
+
+    status = calculate_training_status_logic(athlete_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
+    if not status:
+        return {"has_plan": False, "days": [], "races": race_rows}
+
+    con = get_db_connection()
+    try:
+        row = con.execute("""
+            SELECT median(ae.trimp_banister / (da.distance / 1000.0))
+            FROM dim_activity da JOIN activity_effectiveness ae ON ae.activity_id = da.activity_id
+            WHERE da.athlete_id = ? AND da.type = 'Run' AND da.distance >= 1000
+              AND da.start_date_local >= current_date - interval '90 days'
+        """, [athlete_id]).fetchone()
+    finally:
+        con.close()
+    trimp_per_km = float(row[0]) if row and row[0] else 12.0
+
+    last_day = max(entry.date for entry in future)
+    if races:
+        last_day = max(last_day, races[0].race_date)
+    horizon = min(max((last_day - today).days, 14), 120)
+
+    by_day = {}
+    for entry in future:
+        by_day.setdefault(entry.date, []).append(entry)
+    days = [today + timedelta(days=offset) for offset in range(1, horizon + 1)]
+    loads = []
+    types = []
+    for day in days:
+        sessions = by_day.get(day, [])
+        loads.append(sum(estimate_entry_load(entry.workout_type, planned_distance_km(entry.approximate_distance), trimp_per_km) for entry in sessions))
+        types.append(", ".join(entry.workout_type or "Workout" for entry in sessions) or None)
+
+    projected = project_training_load(status["fitness_ctl"], status["fatigue_atl"], loads)
+    return {
+        "has_plan": True,
+        "trimp_per_km": round(trimp_per_km, 2),
+        "days": [
+            {"date": str(day), "workout_type": kind, "load": round(load, 1), "ctl": round(ctl, 2), "atl": round(atl, 2), "tsb": round(tsb, 2)}
+            for day, kind, load, (ctl, atl, tsb) in zip(days, types, loads, projected)
+        ],
+        "races": race_rows,
+    }
