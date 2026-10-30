@@ -1,6 +1,7 @@
 """The flows a user actually goes through, in a real browser against the
 real app, fake Strava and a fresh database. Tests run in file order: the
 sync test fills the warehouse that the page tests then look at."""
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 
@@ -195,6 +196,8 @@ def test_coros_link_pulls_nights_and_fills_the_recovery_card(app_server, registe
     page.wait_for_selector("#recovery-chart svg")
     page.wait_for_selector("#readiness .badge")
     assert page.text_content("#readiness .badge").startswith("Today:")
+    page.wait_for_selector("#energy-chart svg path")
+    expect(page.locator("#energy-value")).to_have_text(re.compile(r"^\d{1,3}/ 100$"))
 
 
 def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered_user, page):
@@ -324,5 +327,5 @@ def test_coros_switched_off_leaves_out_the_cards_and_the_routes(app_without_coro
     page.goto(f"{app_without_coros}/dashboard")
     page.wait_for_load_state("networkidle")
     assert page.locator("#recovery-card").count() == 0
-    for path in (f"/api/coros/{user_id}", f"/api/recovery/{user_id}", f"/api/readiness/{user_id}"):
+    for path in (f"/api/coros/{user_id}", f"/api/recovery/{user_id}", f"/api/readiness/{user_id}", f"/api/energy/{user_id}"):
         assert page.request.get(f"{app_without_coros}{path}").status == 404

@@ -62,14 +62,14 @@ def test_compose_digest_reports_the_morning_energy_and_the_call():
     empty = {"runs": 0, "distance_m": 0.0, "moving_s": 0.0, "climb_m": 0.0}
     today = {
         "morning": 64,
-        "reasons": ["+31 overnight: HRV 12% under your baseline", "-33 Intervals, yesterday"],
+        "reasons": ["+31 overnight: HRV 12% under baseline", "-33 Intervals, yesterday"],
         "call": {"label": "Easy", "hint": "Readiness says easy today: consider swapping Tempo for an easy run."},
     }
     _, body = digest.compose_digest("Nolan", date(2026, 11, 2), empty, empty, None, [], [], [], None, energy=today)
     assert (
         "Recovery (nightly averages)\n"
         "  Today      Easy, energy 64 of 100 on waking\n"
-        "             +31 overnight: HRV 12% under your baseline\n"
+        "             +31 overnight: HRV 12% under baseline\n"
         "             -33 Intervals, yesterday\n"
         "             Readiness says easy today: consider swapping Tempo for an easy run.\n"
     ) in body

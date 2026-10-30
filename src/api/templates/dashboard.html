@@ -126,10 +126,22 @@
         <div class="card-head">
             <div>
                 <h2 class="card-title">Recovery</h2>
-                <div class="card-sub" id="recovery-sub">Overnight HRV against its baseline and resting heart rate, night by night, from COROS.</div>
+                <div class="card-sub" id="recovery-sub">Energy over the last week, and the overnight HRV and resting heart rate from COROS behind it.</div>
             </div>
             <div class="card-actions readiness" id="readiness"></div>
         </div>
+        <section class="energy hidden" id="energy" aria-label="Energy">
+            <div class="energy-now">
+                <div>
+                    <div class="stat-label">Energy now</div>
+                    <div class="energy-value" id="energy-value"></div>
+                    <div class="stat-foot" id="energy-foot"></div>
+                </div>
+                <ul class="energy-reasons" id="energy-reasons"></ul>
+            </div>
+            <div id="energy-chart" class="chart-slot"></div>
+            <p class="energy-note">An estimate in the spirit of Garmin's Body Battery, not a measurement. Garmin reads stress all day; COROS gives one reading a night. So here nights recharge by HRV and resting heart rate against your four-week baseline, activities drain by training load, and waking hours drain at a flat rate. Daytime stress, naps and real bedtimes are out of view.</p>
+        </section>
         <div class="recovery-tiles" id="recovery-tiles"></div>
         <div id="recovery-chart" class="chart-slot"></div>
     </div>

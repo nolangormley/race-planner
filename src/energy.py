@@ -77,7 +77,7 @@ from statistics import mean, stdev
 
 FULL = 100.0
 START_LEVEL = 50.0           # level at the start of the warm-up
-WARMUP_DAYS = 3              # simulated before the first shown day so the start level has no effect
+WARMUP_DAYS = 3              # simulated before the first shown day so the start level washes out
 DEFAULT_DAYS = 7
 HOUR = timedelta(hours=1)
 
@@ -162,11 +162,11 @@ def describe_night(night):
     if night["hrv_z"] is not None:
         change = night["hrv"] / night["hrv_baseline"] - 1
         parts.append("HRV in your normal range" if abs(night["hrv_z"]) <= SWC_Z
-                     else f"HRV {abs(change):.0%} {'over' if change > 0 else 'under'} your baseline")
+                     else f"HRV {abs(change):.0%} {'over' if change > 0 else 'under'} baseline")
     if night["rhr_z"] is not None:
         delta = night["rhr"] - night["rhr_baseline"]
         parts.append("resting heart rate in your normal range" if abs(night["rhr_z"]) <= SWC_Z
-                     else f"resting heart rate {abs(delta):.0f} bpm {'over' if delta > 0 else 'under'} your baseline")
+                     else f"resting heart rate {abs(delta):.0f} bpm {'over' if delta > 0 else 'under'} baseline")
     if parts == ["HRV in your normal range", "resting heart rate in your normal range"]:
         return "HRV and resting heart rate in your normal range"
     return ", ".join(parts) or "your baseline is still building"

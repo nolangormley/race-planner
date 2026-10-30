@@ -70,7 +70,7 @@ def test_energy_for_judges_last_night_against_the_nights_before_it():
 
     assert result["available"]
     assert result["night"]["hrv_baseline"] == 62 and result["night"]["rhr_baseline"] == 48
-    assert result["reasons"][0].endswith("HRV 19% under your baseline, resting heart rate 6 bpm over your baseline")
+    assert result["reasons"][0].endswith("HRV 19% under baseline, resting heart rate 6 bpm over baseline")
     assert "-33 Track, yesterday" in result["reasons"] and "-13 Shakeout, today" in result["reasons"]
     assert [drain["cost"] for drain in result["drains"]] == [33, 13]
     assert result["call"]["label"] in ("Easy", "Rest")

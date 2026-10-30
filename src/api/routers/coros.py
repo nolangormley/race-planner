@@ -196,11 +196,10 @@ def energy_curve(user_id: int, days: int = DEFAULT_DAYS, current_user: User = De
     that drained it, the nights that charged it and today's call."""
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    athlete_id = current_user.strava_athlete_id
-    if not athlete_id or not current_user.coros_access_token:
+    if not current_user.coros_access_token:
         return {"available": False}
     con = get_db_connection()
     try:
-        return energy_for(con, athlete_id, days=max(1, min(days, 14)))
+        return energy_for(con, current_user.athlete_id, days=max(1, min(days, 14)))
     finally:
         con.close()

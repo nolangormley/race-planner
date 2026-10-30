@@ -12,7 +12,10 @@ RECENT_NIGHTS = 2        # a call needs a reading from today or one of the two d
 def energy_for(con, athlete_id, now=None, days=DEFAULT_DAYS, planned_workout=None):
     """The energy curve over the last days with today's call, or
     {"available": False} without a COROS reading in that window. The call
-    is None when the newest reading is too old to speak for today."""
+    is None when the newest reading is too old to speak for today.
+
+    now defaults to the server's local time; activity start times are local
+    to the athlete, so the two are taken to match, as the digest's send hour does."""
     now = now or datetime.now()
     today = now.date()
     since = first_day(today, days)

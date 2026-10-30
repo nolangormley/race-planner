@@ -141,7 +141,7 @@ def test_reasons_name_the_night_and_the_largest_drains():
     activities = easy_days()[1:] + [run(at(0, 7, 30), 150, name="Intervals")]
     result = energy(history() + last_night(hrv=54, rhr=48), activities, NOW)
     overnight, intervals, easy = result["reasons"]
-    assert overnight.startswith("+") and overnight.endswith("overnight: HRV 10% under your baseline, resting heart rate in your normal range")
+    assert overnight.startswith("+") and overnight.endswith("overnight: HRV 10% under baseline, resting heart rate in your normal range")
     assert intervals == "-33 Intervals, today"
     assert easy == "-13 Easy Run, yesterday"
 
