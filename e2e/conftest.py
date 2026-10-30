@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import psycopg2
@@ -81,33 +82,47 @@ def fake_coros():
     server.should_exit = True
 
 
-@pytest.fixture(scope="session")
-def app_server(tmp_path_factory, fake_strava, fake_coros, database):
+@contextmanager
+def running_app(workdir, settings):
+    """The app in a uvicorn subprocess with its warehouse in workdir and
+    settings over the e2e defaults; yields its base URL."""
     port = free_port()
-    workdir = tmp_path_factory.mktemp("app")
+    base = f"http://127.0.0.1:{port}"
     env = {
         **os.environ,
-        "DATABASE_URL": database,
         "DB_PATH": str(workdir / "warehouse.duckdb"),
-        "STRAVA_API_BASE": fake_strava,
-        "COROS_API_BASE": fake_coros,
         "STRAVA_CLIENT_ID": "e2e", "STRAVA_CLIENT_SECRET": "e2e",
         "SECRET_KEY": "e2e-secret", "SECURE_COOKIES": "false",
         "LLM_PROVIDER": "local",
-        "HOST_URL": f"http://127.0.0.1:{port}", "ALLOWED_ORIGINS": f"http://127.0.0.1:{port}",
+        "HOST_URL": base, "ALLOWED_ORIGINS": base,
+        **settings,
     }
     # cwd is the temp dir so the repo's .env/.env.dev are not picked up.
     process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "src.api.main:app", "--app-dir", str(REPO), "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
         cwd=workdir, env=env,
     )
-    base = f"http://127.0.0.1:{port}"
     try:
         wait_for(f"{base}/login")
         yield base
     finally:
         process.terminate()
         process.wait(timeout=15)
+
+
+@pytest.fixture(scope="session")
+def app_server(tmp_path_factory, fake_strava, fake_coros, database):
+    settings = {"DATABASE_URL": database, "STRAVA_API_BASE": fake_strava, "COROS_API_BASE": fake_coros}
+    with running_app(tmp_path_factory.mktemp("app"), settings) as base:
+        yield base
+
+
+@pytest.fixture(scope="session")
+def app_without_coros(tmp_path_factory, fake_strava, database):
+    """A second app on the same database with COROS switched off."""
+    settings = {"DATABASE_URL": database, "STRAVA_API_BASE": fake_strava, "COROS_ENABLED": "false"}
+    with running_app(tmp_path_factory.mktemp("app-without-coros"), settings) as base:
+        yield base
 
 
 @pytest.fixture(scope="session")
