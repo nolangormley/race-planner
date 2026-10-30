@@ -105,7 +105,7 @@ def nights(today, count, rhr):
 
 
 def athlete(**overrides):
-    values = {"id": 1, "strava_athlete_id": 424242, "resting_hr": None, "max_hr": None, "coros_synced_at": None, "coros_error": None, "coros_access_token": "tok"}
+    values = {"id": 1, "strava_athlete_id": 424242, "athlete_id": 424242, "resting_hr": None, "max_hr": None, "coros_synced_at": None, "coros_error": None, "coros_access_token": "tok"}
     values.update(overrides)
     return SimpleNamespace(**values)
 

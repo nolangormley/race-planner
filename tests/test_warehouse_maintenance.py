@@ -4,8 +4,8 @@ from datetime import date
 
 import duckdb
 
-from src.pipeline import StravaDB
-from src.api.routers.activities import ACTIVITY_TABLES_TO_DELETE, delete_activity_rows
+from src.pipeline import ACTIVITY_CHILD_TABLES, StravaDB
+from src.api.routers.activities import delete_activity_rows
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 ATHLETE_ID = 424242
@@ -30,13 +30,14 @@ def add_activity_with_children(con):
     con.execute("INSERT INTO activity_laps (activity_id, lap_index, distance, moving_time) VALUES (?, 1, 1609.344, 420)", [ACTIVITY_ID])
 
 
-def test_every_activity_keyed_table_is_cleaned_on_delete():
+def test_every_activity_keyed_table_is_a_listed_child_table():
+    # The list drives deleting an activity and moving a file-only user's
+    # activities to their Strava id; a table missing from it breaks both.
     warehouse = StravaDB(":memory:")
     keyed = {row[0] for row in warehouse.con.execute(
         "SELECT DISTINCT table_name FROM duckdb_columns() WHERE column_name = 'activity_id' AND database_name = current_database()"
     ).fetchall()}
-    assert keyed - set(ACTIVITY_TABLES_TO_DELETE) == set()
-    assert ACTIVITY_TABLES_TO_DELETE[-1] == "dim_activity"
+    assert keyed - set(ACTIVITY_CHILD_TABLES) == {"dim_activity"}
 
 
 def test_an_activity_with_laps_and_best_efforts_can_be_deleted():
@@ -44,7 +45,7 @@ def test_an_activity_with_laps_and_best_efforts_can_be_deleted():
     add_activity_with_children(warehouse.con)
 
     assert delete_activity_rows(warehouse.con, ACTIVITY_ID) == []
-    for table in ACTIVITY_TABLES_TO_DELETE:
+    for table in ACTIVITY_CHILD_TABLES + ("dim_activity",):
         assert warehouse.con.execute(f"SELECT COUNT(*) FROM {table} WHERE activity_id = ?", [ACTIVITY_ID]).fetchone()[0] == 0
 
 

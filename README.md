@@ -11,6 +11,7 @@ Every estimator is a short, readable function (mostly in `src/metrics.py`), so y
 *   **Activity analysis**: streams with laps and splits, detected interval and tempo sessions, time in heart-rate zones, aerobic decoupling, and an efficiency trend across your easy runs; planned sessions are marked done when a run matches them.
 *   **Race predictions and records**: predictions from your best efforts (Riegel), with the VDOT equivalent of your VO2 max as a ceiling, personal records, and a race-day pacing plan that follows the course's hills.
 *   **Strava sync** with a live progress bar, or automatically through Strava webhooks.
+*   **FIT and GPX import**: add runs straight from your watch's files, with or without Strava.
 *   **Weekly digest email** on Monday mornings.
 *   **COROS (optional, unofficial)**: overnight resting heart rate and HRV, a daily readiness call, and the resting heart rate the zones use.
 *   **Web UI**: server-rendered pages with a small dependency-free SVG chart module (see `src/api/static/js/charts/AGENTS.md`), dark and light themes, installable on a phone.
@@ -44,7 +45,7 @@ DATABASE_URL=postgresql://user:pass@localhost/raceplanner python scripts/demo.py
 ### What you need
 
 *   Python 3.12 and Postgres 15 or later.
-*   A Strava account, to register an API application.
+*   A Strava account, to register an API application. Without one you can still sign up and import FIT and GPX files.
 *   Optional: an SMTP account for password-reset and digest emails, a COROS account, an API key for one of the LLM providers (for the coach's note on the dashboard).
 
 ### 1. Register a Strava API application
@@ -130,6 +131,12 @@ To deploy your own fork that way, put your public key in `deploy/ci_deploy_key.p
 ### Syncing from Strava
 The **Sync Strava** button pulls new activities, their streams and laps, then recomputes the metrics, with a progress bar while it runs.
 With a [webhook subscription](#strava-webhooks-automatic-sync), Strava starts the sync itself whenever you upload.
+
+### Importing FIT and GPX files
+**Import files** on the Activities page reads `.fit` files (from Garmin, COROS, Wahoo and most other watches) and `.gpx` tracks, up to 20 files of 25 MB each at a time, without Strava.
+`src/importers.py` turns each file into the same activity, streams (heart rate, pace, cadence, elevation, power) and laps a Strava sync stores, and the import then runs the same analysis passes, so interval detection, load, zones, best efforts and the dashboard include the new runs straight away.
+A file is skipped when it was imported before (the activity id is a hash of the file) or when it starts within a minute of an activity you already have, so a run that also came in through Strava is not counted twice.
+You can use the app with imports only, without connecting Strava: your activities are stored under a placeholder athlete id, and they move to your Strava athlete id when you connect Strava later.
 
 ### Building a training plan
 On the training plan page, **Build plan** fills the calendar from tomorrow to one of your upcoming races.
@@ -218,6 +225,7 @@ The rebuild copies every table into a fresh schema (about 4 s for 400 activities
 *   **/src/metrics.py**: Pure math shared by the pipeline and the API: load model, VO2 max estimator, Daniels VDOT, best efforts, planned-load projection.
 *   **/src/intervals.py**, **/src/structure_pass.py**: The interval and tempo detector and the sync pass that stores its results.
 *   **/src/plan_builder.py**: The deterministic training plan generator behind **Build plan**.
+*   **/src/importers.py**: FIT and GPX parsing for **Import files**.
 *   **/alembic**: Postgres schema migrations (`alembic upgrade head` to apply). The DuckDB warehouse's own schema is managed separately, inside `src/pipeline.py`'s `StravaDB.init_schema()`.
 *   **/tests**, **/e2e**: unit tests (`pytest`), and browser tests against the real app with a fake Strava and a fake COROS (`pytest e2e`, see `e2e/AGENTS.md`).
 *   **/scripts**: the demo, the Strava webhook and warehouse repair tools, and a COROS field probe.

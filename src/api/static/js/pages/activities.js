@@ -1,4 +1,4 @@
-// Activities list (sortable, filterable, deletable) and the workout library.
+// Activities list (sortable, filterable, deletable, FIT/GPX import) and the workout library.
 import { fetchJson, units, fmtDate, fmtDuration, escapeHtml, showToast, qs, qsa, openModal, closeModal } from '../app.js';
 
 const PACE_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
@@ -39,7 +39,7 @@ function renderActivities() {
     else th.removeAttribute('aria-sort');
   });
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="8"><div class="empty"><strong>No activities yet</strong>Sync Strava to pull in your training.</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="8"><div class="empty"><strong>No activities yet</strong>Sync Strava, or import FIT and GPX files from your watch.</div></td></tr>`;
     return;
   }
   body.innerHTML = rows.map((activity) => `
@@ -109,6 +109,42 @@ qsa('#activities-table th.sortable').forEach((th) => {
     renderActivities();
   });
 });
+
+// ---- Import ----
+function importSummary(results) {
+  const count = (status) => results.filter((result) => result.status === status).length;
+  const parts = [];
+  if (count('imported')) parts.push(`${count('imported')} imported`);
+  if (count('skipped')) parts.push(`${count('skipped')} skipped`);
+  if (count('error')) parts.push(`${count('error')} could not be read`);
+  const problem = results.find((result) => result.status !== 'imported');
+  return parts.join(', ') + (problem ? `. ${problem.file}: ${problem.detail}` : '');
+}
+
+async function importFiles(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  const button = qs('#import-btn');
+  const form = new FormData();
+  files.forEach((file) => form.append('files', file));
+  button.disabled = true;
+  button.textContent = `Importing ${files.length} file${files.length === 1 ? '' : 's'}…`;
+  try {
+    const result = await fetchJson('/api/activities/import', { method: 'POST', body: form });
+    const unreadable = result.results.some((item) => item.status === 'error');
+    showToast(importSummary(result.results), unreadable && !result.imported ? 'error' : 'success');
+    if (result.imported) await loadActivities();
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Import files';
+    qs('#import-input').value = '';
+  }
+}
+
+qs('#import-btn').addEventListener('click', () => qs('#import-input').click());
+qs('#import-input').addEventListener('change', (event) => importFiles(event.target.files));
 
 // ---- Workout library ----
 const modal = qs('#workout-modal');
