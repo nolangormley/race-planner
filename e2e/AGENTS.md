@@ -6,5 +6,7 @@ Browser tests against the real app, run by the `e2e` CI job before every deploy 
 - `fake_strava.py`: token, athlete, activity list, streams and laps endpoints with three synthetic 40-minute runs.
 - `fake_coros.py`: the Training Hub login, dashboard and dayDetail endpoints with two weeks of synthetic nights; the app reaches it through `COROS_API_BASE`.
 - `test_flows.py`: sign-up to the Strava prompt, dashboard empty states, a sync from the button with the progress panel and the filled dashboard, every page rendering, calendar entry add/edit/delete, a heart rate profile change triggering a recompute, Build plan filling the calendar to race day, the weekly digest preview and switch, linking COROS and the recovery card, the pacing page building splits for a race with a goal. Tests run in file order; the sync test fills the warehouse the later tests read.
+- `test_layout.py`: every logged-in page at 390 and 360 px with touch emulation: no sideways scroll, and the nav links and Sync button on screen.
+  pytest collects files by name, so it runs after `test_flows.py` and lays out the data those tests created.
 
 Run locally: `E2E_DATABASE_URL=postgresql://user:pass@host/db pytest e2e -q` with `playwright install chromium` done once.

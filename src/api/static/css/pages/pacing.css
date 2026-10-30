@@ -1,4 +1,7 @@
-.pacing-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr) auto; gap: 12px 14px; align-items: end; }
+/* Fields align at the top so the labels line up when the touch-sized
+   segmented control is taller than the input next to it. */
+.pacing-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr) auto; gap: 12px 14px; align-items: start; }
+.pacing-controls .pacing-submit { align-self: end; }
 .pacing-controls .seg, .pacing-controls .row { min-height: 36px; align-items: center; }
 .pacing-controls .seg { align-self: flex-start; }
 .no-grade .col-grade { display: none; }
@@ -10,7 +13,7 @@
 
 @media (max-width: 800px) {
   .pacing-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .pacing-controls .pacing-submit { grid-column: 1 / -1; }
+  .pacing-controls .pacing-submit, .pacing-controls .field:has(> .row) { grid-column: 1 / -1; }
   .pacing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 /* On a phone the split time column goes: for a whole split it is the pace. */
