@@ -65,10 +65,12 @@ Access the dashboard at `http://localhost:8000`.
 > Edit whichever one matches what you're actually trying to change.
 
 ### Data Ingestion
-To sync your latest Strava activities and recalculate effectiveness metrics:
+The **Sync Strava** button in the app is the normal way to pull activities.
+To run the pipeline from the command line instead:
 ```bash
 python src/pipeline.py
 ```
+The running app holds the warehouse file open, so stop it first (`sudo systemctl stop race-planner` on the server); DuckDB allows one writing process at a time.
 
 ### Building a training plan
 On the training plan page, **Build plan** fills the calendar from tomorrow to one of your upcoming races.
