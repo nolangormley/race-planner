@@ -283,6 +283,57 @@ qsa('#pref-theme button').forEach((button) => {
     renderPrefs();
   });
 });
+// ---- Weekly digest ----
+async function loadDigest() {
+  const digest = await fetchJson(`/api/digest/${userId}`);
+  qs('#digest-enabled').checked = digest.enabled;
+  const hint = qs('#digest-hint');
+  if (!digest.smtp_configured) {
+    hint.textContent = 'Email is not set up on this server (SMTP_HOST); digests are written to the server log instead.';
+  } else if (digest.last_sent_at) {
+    hint.textContent = `Last sent ${fmtDate(digest.last_sent_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}.`;
+  } else {
+    hint.textContent = 'A Monday morning summary of last week, your plan for this week and upcoming races.';
+  }
+}
+
+qs('#digest-enabled').addEventListener('change', async (event) => {
+  try {
+    await fetchJson(`/api/digest/${userId}`, { method: 'POST', body: { enabled: event.target.checked } });
+    showToast(event.target.checked ? 'Weekly digest on' : 'Weekly digest off');
+  } catch (error) {
+    event.target.checked = !event.target.checked;
+    showToast(error.message, 'error');
+  }
+});
+qs('#digest-preview').addEventListener('click', async () => {
+  const block = qs('#digest-body');
+  if (!block.classList.contains('hidden')) {
+    block.classList.add('hidden');
+    return;
+  }
+  block.textContent = 'Building…';
+  block.classList.remove('hidden');
+  try {
+    const preview = await fetchJson(`/api/digest/${userId}/preview`);
+    block.textContent = `Subject: ${preview.subject}\n\n${preview.body}`;
+  } catch (error) {
+    block.textContent = error.message;
+  }
+});
+qs('#digest-send').addEventListener('click', async (event) => {
+  event.target.disabled = true;
+  try {
+    const result = await fetchJson(`/api/digest/${userId}/send`, { method: 'POST' });
+    showToast(result.delivered ? `Digest sent to ${result.to}` : 'Digest written to the server log (no SMTP configured)');
+    loadDigest();
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    event.target.disabled = false;
+  }
+});
+
 qs('#profile-sync')?.addEventListener('click', () => qs('#sync-btn')?.click());
 document.addEventListener('strava:synced', () => {
   loadSyncState();
@@ -295,3 +346,4 @@ loadHrProfile();
 loadRaces();
 loadSyncState();
 loadWarehouseStats();
+loadDigest();

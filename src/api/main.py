@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 import logging
 import os
 import secrets
@@ -25,7 +26,15 @@ if os.path.exists(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env
 elif os.path.exists('.env.dev'):
     load_dotenv('.env.dev', override=True)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(_app):
+    # Monday morning emails for users who opted in (services/digest.py).
+    from src.api.services.digest import start_scheduler
+    start_scheduler()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(auth_router)
 
@@ -100,6 +109,7 @@ from src.api.routers import races  # noqa: E402
 from src.api.routers import profile  # noqa: E402
 from src.api.routers import plan  # noqa: E402
 from src.api.routers import strava_webhook  # noqa: E402
+from src.api.routers import digest  # noqa: E402
 
 app.include_router(pages.router)
 app.include_router(activities.router)
@@ -110,6 +120,7 @@ app.include_router(races.router)
 app.include_router(profile.router)
 app.include_router(plan.router)
 app.include_router(strava_webhook.router)
+app.include_router(digest.router)
 
 # A new install has no warehouse until the first sync. Creating the schema
 # here means every page works from the first login instead of failing on

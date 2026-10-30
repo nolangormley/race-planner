@@ -94,6 +94,13 @@ With a push subscription, Strava calls `/api/strava/webhook` whenever an activit
 Strava validates the URL during `create`, so the app must already be reachable there. Events are not signed; an event can only start a sync for a known athlete or remove one activity, which the next sync restores if it still exists on Strava.
 
 
+## Weekly digest email
+Tick **Weekly digest** on the profile page to get a Monday morning email: last week's runs against the week before, how the plan went, fitness and form, new best efforts, this week's sessions and upcoming races.
+Sending needs SMTP in `.env`, the same variables the password reset uses: `SMTP_HOST`, `SMTP_PORT` (587 for STARTTLS, 465 for implicit TLS), `SMTP_USERNAME`, `SMTP_PASSWORD` and `SMTP_FROM`.
+Set `APP_URL` for the link in the footer.
+Without `SMTP_HOST` the digest is written to the server log, and **Preview** on the profile page shows it in the browser.
+A thread in the app checks every half hour and sends after 06:00 server time on Mondays; **Send now** sends it straight away.
+
 ## Repairing the warehouse
 
 Stream tables that were migrated with a rename in an earlier version keep a foreign-key reference to their old name inside DuckDB, and every delete on them fails at commit (`Table with name stream_x_new does not exist`). That breaks the activity Delete button and webhook deletes. Rebuild the file once, with the app stopped:
