@@ -20,11 +20,20 @@ import duckdb
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.pipeline import StravaDB  # noqa: E402
 
-TABLES = [
-    "dim_athlete", "dim_activity",
-    "stream_heartrate", "stream_velocity", "stream_cadence", "stream_watts", "stream_temperature", "stream_altitude", "stream_moving",
-    "activity_effectiveness", "best_efforts",
-]
+# Copied first so foreign keys hold while the other tables fill.
+PARENT_TABLES = ("dim_athlete", "dim_activity")
+
+
+def tables_to_copy(con):
+    """Every table the current schema creates, parents first. Read from the
+    new file rather than listed by hand, so a table added later is never
+    left behind. schema_migrations is merged separately."""
+    names = {row[0] for row in con.execute(
+        "SELECT table_name FROM duckdb_tables() WHERE database_name = current_database() AND schema_name = 'main'"
+    ).fetchall()}
+    names.discard("schema_migrations")
+    parents = [name for name in PARENT_TABLES if name in names]
+    return parents + sorted(names - set(parents))
 
 
 def main(source):
@@ -33,11 +42,12 @@ def main(source):
         sys.exit(f"{target} already exists; remove it first.")
     db = StravaDB(db_path=target)
     con = db.con
+    tables = tables_to_copy(con)
     con.execute(f"ATTACH '{source}' AS old (READ_ONLY)")
     existing = {row[0] for row in con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_catalog = 'old' AND table_schema = 'main'"
     ).fetchall()}
-    for table in TABLES:
+    for table in tables:
         if table not in existing:
             print(f"{table}: not in source, skipped")
             continue
