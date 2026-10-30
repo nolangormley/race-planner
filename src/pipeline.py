@@ -14,7 +14,7 @@ from urllib.parse import urlparse, parse_qs
 from dotenv import load_dotenv, set_key
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
-from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category
+from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category, best_effort_seconds, BEST_EFFORT_DISTANCES_M
 
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(env_path)
@@ -639,6 +639,46 @@ def run_analyze_effectiveness(db, progress=None, resting_hr=None, max_hr=None):
             continue
     return processed
 
+def run_best_efforts(db, progress=None):
+    """Stores each run's fastest mile, 5K, 10K and half marathon from its
+    velocity stream (see src.metrics.best_effort_seconds). Only runs without
+    a row yet are processed; a re-synced run gets fresh rows."""
+    if progress is None:
+        progress = _no_progress
+    con = db.con
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS best_efforts (
+            activity_id UBIGINT, distance_m DOUBLE, seconds DOUBLE,
+            computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (activity_id, distance_m),
+            FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
+        );
+    """)
+    pending = [row[0] for row in con.execute("""
+        SELECT da.activity_id FROM dim_activity da
+        WHERE da.type = 'Run'
+          AND EXISTS (SELECT 1 FROM stream_velocity sv WHERE sv.activity_id = da.activity_id)
+          AND NOT EXISTS (
+              SELECT 1 FROM best_efforts be
+              WHERE be.activity_id = da.activity_id AND be.computed_at >= da.updated_at
+          )
+        ORDER BY da.start_date_local
+    """).fetchall()]
+    for position, act_id in enumerate(pending):
+        progress('metrics', done=position, total=len(pending), name='best efforts')
+        rows = con.execute(
+            "SELECT time_offset, value FROM stream_velocity WHERE activity_id = ? ORDER BY time_offset", [act_id]
+        ).fetchall()
+        times = [row[0] for row in rows]
+        speeds = [row[1] if row[1] is not None else 0.0 for row in rows]
+        con.execute("DELETE FROM best_efforts WHERE activity_id = ?", [act_id])
+        for distance_m in BEST_EFFORT_DISTANCES_M.values():
+            seconds = best_effort_seconds(times, speeds, distance_m)
+            if seconds is not None:
+                con.execute("INSERT INTO best_efforts (activity_id, distance_m, seconds) VALUES (?, ?, ?)", [act_id, distance_m, seconds])
+    return len(pending)
+
+
 def run_analyze_training_load(db):
     con = db.con
     df = con.execute("SELECT da.start_date_local::DATE as activity_date, SUM(ae.trimp_banister) as daily_load, AVG(ae.efficiency_factor) as daily_ef, AVG(ae.aerobic_decoupling) as daily_decoup FROM activity_effectiveness ae JOIN dim_activity da ON ae.activity_id = da.activity_id GROUP BY 1 ORDER BY 1").fetchdf()
@@ -669,6 +709,7 @@ def recompute_metrics(db_path=None, progress=None, resting_hr=None, max_hr=None)
     try:
         progress('metrics')
         run_analyze_effectiveness(db, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+        run_best_efforts(db, progress=progress)
         progress('load')
         run_analyze_training_load(db)
     finally:
@@ -719,6 +760,7 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None, 
         count = ingest_data(manager, db, access_token, lookback_days=lookback_days, reauth_fn=_reauth_unavailable, progress=progress)
         progress('metrics')
         run_analyze_effectiveness(db, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+        run_best_efforts(db, progress=progress)
         progress('load')
         run_analyze_training_load(db)
     finally:
