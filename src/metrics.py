@@ -88,22 +88,33 @@ def add_grade(df, window=30):
     return df
 
 
+def flat_equivalent_speed(speed, grade):
+    """The speed on the flat that costs as much oxygen as `speed` on `grade`
+    (a fraction). Works on numbers, arrays and Series.
+
+    From the ACSM running equation: the horizontal cost is 0.2 x speed,
+    uphill adds 0.9 x speed x grade, and downhill gives back half that rate
+    (0.45). A 5% climb costs 22.5% more than the flat; a 5% descent about
+    11% less.
+    """
+    uphill = np.clip(grade, 0, None)
+    downhill = np.clip(grade, None, 0)
+    return speed * (1 + (0.9 * uphill + 0.45 * downhill) / 0.2)
+
+
 def calculate_vo2max_from_df(df, hr_max=190, hr_rest=60):
     """
     Given a DataFrame with 'speed' and 'hr' columns (and optionally 'grade',
     a fraction), estimates VO2 max per sample. Returns a DataFrame with
     'vo2_max_est' calculated.
 
-    The oxygen cost of running is the ACSM equation: 0.2 x speed (m/min) plus
-    a grade term, plus 3.5 resting. Downhill gives back less than the uphill
-    term costs, so the downhill coefficient is halved.
+    The oxygen cost of running is the ACSM equation: 0.2 x speed (m/min),
+    with the grade folded in by flat_equivalent_speed, plus 3.5 resting.
     """
     df_calc = df.copy()
     speed_per_min = df_calc['speed'] * 60
     grade = df_calc['grade'] if 'grade' in df_calc.columns else 0.0
-    uphill = grade.clip(lower=0) if hasattr(grade, 'clip') else max(grade, 0)
-    downhill = grade.clip(upper=0) if hasattr(grade, 'clip') else min(grade, 0)
-    df_calc['vo2_current'] = 0.2 * speed_per_min + 0.9 * speed_per_min * uphill + 0.45 * speed_per_min * downhill + 3.5
+    df_calc['vo2_current'] = 0.2 * flat_equivalent_speed(speed_per_min, grade) + 3.5
     df_calc['pct_hrr'] = (df_calc['hr'] - hr_rest) / (hr_max - hr_rest)
     # avoid division by zero or negative
     df_calc = df_calc[df_calc['pct_hrr'] > 0]

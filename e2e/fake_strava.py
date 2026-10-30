@@ -17,7 +17,7 @@ def synthetic_runs(count=3):
     for index in range(count):
         start = (now - timedelta(days=3 + 7 * index)).replace(hour=7, minute=30, second=0, microsecond=0)
         runs.append({
-            "id": 9_000_000 + index,
+            "id": 20_000_000_000 + index,      # real Strava ids no longer fit in 32 bits
             "name": f"E2E run {index + 1}",
             "type": "Run",
             "start_date": start.strftime("%Y-%m-%dT%H:%M:%SZ"),

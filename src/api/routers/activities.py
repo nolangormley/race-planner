@@ -8,6 +8,7 @@ from src.api.auth_routes import get_current_user
 from src.api.database import User
 from src.api.services.coach import get_ai_insight
 from src.api.deps import get_db_connection
+from src.structure_pass import stored_structure
 from src.api.services.metrics import (
     calculate_training_status_logic,
 )
@@ -24,6 +25,7 @@ router = APIRouter()
 ACTIVITY_TABLES_TO_DELETE = (
     "stream_altitude", "stream_cadence", "stream_heartrate", "stream_moving",
     "stream_temperature", "stream_velocity", "stream_watts", "activity_effectiveness",
+    "activity_intervals", "activity_structure",
     "dim_activity"
 )
 
@@ -53,9 +55,12 @@ def get_activities(limit: Optional[int] = 50, current_user: User = Depends(get_c
         query = """
         SELECT
             da.*,
-            ae.trimp_banister as training_load
+            ae.trimp_banister as training_load,
+            ast.kind AS structure_kind,
+            ast.activity_id IS NOT NULL AS structure_checked
         FROM dim_activity da
         LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
+        LEFT JOIN activity_structure ast ON ast.activity_id = da.activity_id
         WHERE da.athlete_id = ?
         ORDER BY da.start_date DESC
         LIMIT ?
@@ -319,5 +324,24 @@ def get_activity_laps(activity_id: int, current_user: User = Depends(get_current
         """, [activity_id]).fetchall()
         columns = [desc[0] for desc in con.description]
         return [dict(zip(columns, row)) for row in rows]
+    finally:
+        con.close()
+
+
+@router.get("/api/activities/{activity_id}/intervals")
+def get_activity_intervals(activity_id: int, current_user: User = Depends(get_current_user)):
+    """The structure detected in a run (src/intervals.py): kind (intervals,
+    tempo or null), the reps with offsets in seconds from the start of the
+    streams, and the recoveries between them. detected is False until a
+    sync has looked at the run."""
+    con = get_db_connection()
+    try:
+        owner_row = con.execute(
+            "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
+            [activity_id, current_user.strava_athlete_id]
+        ).fetchone()
+        if not owner_row:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        return stored_structure(con, activity_id)
     finally:
         con.close()

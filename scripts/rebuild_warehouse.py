@@ -23,7 +23,7 @@ from src.pipeline import StravaDB  # noqa: E402
 TABLES = [
     "dim_athlete", "dim_activity",
     "stream_heartrate", "stream_velocity", "stream_cadence", "stream_watts", "stream_temperature", "stream_altitude", "stream_moving",
-    "activity_effectiveness", "best_efforts",
+    "activity_effectiveness", "best_efforts", "activity_structure", "activity_intervals",
 ]
 
 

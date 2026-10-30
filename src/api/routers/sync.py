@@ -8,6 +8,7 @@ from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User
 from src.api.deps import get_db_connection
 from src.api.services.metrics import resolve_resting_hr
+from src.api.services.plan_match import auto_complete_plan
 from src.api.services.sync import registry as sync_registry, SyncAlreadyRunning
 
 logger = logging.getLogger("race_planner.api")
@@ -15,16 +16,26 @@ router = APIRouter()
 
 
 def record_sync_result(user_id, new_refresh_token):
-    """Runs in the sync worker thread once sync_athlete returns."""
+    """Runs in the sync worker thread once sync_athlete returns. Planned
+    sessions the new runs match are marked done (services/plan_match.py);
+    that is a side effect, so its failure is logged and the sync still
+    counts as done."""
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == user_id).first()
         if new_refresh_token:
             user.strava_refresh_token = new_refresh_token
         user.strava_last_synced_at = datetime.utcnow()
+        athlete_id = user.strava_athlete_id
         db.commit()
     finally:
         db.close()
+    try:
+        completed = auto_complete_plan(user_id, athlete_id)
+        if completed:
+            logger.info("Marked %d planned session(s) done for user %s", len(completed), user_id)
+    except Exception:
+        logger.exception("Matching runs to planned sessions failed for user %s", user_id)
 
 
 def start_sync_for(user, queue_if_running=False):
