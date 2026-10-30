@@ -7,9 +7,11 @@ data/
 .env.*
 !.env.example
 
-# VCS
+# VCS and agent worktrees
 .git/
 .gitignore
+.worktrees/
+.claude/
 
 # Python
 venv/
