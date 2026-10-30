@@ -48,18 +48,21 @@ def weekly_targets(current_weekly_m, weeks, profile, taper_weeks):
     peak = base * profile["peak_multiplier"]
     targets = []
     volume = base
+    reached = base
     for index in range(weeks):
         weeks_left = weeks - index
         if weeks_left <= taper_weeks:
-            # Taper: race week at half the peak, the week before at 70%, a
-            # third marathon taper week at 85%.
+            # Taper from the biggest week the plan reached: race week at
+            # half of it, the week before at 70%, a third marathon taper
+            # week at 85%. A short plan never gets to the peak.
             factor = {1: 0.5, 2: 0.7, 3: 0.85}[weeks_left]
-            targets.append(peak * factor if weeks > taper_weeks else base * factor)
+            targets.append(reached * factor)
             continue
         if index > 0 and index % CUTBACK_EVERY == CUTBACK_EVERY - 1:
             targets.append(volume * CUTBACK_FACTOR)
             continue
         targets.append(volume)
+        reached = max(reached, volume)
         volume = min(peak, volume * RAMP_PER_WEEK)
     return targets
 

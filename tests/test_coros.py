@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+import requests
 
 from src import coros
 from src.pipeline import StravaDB
@@ -53,6 +54,20 @@ def test_refused_login_and_expired_token_are_auth_errors():
     session = FakeSession([FakeResponse({}, status_code=429)])
     with pytest.raises(coros.CorosError, match="rate limit"):
         coros.CorosClient("tok", "42", session=session).verify()
+
+
+def test_network_failures_are_coros_errors():
+    class Unreachable:
+        def post(self, *args, **kwargs):
+            raise requests.ConnectionError("connection reset")
+
+        def get(self, *args, **kwargs):
+            raise requests.Timeout("read timed out")
+
+    with pytest.raises(coros.CorosError, match="Could not reach COROS"):
+        coros.login("me@example.com", "pw", session=Unreachable())
+    with pytest.raises(coros.CorosError, match="Could not reach COROS"):
+        coros.CorosClient("tok", "42", session=Unreachable()).verify()
 
 
 def test_daily_rows_are_normalized_and_fetched_in_chunks():
