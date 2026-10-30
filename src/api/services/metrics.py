@@ -21,8 +21,10 @@ from src.metrics import (
     get_target_category,
     calculate_vo2max_from_df,
     clean_val,
+    steady_state_mask,
+    add_grade,
 )
-from src.api.deps import get_db_connection, DEFAULT_MAX_HR
+from src.api.deps import get_db_connection, DEFAULT_MAX_HR, DEFAULT_REST_HR
 
 logger = logging.getLogger("race_planner.api")
 
@@ -62,7 +64,20 @@ def get_performance_standing(stats):
     }
 
 
-def calculate_training_status_logic(user_id: int):
+def detected_max_hr(con, athlete_id):
+    """The highest heart rate in the athlete's activities, or DEFAULT_MAX_HR.
+    The profile's max_hr overrides it wherever it is used."""
+    try:
+        row = con.execute(
+            "SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id = ? AND max_heartrate > 100", [athlete_id]
+        ).fetchone()
+    except Exception:
+        logger.exception("Failed to look up max heart rate for athlete %s", athlete_id)
+        return float(DEFAULT_MAX_HR)
+    return float(row[0]) if row and row[0] else float(DEFAULT_MAX_HR)
+
+
+def calculate_training_status_logic(user_id: int, hr_max=None, hr_rest=None):
     """Computes CTL/ATL/TSB/ACWR/VO2 history for an athlete.
 
     Reads daily training load from activity_effectiveness (populated by
@@ -146,7 +161,7 @@ def calculate_training_status_logic(user_id: int):
 
         target_category = get_target_category(tsb)
 
-        vo2max_data = calculate_vo2max(user_id)
+        vo2max_data = calculate_vo2max(user_id, hr_max=hr_max, hr_rest=hr_rest)
         latest_vo2_max = vo2max_data.get('latest_vo2_max') if vo2max_data else None
 
         history_df = merged.tail(90)
@@ -205,33 +220,39 @@ def calculate_training_status_logic(user_id: int):
         con.close()
 
 
-def calculate_vo2max(user_id: int):
+def calculate_vo2max(user_id: int, hr_max=None, hr_rest=None):
+    """VO2 max estimated from steady running: for each steady second, the
+    grade-adjusted oxygen cost of the pace divided by the share of heart
+    rate reserve, extrapolated to max (see src.metrics.steady_state_mask and
+    calculate_vo2max_from_df). Samples under 65% of reserve are left out:
+    extrapolating from easy jogging is where the estimate is noisiest.
+
+    Returns the per-run medians of the last 14 runs with a rolling 7-run
+    median, and that rolling value as latest_vo2_max.
+    """
     con = get_db_connection()
     try:
-        try:
-            max_hr_query = con.execute("SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id=?", [user_id]).fetchone()
-            hr_max = max_hr_query[0] if max_hr_query and max_hr_query[0] and max_hr_query[0] > 100 else DEFAULT_MAX_HR
-        except Exception:
-            logger.exception(f"Failed to look up max_heartrate for athlete {user_id}; falling back to default.")
-            hr_max = DEFAULT_MAX_HR
-
-        hr_rest = 60
+        hr_max = hr_max or detected_max_hr(con, user_id)
+        hr_rest = hr_rest or DEFAULT_REST_HR
 
         try:
-            query = """
+            df = con.execute("""
             SELECT
                 a.activity_id,
                 a.start_date_local::DATE as activity_date,
+                v.time_offset,
                 v.value as speed,
-                h.value as hr
+                h.value as hr,
+                alt.value as altitude
             FROM dim_activity a
             JOIN stream_velocity v ON a.activity_id = v.activity_id
             JOIN stream_heartrate h ON a.activity_id = h.activity_id AND v.time_offset = h.time_offset
+            LEFT JOIN stream_altitude alt ON a.activity_id = alt.activity_id AND v.time_offset = alt.time_offset
             WHERE a.athlete_id = ? AND a.type = 'Run'
               AND v.value > 1.5
               AND h.value > 100
-            """
-            df = con.execute(query, [user_id]).fetchdf()
+            ORDER BY a.activity_id, v.time_offset
+            """, [user_id]).fetchdf()
         except Exception as e:
             print(f"Error querying streams: {e}")
             return None
@@ -239,14 +260,20 @@ def calculate_vo2max(user_id: int):
         if df.empty:
             return None
 
+        df = add_grade(df)
+        df = df[steady_state_mask(df)]
+        if df.empty:
+            return None
         df = calculate_vo2max_from_df(df, hr_max, hr_rest)
         if df is None or df.empty:
+            return None
+        df = df[df['pct_hrr'] >= 0.65]
+        if df.empty:
             return None
 
         results = df.groupby('activity_date')['vo2_max_est'].median().reset_index()
         results = results.sort_values('activity_date')
-
-        results['vo2_max_rolling_7d'] = results['vo2_max_est'].rolling(window=7, min_periods=1).mean()
+        results['vo2_max_rolling_7d'] = results['vo2_max_est'].rolling(window=7, min_periods=1).median()
 
         latest = results.iloc[-1]
 
@@ -261,6 +288,8 @@ def calculate_vo2max(user_id: int):
         return {
             "user_id": user_id,
             "latest_vo2_max": clean_val(latest['vo2_max_rolling_7d'], 2),
+            "hr_max_used": hr_max,
+            "hr_rest_used": hr_rest,
             "history": history_list
         }
     finally:
@@ -322,18 +351,13 @@ def pace_zones_from_threshold_speed(t_speed):
     return labels, speeds
 
 
-def calculate_pace_zones(user_id: int):
+def calculate_pace_zones(user_id: int, hr_max=None):
     # NOTE: previously this connection was never closed on any code path in
     # this function (get_db_connection() with no matching finally). Wrapped
     # the whole DB-touching section in try/finally to fix the leak.
     con = get_db_connection()
     try:
-        try:
-            max_hr_query = con.execute("SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id=?", [user_id]).fetchone()
-            hr_max = max_hr_query[0] if max_hr_query and max_hr_query[0] and max_hr_query[0] > 100 else DEFAULT_MAX_HR
-        except Exception:
-            logger.exception(f"Failed to look up max_heartrate for athlete {user_id}; falling back to default.")
-            hr_max = DEFAULT_MAX_HR
+        hr_max = hr_max or detected_max_hr(con, user_id)
 
         # Limit to recent activities for more accurate current zones (e.g. last 90 days)
         try:

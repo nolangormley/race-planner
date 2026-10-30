@@ -140,6 +140,14 @@ async function start() {
   }
 }
 
+// Re-reads the job state; a page that starts a job another way (a profile
+// change that triggers a recompute) calls this so the panel appears.
+export function refreshSync() {
+  if (!config.userId) return;
+  hidePanel();
+  fetchJson(url()).then(apply).catch(() => setStatusText(null, null));
+}
+
 export function initSync() {
   const button = qs('#sync-btn');
   if (!button || !config.userId) return;
@@ -147,5 +155,5 @@ export function initSync() {
   button.addEventListener('click', start);
   // Picks up a sync that is already running (page reload mid-sync) and the
   // last-synced time.
-  fetchJson(url()).then(apply).catch(() => setStatusText(null, null));
+  refreshSync();
 }

@@ -83,3 +83,41 @@ def test_pace_zone_speeds_are_meters_per_second():
     # Zones tile the speed axis without gaps.
     assert speeds["Recovery"]["max"] == speeds["Aerobic Endurance"]["min"]
     assert speeds["Anaerobic Endurance"]["max"] == speeds["Anaerobic Power"]["min"]
+
+
+def test_steady_state_mask_drops_warmup_surges_and_hr_lag():
+    from src.metrics import steady_state_mask
+    samples = 900
+    speed = np.full(samples, 3.0)
+    hr = np.full(samples, 150.0)
+    speed[500:520] = 4.5          # a surge
+    hr[600:610] = 165.0           # heart rate jumps without a pace change
+    frame = pd.DataFrame({'activity_id': 1, 'time_offset': np.arange(samples), 'speed': speed, 'hr': hr})
+
+    mask = steady_state_mask(frame)
+
+    assert not mask[:300].any()          # warm-up
+    assert not mask[505]                 # inside the surge
+    assert not mask[603]                 # heart rate off its minute mean
+    assert mask[700] and mask[450]       # steady running
+
+
+def test_grade_raises_oxygen_cost_uphill_and_lowers_it_less_downhill():
+    from src.metrics import calculate_vo2max_from_df
+    flat = calculate_vo2max_from_df(pd.DataFrame({'speed': [3.0], 'hr': [150], 'grade': [0.0]}), 196, 60)
+    up = calculate_vo2max_from_df(pd.DataFrame({'speed': [3.0], 'hr': [150], 'grade': [0.05]}), 196, 60)
+    down = calculate_vo2max_from_df(pd.DataFrame({'speed': [3.0], 'hr': [150], 'grade': [-0.05]}), 196, 60)
+    assert up['vo2_max_est'].iloc[0] > flat['vo2_max_est'].iloc[0] > down['vo2_max_est'].iloc[0]
+    assert (up['vo2_current'].iloc[0] - flat['vo2_current'].iloc[0]) == pytest.approx(2 * (flat['vo2_current'].iloc[0] - down['vo2_current'].iloc[0]))
+
+
+def test_add_grade_uses_climb_over_distance():
+    from src.metrics import add_grade
+    samples = 100
+    frame = pd.DataFrame({
+        'activity_id': 1, 'time_offset': np.arange(samples), 'speed': np.full(samples, 3.0), 'hr': 150.0,
+        'altitude': np.arange(samples) * 0.15,   # 5% grade: 0.15 m up per 3 m along
+    })
+    graded = add_grade(frame)
+    assert graded['grade'].iloc[-1] == pytest.approx(0.05, abs=1e-6)
+    assert graded['grade'].iloc[0] == 0.0

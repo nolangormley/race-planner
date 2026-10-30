@@ -231,3 +231,24 @@ def test_effectiveness_zones_use_the_athletes_max_not_the_activitys():
     # 150 bpm is 66% of reserve against the athlete's 196 max (zone 2); against
     # the activity's own 173 peak it would have landed in zone 4.
     assert zones == (0, 10, 0, 0, 0)
+
+
+# ---- effectiveness is incremental and follows the heart rate profile ----
+
+def test_effectiveness_only_recomputes_when_something_changed():
+    db = _make_db()
+    db.con.execute("UPDATE dim_activity SET max_heartrate = 196 WHERE activity_id = 100")
+    db.insert_streams(100, {'time': {'data': list(range(10))}, 'heartrate': {'data': [150] * 10}})
+
+    assert run_analyze_effectiveness(db) == 1
+    assert run_analyze_effectiveness(db) == 0          # nothing new
+
+    # A different heart rate profile invalidates every row.
+    assert run_analyze_effectiveness(db, max_hr=190, resting_hr=50) == 1
+    row = db.con.execute("SELECT hr_max_used, hr_rest_used FROM activity_effectiveness WHERE activity_id = 100").fetchone()
+    assert row == (190, 50)
+    assert run_analyze_effectiveness(db, max_hr=190, resting_hr=50) == 0
+
+    # A re-synced activity (newer updated_at) is recomputed.
+    db.con.execute("UPDATE dim_activity SET updated_at = now() + INTERVAL 1 MINUTE WHERE activity_id = 100")
+    assert run_analyze_effectiveness(db, max_hr=190, resting_hr=50) == 1

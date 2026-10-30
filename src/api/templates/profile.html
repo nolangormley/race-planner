@@ -26,6 +26,8 @@
             <dt>Sex</dt><dd id="view-sex">{{ user.gender or '–' }}</dd>
             <dt>Height</dt><dd id="view-height">–</dd>
             <dt>Weight</dt><dd id="view-weight">–</dd>
+            <dt>Resting heart rate</dt><dd id="view-rest-hr">–</dd>
+            <dt>Max heart rate</dt><dd id="view-max-hr">–</dd>
         </dl>
         <form id="athlete-form" class="stack hidden">
             <div class="form-grid">
@@ -61,7 +63,18 @@
                     <label for="f-weight">Weight <span class="faint" id="weight-unit"></span></label>
                     <input id="f-weight" type="number" class="input" min="0" step="0.1">
                 </div>
+                <div class="field">
+                    <label for="f-rest-hr">Resting heart rate <span class="faint">(bpm)</span></label>
+                    <input id="f-rest-hr" type="number" class="input" min="30" max="120" placeholder="60">
+                    <span class="small faint">Blank uses 60.</span>
+                </div>
+                <div class="field">
+                    <label for="f-max-hr">Max heart rate <span class="faint">(bpm)</span></label>
+                    <input id="f-max-hr" type="number" class="input" min="120" max="230" placeholder="auto">
+                    <span class="small faint" id="max-hr-hint">Blank uses the highest heart rate in your activities.</span>
+                </div>
             </div>
+            <p class="small muted">Zones, training load and VO2 max are recomputed for every activity when these change.</p>
             <div class="form-actions">
                 <span class="status"></span>
                 <button type="button" class="btn" id="cancel-athlete">Cancel</button>

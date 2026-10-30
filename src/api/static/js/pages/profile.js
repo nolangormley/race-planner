@@ -3,6 +3,7 @@ import {
   config, fetchJson, units, fmtDate, relativeTime, daysUntil, escapeHtml, showToast,
   applyTheme, currentTheme, qs, qsa, renderEmpty,
 } from '../app.js';
+import { refreshSync } from '../sync.js';
 
 const userId = config.userId;
 const root = qs('#profile');
@@ -11,6 +12,8 @@ let heightMeters = root.dataset.height ? Number(root.dataset.height) : null;
 let weightKg = root.dataset.weight ? Number(root.dataset.weight) : null;
 // Accounts made with the old sign-up form stored height in centimeters.
 if (heightMeters > 3) heightMeters /= 100;
+// Heart rate profile: null fields mean the default/detected value is in use.
+let hrProfile = { resting_hr: null, max_hr: null, default_resting_hr: 60, detected_max_hr: null };
 
 // ---- Athlete ----
 function renderAthleteView() {
@@ -22,6 +25,24 @@ function renderAthleteView() {
   } else height.textContent = '–';
   if (weightKg) weight.textContent = units.isMetric() ? `${Math.round(weightKg)} kg` : `${Math.round(weightKg * 2.20462)} lb`;
   else weight.textContent = '–';
+  qs('#view-rest-hr').textContent = hrProfile.resting_hr
+    ? `${hrProfile.resting_hr} bpm`
+    : `${hrProfile.default_resting_hr} bpm (default)`;
+  qs('#view-max-hr').textContent = hrProfile.max_hr
+    ? `${hrProfile.max_hr} bpm`
+    : hrProfile.detected_max_hr ? `${Math.round(hrProfile.detected_max_hr)} bpm (highest recorded)` : '–';
+}
+
+async function loadHrProfile() {
+  try {
+    hrProfile = await fetchJson(`/api/hr-profile/${userId}`);
+  } catch {
+    return;
+  }
+  renderAthleteView();
+  if (hrProfile.detected_max_hr) {
+    qs('#max-hr-hint').textContent = `Blank uses the highest heart rate in your activities, currently ${Math.round(hrProfile.detected_max_hr)} bpm.`;
+  }
 }
 
 function fillAthleteForm() {
@@ -41,6 +62,8 @@ function fillAthleteForm() {
     qs('#f-height-cm').value = Math.round(heightMeters * 100);
   }
   if (weightKg) qs('#f-weight').value = metric ? Math.round(weightKg) : Math.round(weightKg * 2.20462);
+  qs('#f-rest-hr').value = hrProfile.resting_hr ?? '';
+  qs('#f-max-hr').value = hrProfile.max_hr ?? '';
 }
 
 function toggleAthleteForm(open) {
@@ -76,13 +99,16 @@ async function saveAthlete(event) {
     gender: qs('#f-sex').value,
     height,
     weight,
+    resting_hr: qs('#f-rest-hr').value ? Number(qs('#f-rest-hr').value) : null,
+    max_hr: qs('#f-max-hr').value ? Number(qs('#f-max-hr').value) : null,
   };
   const status = qs('#athlete-form .status');
   status.textContent = 'Saving…';
   try {
-    await fetchJson(`/profile/${userId}`, { method: 'POST', body: payload });
+    const result = await fetchJson(`/profile/${userId}`, { method: 'POST', body: payload });
     heightMeters = height;
     weightKg = weight;
+    hrProfile = { ...hrProfile, resting_hr: payload.resting_hr, max_hr: payload.max_hr };
     qs('#view-name').textContent = payload.name;
     qs('#view-email').textContent = payload.email;
     qs('#view-dob').textContent = payload.date_of_birth || '–';
@@ -90,7 +116,8 @@ async function saveAthlete(event) {
     qsa('.user-link').forEach((link) => { link.textContent = payload.name; });
     renderAthleteView();
     toggleAthleteForm(false);
-    showToast('Profile saved');
+    showToast(result.recompute_started ? 'Profile saved, recomputing your metrics' : 'Profile saved');
+    if (result.recompute_started) refreshSync();
   } catch (error) {
     status.textContent = error.message;
   }
@@ -264,6 +291,7 @@ document.addEventListener('strava:synced', () => {
 
 renderPrefs();
 renderAthleteView();
+loadHrProfile();
 loadRaces();
 loadSyncState();
 loadWarehouseStats();

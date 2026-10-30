@@ -32,6 +32,11 @@ class User(Base):
     strava_athlete_id = Column(Integer, nullable=True)
     strava_last_synced_at = Column(DateTime, nullable=True)
 
+    # Heart rate profile. Null means "use the default resting rate" and "use
+    # the highest heart rate seen in the warehouse".
+    resting_hr = Column(Integer, nullable=True)
+    max_hr = Column(Integer, nullable=True)
+
     races = relationship("Race", back_populates="user", cascade="all, delete-orphan")
 
 class Race(Base):
