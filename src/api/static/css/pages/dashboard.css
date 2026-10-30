@@ -18,3 +18,9 @@
 .recovery-tile { padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius); }
 .recovery-tile .stat-value { font-size: 22px; }
 @media (max-width: 560px) { .recovery-tiles { grid-template-columns: 1fr; } }
+
+/* Today's readiness call in the recovery card header */
+.readiness { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 280px; text-align: right; }
+.readiness:empty { display: none; }
+.readiness .small { line-height: 1.35; }
+.week-table .hint { display: block; margin-top: 2px; font-size: 12px; color: var(--warning-ink); }
