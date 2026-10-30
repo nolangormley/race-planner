@@ -1,0 +1,42 @@
+.pacing-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr) auto; gap: 12px 14px; align-items: end; }
+.pacing-controls .seg, .pacing-controls .row { min-height: 36px; align-items: center; }
+.pacing-controls .seg { align-self: flex-start; }
+.no-grade .col-grade { display: none; }
+.pacing-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.pacing-summary:empty { display: none; }
+.pacing-summary > div { padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius); min-width: 0; }
+.pacing-summary .stat-value { font-size: 20px; }
+.pace-band { display: none; }
+
+@media (max-width: 800px) {
+  .pacing-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .pacing-controls .pacing-submit { grid-column: 1 / -1; }
+  .pacing-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* On a phone the split time column goes: for a whole split it is the pace. */
+@media (max-width: 560px) {
+  #splits-table .col-split { display: none; }
+}
+
+/* The pace band: a narrow strip of split clock times to wear on race day.
+   Printing hides the page and shows only the band. */
+@media print {
+  body { background: #fff; }
+  body * { visibility: hidden; }
+  .pace-band, .pace-band * { visibility: visible; }
+  .pace-band {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 2.4in;
+    padding: 6pt;
+    border: 1px dashed #999;
+    color: #000;
+    font: 11pt/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .pace-band .band-head { display: flex; flex-direction: column; gap: 2pt; margin-bottom: 6pt; font-size: 10pt; }
+  .pace-band table { width: 100%; border-collapse: collapse; }
+  .pace-band td { padding: 2pt 3pt; border-bottom: 1px solid #bbb; }
+  .pace-band td:last-child { text-align: right; font-weight: 600; }
+}

@@ -5,6 +5,7 @@ import logging
 
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, Race, User
+from src.pacing import parse_clock
 from src.metrics import race_time_for_vdot, riegel_prediction, BEST_EFFORT_DISTANCES_M
 from src.api.services.coach import get_ai_insight
 from src.api.services.llm import cached_call
@@ -173,19 +174,34 @@ RACE_DISTANCES_M = {
 STANDARD_DISTANCES = [("5K", 5000.0), ("10K", 10000.0), ("Half marathon", 21097.5), ("Marathon", 42195.0)]
 
 
-def goal_seconds(text):
-    """'1:45:00' or '45:00' to seconds; None when it does not parse."""
-    if not text:
-        return None
+def recent_best_efforts(con, athlete_id, days=180):
+    """The fastest effort per standard distance in the last days, as dicts
+    with distance_m, label, seconds, date, activity_id and name."""
     try:
-        parts = [int(part) for part in text.strip().split(":")]
-    except ValueError:
-        return None
-    if len(parts) == 2:
-        return parts[0] * 60 + parts[1]
-    if len(parts) == 3:
-        return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    return None
+        rows = con.execute("""
+            SELECT be.distance_m, be.seconds, da.start_date_local::DATE, da.activity_id, da.name
+            FROM best_efforts be JOIN dim_activity da ON da.activity_id = be.activity_id
+            WHERE da.athlete_id = ? AND da.start_date_local >= ?
+            QUALIFY row_number() OVER (PARTITION BY be.distance_m ORDER BY be.seconds) = 1
+            ORDER BY be.distance_m
+        """, [athlete_id, date.today() - timedelta(days=days)]).fetchall()
+    except Exception:
+        rows = []  # no best_efforts table until the first sync after this feature
+    labels = {distance: label for label, distance in BEST_EFFORT_DISTANCES_M.items()}
+    return [
+        {"distance_m": distance, "label": labels.get(distance, f"{distance:.0f} m"), "seconds": round(seconds),
+         "date": str(day), "activity_id": activity_id, "name": name}
+        for distance, seconds, day, activity_id, name in rows
+    ]
+
+
+def predict_from_efforts(efforts, target_m):
+    """Riegel prediction for target_m from the best-suited effort: those
+    between a quarter of the distance and the distance itself, else all.
+    Returns (seconds, effort)."""
+    candidates = [effort for effort in efforts if target_m / 4 <= effort["distance_m"] <= target_m] or efforts
+    best = min(candidates, key=lambda effort: riegel_prediction(effort["seconds"], effort["distance_m"], target_m))
+    return round(riegel_prediction(best["seconds"], best["distance_m"], target_m)), best
 
 
 @router.get("/api/predictions/{user_id}")
@@ -205,38 +221,17 @@ def get_predictions(user_id: int, current_user: User = Depends(get_current_user)
 
     con = get_db_connection()
     try:
-        try:
-            rows = con.execute("""
-                SELECT be.distance_m, be.seconds, da.start_date_local::DATE, da.activity_id, da.name
-                FROM best_efforts be JOIN dim_activity da ON da.activity_id = be.activity_id
-                WHERE da.athlete_id = ? AND da.start_date_local >= current_date - interval '180 days'
-                QUALIFY row_number() OVER (PARTITION BY be.distance_m ORDER BY be.seconds) = 1
-                ORDER BY be.distance_m
-            """, [user_id]).fetchall()
-        except Exception:
-            rows = []  # no best_efforts table until the first sync after this feature
+        efforts = recent_best_efforts(con, user_id)
     finally:
         con.close()
-    if not rows:
+    if not efforts:
         raise HTTPException(status_code=404, detail="Predictions need runs with pace data. Sync Strava.")
-
-    labels = {distance: label for label, distance in BEST_EFFORT_DISTANCES_M.items()}
-    efforts = [
-        {"distance_m": distance, "label": labels.get(distance, f"{distance:.0f} m"), "seconds": round(seconds),
-         "date": str(day), "activity_id": activity_id, "name": name}
-        for distance, seconds, day, activity_id, name in rows
-    ]
-
-    def predict(target_m):
-        candidates = [effort for effort in efforts if target_m / 4 <= effort["distance_m"] <= target_m] or efforts
-        best = min(candidates, key=lambda effort: riegel_prediction(effort["seconds"], effort["distance_m"], target_m))
-        return round(riegel_prediction(best["seconds"], best["distance_m"], target_m)), best
 
     vo2 = calculate_vo2max(user_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
     vdot = vo2["latest_vo2_max"] if vo2 and vo2.get("latest_vo2_max") else None
 
     def row_for(label, distance_m):
-        seconds, source = predict(distance_m)
+        seconds, source = predict_from_efforts(efforts, distance_m)
         return {
             "label": label, "distance_m": distance_m, "seconds": seconds,
             "from": {"label": source["label"], "seconds": source["seconds"], "date": source["date"], "name": source["name"]},
@@ -252,7 +247,7 @@ def get_predictions(user_id: int, current_user: User = Depends(get_current_user)
             prediction = row_for(race.name or race.race_length, distance) if distance else {}
             race_rows.append({
                 "id": race.id, "name": race.name, "race_length": race.race_length, "race_date": str(race.race_date),
-                "goal_time": race.goal_time, "goal_seconds": goal_seconds(race.goal_time), **prediction,
+                "goal_time": race.goal_time, "goal_seconds": parse_clock(race.goal_time), **prediction,
             })
     finally:
         db.close()

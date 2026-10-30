@@ -1,7 +1,7 @@
 """Plan entries hold Strava activity ids, which no longer fit in 32 bits.
 
 Revision ID: c4a9e1f7b2d6
-Revises: b7e2c4d9f1a3
+Revises: c4d8e2f6a1b9
 Create Date: 2026-10-30
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'c4a9e1f7b2d6'
-down_revision: Union[str, Sequence[str], None] = 'b7e2c4d9f1a3'
+down_revision: Union[str, Sequence[str], None] = 'c4d8e2f6a1b9'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

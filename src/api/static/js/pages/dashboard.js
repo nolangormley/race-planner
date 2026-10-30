@@ -23,6 +23,7 @@ const state = {
   projection: null,
   records: null,
   recovery: null,
+  readiness: null,
   pmcDays: Number(localStorage.getItem('pmcWindow') || 42),
 };
 const charts = {};
@@ -466,8 +467,9 @@ function renderWeek() {
       } else if (past) status = '<span class="badge">Missed</span>';
       else if (isToday) status = '<span class="badge badge-accent">Today</span>';
     } else if (isRest) status = '<span class="badge">Rest</span>';
+    const hint = isToday && entry && state.readiness?.hint ? `<span class="hint">${escapeHtml(state.readiness.hint)}</span>` : '';
     const plannedText = entry
-      ? `<span class="strong">${escapeHtml(entry.workout_type || 'Workout')}</span>${entry.approximate_distance ? ` <span class="faint">${escapeHtml(entry.approximate_distance)}</span>` : ''}`
+      ? `<span class="strong">${escapeHtml(entry.workout_type || 'Workout')}</span>${entry.approximate_distance ? ` <span class="faint">${escapeHtml(entry.approximate_distance)}</span>` : ''}${hint}`
       : '<span class="faint">–</span>';
     const actualText = runs.length
       ? `${units.distance(actual)} <span class="cell-sub">${escapeHtml(runs.map((activity) => activity.type).join(', '))}</span>`
@@ -516,7 +518,7 @@ function renderHeader(races) {
     return;
   }
   const when = next.days === 0 ? 'today' : next.days === 1 ? 'tomorrow' : `in ${next.days} days`;
-  sub.innerHTML = `Training for <span class="strong">${escapeHtml(next.name || next.race_length)}</span><span class="sep">·</span>${escapeHtml(next.race_length)}<span class="sep">·</span>${fmtDate(next.race_date, { month: 'long', day: 'numeric' })}, ${when}${next.goal_time ? `<span class="sep">·</span>goal ${escapeHtml(next.goal_time)}` : ''}`;
+  sub.innerHTML = `Training for <span class="strong">${escapeHtml(next.name || next.race_length)}</span><span class="sep">·</span>${escapeHtml(next.race_length)}<span class="sep">·</span>${fmtDate(next.race_date, { month: 'long', day: 'numeric' })}, ${when}${next.goal_time ? `<span class="sep">·</span>goal ${escapeHtml(next.goal_time)}` : ''}<span class="sep">·</span><a href="/races/${next.id}/pacing">Pacing plan</a>`;
 }
 
 function renderNote() {
@@ -662,6 +664,27 @@ function renderRecovery(data) {
   });
 }
 
+function renderReadiness() {
+  const container = qs('#readiness');
+  const call = state.readiness;
+  container.replaceChildren();
+  if (!call?.available) return;
+  const badgeNode = document.createElement('span');
+  badgeNode.className = `badge badge-${call.badge}`;
+  badgeNode.textContent = `Today: ${call.label}`;
+  badgeNode.title = call.advice;
+  const reasons = document.createElement('div');
+  reasons.className = 'small faint';
+  reasons.textContent = call.reasons.length ? call.reasons.join(' · ') : call.advice;
+  container.append(badgeNode, reasons);
+  if (state.plan.length) renderWeek();
+}
+
+async function loadReadiness() {
+  state.readiness = await fetchJson(`/api/readiness/${userId}`).catch(() => null);
+  renderReadiness();
+}
+
 async function loadRecovery() {
   state.recovery = await fetchJson(`/api/recovery/${userId}?days=42`).catch(() => null);
   renderRecovery(state.recovery);
@@ -681,6 +704,7 @@ function loadAll() {
   loadEfficiency();
   loadRecords();
   loadRecovery();
+  loadReadiness();
   fetchJson(`/api/races/${userId}`).then(renderHeader).catch(() => renderHeader([]));
 }
 

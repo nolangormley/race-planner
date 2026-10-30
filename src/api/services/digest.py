@@ -14,6 +14,7 @@ from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPla
 from src.api.deps import get_db_connection, DEFAULT_MAX_HR
 from src.api.services.email import send_email
 from src.api.services.metrics import calculate_training_status_logic, detected_max_hr, resolve_resting_hr
+from src.api.services.readiness import readiness_for
 from src.metrics import planned_distance_km
 
 logger = logging.getLogger("race_planner.digest")
@@ -76,7 +77,7 @@ def form_label(tsb):
     return "overreaching"
 
 
-def compose_digest(name, today, week, previous, plan, sessions, races, records, status, app_url=None, recovery=None):
+def compose_digest(name, today, week, previous, plan, sessions, races, records, status, app_url=None, recovery=None, readiness=None):
     """The subject and body of the digest as of today; last week is the
     Monday to Sunday before today's week.
 
@@ -86,6 +87,7 @@ def compose_digest(name, today, week, previous, plan, sessions, races, records, 
     races: upcoming (name, race_length, race_date). records: (label, seconds, date)
     for best efforts set last week. status: the training status dict, or None.
     recovery: last week's nightly averages from COROS {"rhr", "hrv", "hrv_baseline", "sleep_min"}, or None.
+    readiness: today's call from services.readiness ({"label", "reasons", "hint", ...}), or None.
     """
     last_week = week_start(today) - timedelta(days=7)
     first_name = (name or "there").split()[0]
@@ -113,8 +115,14 @@ def compose_digest(name, today, week, previous, plan, sessions, races, records, 
             f"  Form       {status['form_tsb']:+.0f}  ({form_label(status['form_tsb'])})",
         ]
 
-    if recovery:
+    if recovery or readiness:
         lines += ["", "Recovery (nightly averages)"]
+    if readiness:
+        reasons = f": {', '.join(readiness['reasons'])}" if readiness.get("reasons") else ""
+        lines.append(f"  Today      {readiness['label']}{reasons}")
+        if readiness.get("hint"):
+            lines.append(f"             {readiness['hint']}")
+    if recovery:
         if recovery.get("rhr"):
             lines.append(f"  Resting HR {recovery['rhr']:.0f} bpm")
         if recovery.get("hrv"):
@@ -207,7 +215,7 @@ def build_digest(db, user, today=None):
     athlete_id = user.strava_athlete_id
 
     week = previous = {"runs": 0, "distance_m": 0.0, "moving_s": 0.0, "climb_m": 0.0}
-    records, status, recovery = [], None, None
+    records, status, recovery, today_call = [], None, None, None
     if athlete_id:
         con = get_db_connection()
         try:
@@ -220,6 +228,14 @@ def build_digest(db, user, today=None):
         finally:
             con.close()
         status = calculate_training_status_logic(athlete_id, hr_max, hr_rest)
+        today_entries = plan_week(db, user.id, today)[1]
+        planned_today = next((item.workout_type for item in today_entries if item.date == today), None)
+        con = get_db_connection()
+        try:
+            call = readiness_for(con, athlete_id, status["form_tsb"] if status else None, today, planned_today)
+        finally:
+            con.close()
+        today_call = call if call.get("available") else None
 
     plan, _ = plan_week(db, user.id, last_week)
     _, this_week_entries = plan_week(db, user.id, this_week)
@@ -228,7 +244,7 @@ def build_digest(db, user, today=None):
         (race.name, race.race_length, race.race_date)
         for race in db.query(Race).filter(Race.user_id == user.id, Race.race_date >= today).order_by(Race.race_date).limit(3).all()
     ]
-    return compose_digest(user.name, today, week, previous, plan, sessions, races, records, status, app_url=os.getenv("APP_URL"), recovery=recovery)
+    return compose_digest(user.name, today, week, previous, plan, sessions, races, records, status, app_url=os.getenv("APP_URL"), recovery=recovery, readiness=today_call)
 
 
 # ---- Sending ----
