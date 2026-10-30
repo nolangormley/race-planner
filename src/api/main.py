@@ -124,8 +124,11 @@ app.include_router(digest.router)
 
 # A new install has no warehouse until the first sync. Creating the schema
 # here means every page works from the first login instead of failing on
-# missing tables.
+# missing tables. The connection stays open for the life of the process:
+# DuckDB drops the database instance when its last connection closes, and
+# request threads opening and closing their own connections can race that
+# teardown for the file lock, which showed up as a rare 500 on the dashboard.
 from src.pipeline import StravaDB  # noqa: E402
 from src.api.deps import DB_PATH  # noqa: E402
 os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
-StravaDB(DB_PATH).con.close()
+warehouse_anchor = StravaDB(DB_PATH)
