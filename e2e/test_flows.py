@@ -2,6 +2,7 @@
 real app, fake Strava and a fresh database. Tests run in file order: the
 sync test fills the warehouse that the page tests then look at."""
 import time
+from datetime import date, timedelta
 
 import requests
 
@@ -122,3 +123,35 @@ def test_changing_heart_rate_profile_recomputes_metrics(app_server, registered_u
     page.wait_for_selector(".sync-panel .progress.is-done", timeout=60000)
     assert "Metrics updated" in page.text_content(".sync-panel .label")
     assert page.text_content("#view-max-hr").strip() == "190 bpm"
+
+
+def test_build_plan_fills_the_calendar_to_race_day(app_server, registered_user, page):
+    login(page, app_server)
+    user_id = page.evaluate("document.body.dataset.userId")
+    race_day = date.today() + timedelta(weeks=10)
+    response = page.request.post(f"{app_server}/api/races/{user_id}", data={
+        "name": "Spring Half", "race_length": "half marathon", "race_date": race_day.isoformat(),
+    })
+    assert response.ok, response.text()
+
+    page.goto(f"{app_server}/training-calendar")
+    page.wait_for_load_state("networkidle")
+    page.click("#cal-build")
+    page.wait_for_selector("#build-modal.open")
+    page.wait_for_function("document.querySelector('#build-race option[value]:not([value=\"\"])') !== null")
+    assert "Spring Half" in page.text_content("#build-race")
+    page.fill("#build-weekly", "25")
+    page.select_option("#build-days", "4")
+    page.click("#build-save")
+    page.locator("#build-modal.open").wait_for(state="hidden")
+    page.wait_for_selector("#toast.show")
+    assert "weeks" in page.text_content("#toast")
+
+    today = date.today()
+    months_ahead = (race_day.year - today.year) * 12 + race_day.month - today.month
+    for _ in range(months_ahead):
+        page.click("#cal-next")
+    race_chip = page.locator(f'.cal-cell[data-date="{race_day.isoformat()}"] .chip')
+    race_chip.wait_for()
+    assert "Race" in race_chip.text_content()
+    assert page.locator(".cal-cell .chip").count() >= 20          # the race month is planned day by day

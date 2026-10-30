@@ -1,18 +1,18 @@
-"""Training plan entries."""
+"""Training plan entries, projection and the plan builder."""
 from fastapi import APIRouter, HTTPException, Depends
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import logging
 
 from src.api.auth_routes import get_current_user
-from src.api.database import SessionLocal, User, TrainingPlan, TrainingPlanEntry
-from src.api.schemas import PlanEntryCreate, PlanEntryUpdate, BulkEntriesCreate
-
-logger = logging.getLogger("race_planner.api")
-from datetime import date, timedelta
+from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry
 from src.api.deps import get_db_connection
-from src.api.database import Race
+from src.api.schemas import PlanEntryCreate, PlanEntryUpdate, BulkEntriesCreate, PlanBuildRequest
 from src.api.services.metrics import calculate_training_status_logic
 from src.metrics import planned_distance_km, estimate_entry_load, project_training_load
+from src.plan_builder import build_plan, summarize, RACE_PROFILES
+
+logger = logging.getLogger("race_planner.api")
+
 router = APIRouter()
 
 
@@ -265,3 +265,98 @@ def get_projection(user_id: int, current_user: User = Depends(get_current_user))
         ],
         "races": race_rows,
     }
+
+
+def current_weekly_run_meters(athlete_id):
+    """Average weekly run distance over the last four complete weeks, or None."""
+    con = get_db_connection()
+    try:
+        rows = con.execute("""
+            SELECT date_trunc('week', start_date_local)::DATE AS week, SUM(distance)
+            FROM dim_activity
+            WHERE athlete_id = ? AND type = 'Run'
+              AND start_date_local >= date_trunc('week', current_date) - interval '4 weeks'
+              AND start_date_local < date_trunc('week', current_date)
+            GROUP BY 1
+        """, [athlete_id]).fetchall()
+    finally:
+        con.close()
+    if not rows:
+        return None
+    return sum(row[1] for row in rows) / 4
+
+
+@router.post("/api/training-plan/{user_id}/build")
+def build_training_plan(user_id: int, body: PlanBuildRequest, current_user: User = Depends(get_current_user)):
+    """Fills the calendar from tomorrow to a race with a generated plan (see
+    src.plan_builder). Weekly volume starts from the last four weeks of
+    running unless given. With replace_future, planned days after today are
+    replaced; otherwise only days without an entry are filled."""
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this training plan")
+    today = date.today()
+    db = SessionLocal()
+    try:
+        race = db.query(Race).filter(Race.id == body.race_id, Race.user_id == user_id).first()
+        if not race:
+            raise HTTPException(status_code=404, detail="Race not found")
+        if race.race_date <= today:
+            raise HTTPException(status_code=400, detail="That race is in the past.")
+        if (race.race_length or "").lower() not in RACE_PROFILES:
+            raise HTTPException(status_code=400, detail="Plans cover 5K, 5 mile, 10K, 10 mile, half marathon and marathon.")
+
+        weekly = body.weekly_distance_m
+        if not weekly and current_user.strava_athlete_id:
+            weekly = current_weekly_run_meters(current_user.strava_athlete_id)
+        weekly = weekly or 20000.0
+
+        entries = build_plan(
+            today + timedelta(days=1), race.race_date, race.race_length, weekly,
+            metric=body.metric, days_per_week=body.days_per_week, long_run_day=body.long_run_day,
+            quality_sessions=body.quality_sessions, race_label=race.name or race.race_length,
+        )
+
+        plan = db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).order_by(TrainingPlan.id.desc()).first()
+        if not plan:
+            plan = TrainingPlan(user_id=user_id, name=f"{race.name or race.race_length} plan", race_id=race.id)
+            db.add(plan)
+            db.commit()
+            db.refresh(plan)
+        else:
+            plan.race_id = race.id
+            plan.name = f"{race.name or race.race_length} plan"
+
+        future = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id, TrainingPlanEntry.date > today)
+        if body.replace_future:
+            future.delete(synchronize_session=False)
+            taken = set()
+        else:
+            taken = {entry.date for entry in future.all()}
+
+        created = 0
+        for item in entries:
+            day = date.fromisoformat(item["date"])
+            if day in taken:
+                continue
+            db.add(TrainingPlanEntry(
+                plan_id=plan.id, date=day, workout_type=item["workout_type"], training_focus=item["training_focus"],
+                approximate_distance=item["approximate_distance"], description=item["description"],
+            ))
+            created += 1
+        db.commit()
+        all_entries = db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id == plan.id).order_by(TrainingPlanEntry.date).all()
+        return {
+            "created": created,
+            "weekly_distance_m": weekly,
+            "summary": summarize(entries, body.metric),
+            "entries": [_entry_to_dict(entry) for entry in all_entries],
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.exception("Plan build failed")
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()

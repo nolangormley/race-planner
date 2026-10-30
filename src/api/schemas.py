@@ -75,3 +75,13 @@ class BulkEntriesCreate(BaseModel):
     entries: List[PlanEntryCreate]
     name: Optional[str] = None
     race_id: Optional[int] = None
+
+
+class PlanBuildRequest(BaseModel):
+    race_id: int
+    days_per_week: int = Field(default=5, ge=3, le=7)
+    long_run_day: int = Field(default=6, ge=0, le=6)       # Python weekday: 0 Monday, 6 Sunday
+    quality_sessions: int = Field(default=2, ge=0, le=2)
+    weekly_distance_m: Optional[float] = Field(default=None, ge=0)
+    metric: bool = False
+    replace_future: bool = True

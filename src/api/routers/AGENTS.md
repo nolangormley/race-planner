@@ -10,6 +10,6 @@ One `APIRouter` per concern, all mounted by `../main.py`. Each router does the s
 - `analytics.py`: training status (with the coach's note), VO2 max, pace zones, dashboard analytics (HR zones, time by type, weekly volume), race predictions from best efforts with the VDOT ceiling (`/api/predictions`), aerobic efficiency on easy runs (`/api/efficiency`), personal records (`/api/records`).
 - `races.py`: races CRUD.
 - `profile.py`: profile updates and `GET /api/hr-profile/{user_id}` (resting and max heart rate in use, and where they come from). A changed heart rate profile starts a metrics recompute job.
-- `plan.py`: training plan entries CRUD, and `GET /api/projection/{user_id}`: fitness, fatigue and form stepped forward along the planned sessions (load per session from the athlete's TRIMP per kilometre scaled by workout type), with upcoming race dates.
+- `plan.py`: training plan entries CRUD; `GET /api/projection/{user_id}`: fitness, fatigue and form stepped forward along the planned sessions (load per session from the athlete's TRIMP per kilometre scaled by workout type), with upcoming race dates; `POST /api/training-plan/{user_id}/build`: fills the calendar from tomorrow to a race with entries from `src/plan_builder.py`, starting from the last four weeks of run volume in the warehouse unless the body gives a weekly distance.
 
 A new endpoint goes in the router that owns its data; a new concern gets a new file here and one `include_router` line in `main.py`.
