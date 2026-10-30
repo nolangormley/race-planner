@@ -10,6 +10,8 @@
 //              reverse, includeZero, min, max, bands: [{from, to, color, label}],
 //              series: [{ key, label, color, values, dash, area, endLabel,
 //                         negativeColor }] }],
+//   markers: [{x, label}],             vertical lines across every panel
+//   xBands: [{from, to, label}],       x ranges shaded across every panel
 //   legend: boolean, table: boolean, note(index) -> string
 // }) -> { update(spec), destroy() }
 import {
@@ -168,6 +170,31 @@ export function panelChart(container, initialSpec) {
     });
   }
 
+  // x ranges (the reps of an interval session) shaded behind every panel.
+  function drawXBands(group, entry) {
+    for (const band of spec.xBands || []) {
+      const from = layout.xScale(Math.max(band.from, layout.xScale.domain[0]));
+      const to = layout.xScale(Math.min(band.to, layout.xScale.domain[1]));
+      if (to <= from) continue;
+      svgEl('rect', {
+        x: from, y: entry.top, width: to - from, height: entry.panel.height,
+        fill: colorOf('series-muted'), 'fill-opacity': 0.16, class: 'x-band',
+      }, group);
+    }
+  }
+
+  function drawXBandLabels(group) {
+    const first = layout.panels[0];
+    for (const band of spec.xBands || []) {
+      if (!band.label) continue;
+      const from = layout.xScale(Math.max(band.from, layout.xScale.domain[0]));
+      const to = layout.xScale(Math.min(band.to, layout.xScale.domain[1]));
+      if (to - from < 12) continue;
+      const text = svgEl('text', { class: 'x-band-label', x: (from + to) / 2, y: first.top + 11, 'text-anchor': 'middle' }, group);
+      text.textContent = band.label;
+    }
+  }
+
   function linePath(series, entry) {
     const { xScale } = layout;
     let path = '';
@@ -312,12 +339,14 @@ export function panelChart(container, initialSpec) {
       const clip = svgEl('clipPath', { id: `panel-clip-${uid}-${index}` }, defs);
       svgEl('rect', { x: layout.xScale.range[0], y: entry.top - 1, width: layout.plotWidth, height: entry.panel.height + 2 }, clip);
       const group = svgEl('g', { 'clip-path': `url(#panel-clip-${uid}-${index})` }, svg);
+      drawXBands(group, entry);
       drawBands(group, entry);
       for (const series of visibleSeries(entry.panel)) {
         if (entry.panel.kind === 'columns') drawColumns(group, series, entry);
         else drawLine(group, series, entry);
       }
     });
+    drawXBandLabels(svgEl('g', {}, svg));
     drawMarkers(svgEl('g', {}, svg));
     drawEndLabels(svgEl('g', {}, svg));
     drawHover(svgEl('g', { class: 'hover-layer' }, svg));

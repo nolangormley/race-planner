@@ -8,6 +8,8 @@ Unit tests (`pytest`, no network, no database server). DuckDB tests use `StravaD
 - `test_importers.py`: FIT and GPX parsing: the `fixtures/sample_run.fit` fixture (summary, local time from the watch's offset, streams, laps), FIT records without a session, sport mapping and names, GPX tracks and time offsets, refused files, the activity id range.
 - `test_imports.py`: the import service on an in-memory warehouse (activity, streams and analysis written, a `dim_athlete` row for a file-only user), skipping repeats and runs already synced, moving a file-only user's rows to their Strava id, and the `User.athlete_id` resolver.
 - `test_sync.py`: the background job registry and its progress snapshots.
+- `test_intervals.py`: the interval detector on synthetic streams (track reps, steady run, tempo, a short fast block, rolling hills at even effort, auto-pauses, standing rests, missing readings) and the warehouse pass.
+- `test_plan_match.py`: marking planned sessions done from synced runs, with SQLite in place of Postgres and an in-memory warehouse.
 - `test_app.py`: the route table, so a router that fails to mount or a removed endpoint that returns fails CI.
 - `test_digest.py`: when the weekly digest is due, the email text, and a scheduler pass sending once and stamping the user (SQLite in place of Postgres).
 - `test_pacing.py`: clock parsing, even and negative splits summing to the goal, the grade cost curve, a hilly profile slowing the climbs, GPX parsing of an inline course, the stretched-course warning, rejected files, and the prediction the goal falls back to.

@@ -92,6 +92,18 @@ Upload the course GPX and the splits follow the hills at one effort: each split'
 **Print pace band** prints only a narrow strip of split clock times to wear on race day.
 
 
+## Detected intervals and automatic plan completion
+Every sync looks at the pace stream of each new run and calls it **intervals**, **tempo** or nothing (`src/intervals.py`, which documents every threshold).
+In short: pace is resampled to one reading a second, adjusted for grade with the same ACSM cost the VO2 max estimator uses, smoothed, and split into a fast and a slow group; the fast group has to be at least 12% faster than the slow one.
+Three or more reps with a median under 8 minutes are intervals; one or two fast blocks of 12 minutes or more are a tempo.
+The activity page then shows a **Detected structure** card (for example "6 × 800 m at 3:42/km, 2:38 recoveries") with a table of the reps, and shades the reps on the stream chart.
+Runs synced before this feature are analysed on the next sync.
+
+After each sync, planned sessions from the last seven days are marked done when a run matches them (`src/api/services/plan_match.py`): an Intervals or Tempo session needs a run with that structure, a Long Run needs 80% of the planned distance or the longest run of that week, an Easy Run or Race needs any run that day, and Cross Training or Strength needs any activity that day.
+On the dashboard, a planned Intervals or Tempo day whose runs were analysed and do not match shows **Ran, not the session** instead of Done.
+
+Known blind spots: a run-walk easy run reads as intervals (the walks look like recoveries), and three or more long reps (3 × 10 min) are neither kind.
+
 ## Strava webhooks (automatic sync)
 
 With a push subscription, Strava calls `/api/strava/webhook` whenever an activity is created, updated or deleted and the warehouse syncs itself; the Sync button becomes a fallback.
@@ -141,6 +153,7 @@ The rebuild copies every table into a fresh schema (about 4 s for 400 activities
 *   **/src/api**: FastAPI backend and Jinja2 templates (Dashboard, Warehouse, Activity Analysis).
 *   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB — including `run_analyze_effectiveness()`, which computes per-activity physiological metrics from activity streams.
 *   **/src/metrics.py**: Pure math shared by the pipeline and the API: load model, VO2 max estimator, Daniels VDOT, best efforts, planned-load projection.
+*   **/src/intervals.py**, **/src/structure_pass.py**: The interval and tempo detector and the sync pass that stores its results.
 *   **/src/plan_builder.py**: The deterministic training plan generator behind **Build plan**.
 *   **/src/importers.py**: FIT and GPX parsing for **Import files**.
 *   **/alembic**: Postgres schema migrations (`alembic upgrade head` to apply). The DuckDB warehouse's own schema is managed separately, inside `src/pipeline.py`'s `StravaDB.init_schema()`.
