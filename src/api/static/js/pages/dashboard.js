@@ -504,7 +504,7 @@ function renderHeader(races) {
     return;
   }
   const when = next.days === 0 ? 'today' : next.days === 1 ? 'tomorrow' : `in ${next.days} days`;
-  sub.innerHTML = `Training for <span class="strong">${escapeHtml(next.name || next.race_length)}</span><span class="sep">·</span>${escapeHtml(next.race_length)}<span class="sep">·</span>${fmtDate(next.race_date, { month: 'long', day: 'numeric' })}, ${when}${next.goal_time ? `<span class="sep">·</span>goal ${escapeHtml(next.goal_time)}` : ''}`;
+  sub.innerHTML = `Training for <span class="strong">${escapeHtml(next.name || next.race_length)}</span><span class="sep">·</span>${escapeHtml(next.race_length)}<span class="sep">·</span>${fmtDate(next.race_date, { month: 'long', day: 'numeric' })}, ${when}${next.goal_time ? `<span class="sep">·</span>goal ${escapeHtml(next.goal_time)}` : ''}<span class="sep">·</span><a href="/races/${next.id}/pacing">Pacing plan</a>`;
 }
 
 function renderNote() {

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Pacing · {{ race.name or race.race_length }} · Race Planner{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="/static/css/pages/pacing.css">
+{% endblock %}
+
+{% block content %}
+<div id="pacing" data-race-id="{{ race.id }}">
+    <a href="/profile" class="back-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+        Profile
+    </a>
+    <div class="page-head">
+        <div>
+            <h1>{{ race.name or race.race_length }}</h1>
+            <p class="sub">Pacing plan<span class="sep">·</span>{{ race.race_length }}<span class="sep">·</span>{{ race.race_date.strftime('%B %-d, %Y') }}</p>
+        </div>
+        <div class="page-actions">
+            <div class="seg" id="units-toggle" role="group" aria-label="Distance units">
+                <button type="button" data-units="imperial">mi</button>
+                <button type="button" data-units="metric">km</button>
+            </div>
+            <button type="button" class="btn btn-sm" id="print-band">Print pace band</button>
+        </div>
+    </div>
+
+    <section class="card">
+        <form id="pacing-form" class="pacing-controls">
+            <div class="field">
+                <label for="goal">Goal time</label>
+                <input id="goal" class="input" placeholder="1:45:00" autocomplete="off">
+            </div>
+            <div class="field">
+                <span class="label" id="strategy-label">Split strategy</span>
+                <div class="seg" id="strategy" role="group" aria-labelledby="strategy-label">
+                    <button type="button" data-strategy="even" aria-pressed="true">Even</button>
+                    <button type="button" data-strategy="negative" aria-pressed="false">Negative</button>
+                </div>
+            </div>
+            <div class="field">
+                <span class="label">Course</span>
+                <div class="row wrap">
+                    <input type="file" id="gpx-file" accept=".gpx,application/gpx+xml" class="hidden">
+                    <button type="button" class="btn btn-sm" id="gpx-upload">Upload GPX</button>
+                    <button type="button" class="btn btn-sm hidden" id="gpx-remove">Remove course</button>
+                </div>
+            </div>
+            <div class="field pacing-submit">
+                <button type="submit" class="btn btn-primary">Update</button>
+            </div>
+        </form>
+        <div class="small faint mt-3" id="goal-source"></div>
+        <div class="small mt-3 hidden" id="pacing-status" role="status"></div>
+        <div class="pacing-summary" id="pacing-summary"></div>
+    </section>
+
+    <section class="card mt-4">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">Course profile</h2>
+                <div class="card-sub" id="course-note">Elevation along the course, with each split marked. Upload the race GPX and the splits follow the hills at one effort.</div>
+            </div>
+        </div>
+        <div id="profile-chart" class="chart-slot"></div>
+    </section>
+
+    <section class="card mt-4">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">Splits</h2>
+                <div class="card-sub" id="splits-sub">Target pace for each split and the clock time you should see at its end.</div>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="table table-compact" id="splits-table">
+                <thead>
+                    <tr>
+                        <th id="split-head">Mile</th>
+                        <th class="num col-grade">Grade</th>
+                        <th class="num">Pace <span class="faint" id="pace-unit">/mi</span></th>
+                        <th class="num col-split">Split time</th>
+                        <th class="num">Clock</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+
+    <aside class="pace-band" id="pace-band" aria-hidden="true"></aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/pacing.js"></script>
+{% endblock %}

@@ -192,3 +192,32 @@ def test_coros_link_pulls_nights_and_fills_the_recovery_card(app_server, registe
     assert "ms" in tiles and "bpm" in tiles
     page.wait_for_selector("#recovery-chart svg")
 
+
+def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered_user, page):
+    login(page, app_server)
+    user_id = page.evaluate("document.body.dataset.userId")
+    response = page.request.post(f"{app_server}/api/races/{user_id}", data={
+        "name": "Pacing Half", "race_length": "half marathon",
+        "race_date": (date.today() + timedelta(weeks=8)).isoformat(), "goal_time": "1:45:00",
+    })
+    assert response.ok, response.text()
+    race_id = response.json()["id"]
+
+    page.goto(f"{app_server}/profile")
+    page.wait_for_load_state("networkidle")
+    page.click(f'a[href="/races/{race_id}/pacing"]')
+    page.wait_for_url(f"**/races/{race_id}/pacing")
+    page.wait_for_selector("#splits-table tbody tr")
+    rows = page.locator("#splits-table tbody tr")
+    assert rows.count() == 14                                   # 13 miles and the last 0.11
+    assert "1:45:00" in rows.nth(13).text_content()
+    assert "1:45:00" in page.input_value("#goal")
+    even_first_row = rows.nth(0).text_content()
+
+    page.click('#strategy button[data-strategy="negative"]')
+    page.wait_for_function(
+        "text => document.querySelector('#splits-table tbody tr').textContent !== text", arg=even_first_row,
+    )
+    assert "1:45:00" in rows.nth(13).text_content()             # the finish time does not move
+    assert page.locator("#pace-band tr").count() == 14
+

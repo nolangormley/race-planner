@@ -187,7 +187,7 @@ async function loadRaces() {
         <div class="strong">${escapeHtml(race.name || race.race_length)}</div>
         <div class="small muted">${escapeHtml(race.race_length)} · ${fmtDate(race.race_date, { month: 'long', day: 'numeric', year: 'numeric' })}${race.goal_time ? ` · goal ${escapeHtml(race.goal_time)}` : ''}</div>
       </div>
-      <div class="row">${when}<button type="button" class="btn btn-ghost btn-icon btn-sm" data-delete-race="${race.id}" aria-label="Delete race">
+      <div class="row">${when}<a class="btn btn-sm" href="/races/${race.id}/pacing">Pacing</a><button type="button" class="btn btn-ghost btn-icon btn-sm" data-delete-race="${race.id}" aria-label="Delete race">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button></div>
     </div>`;

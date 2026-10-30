@@ -2,7 +2,7 @@
 
 One `APIRouter` per concern, all mounted by `../main.py`. Each router does the session check through `get_current_user` (API) or `get_current_user_from_session` (pages) from `../auth_routes.py`, talks to Postgres through `SessionLocal` and to the DuckDB warehouse through `get_db_connection` in `../deps.py`.
 
-- `pages.py`: the server-rendered pages (`/dashboard`, `/training-calendar`, `/warehouse`, `/workout_streams/{id}`, `/profile`). Markup only; data comes from the API routers below.
+- `pages.py`: the server-rendered pages (`/dashboard`, `/training-calendar`, `/warehouse`, `/workout_streams/{id}`, `/profile`, `/races/{id}/pacing`). Markup only; data comes from the API routers below.
 - `activities.py`: synced Strava activities: list, per-user list, detail, streams, laps (the watch's splits), effectiveness, AI note, delete (with the fixed table allowlist).
 - `sync.py`: start a background Strava sync and read its progress (`src.api.services.sync`). `start_sync_for(user)` is the one place that builds a user's sync job; the webhook uses it too.
 - `strava_webhook.py`: Strava's push subscription. `GET` answers the subscription handshake with `STRAVA_WEBHOOK_VERIFY_TOKEN`; `POST` takes activity create/update (queue a sync), delete (remove from the warehouse) and athlete deauthorization events. `scripts/strava_webhook.py` registers the subscription.
@@ -13,5 +13,6 @@ One `APIRouter` per concern, all mounted by `../main.py`. Each router does the s
 - `plan.py`: training plan entries CRUD; `GET /api/projection/{user_id}`: fitness, fatigue and form stepped forward along the planned sessions (load per session from the athlete's TRIMP per kilometre scaled by workout type), with upcoming race dates; `POST /api/training-plan/{user_id}/build`: fills the calendar from tomorrow to a race with entries from `src/plan_builder.py`, starting from the last four weeks of run volume in the warehouse unless the body gives a weekly distance.
 - `digest.py`: weekly digest email settings (`GET`/`POST /api/digest/{user_id}`), `GET .../preview` for the text the user would get, and `POST .../send` to send it now.
 - `coros.py`: the COROS link: `GET /api/coros/{user_id}` status, `POST .../link` (logs in with email and password, keeps only the token, pulls a year of nights), `POST .../sync`, `DELETE /api/coros/{user_id}`, and `GET /api/recovery/{user_id}` with the nightly HRV, resting heart rate and time in bed for the dashboard.
+- `pacing.py`: `GET /api/races/{race_id}/pacing?goal&strategy&unit` builds the split plan from `src/pacing.py` (goal from the query, else the race, else the Riegel prediction via `analytics.recent_best_efforts` and `predict_from_efforts`); `POST`/`DELETE /api/races/{race_id}/course` store or drop the course GPX on the race.
 
 A new endpoint goes in the router that owns its data; a new concern gets a new file here and one `include_router` line in `main.py`.
