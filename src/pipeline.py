@@ -329,6 +329,10 @@ class StravaDB:
                 PRIMARY KEY (athlete_id, day)
             );
         """)
+        # Early syncs stored COROS's `tib` as minutes in bed; it is not.
+        if not self._migration_applied("coros_daily_clear_tib"):
+            self.con.execute("UPDATE coros_daily SET time_in_bed_min = NULL")
+            self._mark_migration_applied("coros_daily_clear_tib")
 
     def _table_has_pk(self, table_name):
         try:

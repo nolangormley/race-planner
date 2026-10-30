@@ -104,7 +104,7 @@ Without `SMTP_HOST` the digest is written to the server log, and **Preview** on 
 A thread in the app checks every half hour and sends after 06:00 server time on Mondays; **Send now** sends it straight away.
 
 ## COROS (unofficial)
-The COROS card on the profile page links a COROS Training Hub account and pulls the nightly readings the watch uploads: resting heart rate, overnight HRV with its baseline, time in bed and training load.
+The COROS card on the profile page links a COROS Training Hub account and pulls the nightly readings the watch uploads: resting heart rate, overnight HRV with its baseline and training load. (Sleep is only in the phone app's API, which the app does not use because logging in there signs the phone app out; `scripts/coros_probe.py` prints the raw fields if you want to look for more.)
 They show up in the Recovery card on the dashboard, and the 14-night median resting heart rate becomes the default for the heart-rate-reserve model whenever you have not typed a resting heart rate on your profile (a change of 2 bpm or more recomputes your metrics, as a profile change does).
 Linking sends your email and password to COROS once, the way their web app does; only the session token is stored.
 The app syncs once a day after 05:00 server time and the card has **Sync now**.
