@@ -25,7 +25,8 @@ def digest_settings(user_id: int, current_user: User = Depends(get_current_user)
         user = own_user(db, user_id, current_user)
         return {
             "enabled": bool(user.weekly_digest),
-            "last_sent_at": user.digest_sent_at.isoformat() if user.digest_sent_at else None,
+            # Stored in server time without a zone; astimezone() adds the offset.
+            "last_sent_at": user.digest_sent_at.astimezone().isoformat() if user.digest_sent_at else None,
             "smtp_configured": smtp_configured(),
         }
     finally:

@@ -7,7 +7,7 @@ from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry
 from src.api.deps import get_db_connection
 from src.api.schemas import PlanEntryCreate, PlanEntryUpdate, BulkEntriesCreate, PlanBuildRequest
-from src.api.services.metrics import calculate_training_status_logic
+from src.api.services.metrics import calculate_training_status_logic, resolve_resting_hr
 from src.metrics import planned_distance_km, estimate_entry_load, project_training_load
 from src.plan_builder import build_plan, summarize, RACE_PROFILES
 
@@ -221,7 +221,7 @@ def get_projection(user_id: int, current_user: User = Depends(get_current_user))
     if not future:
         return {"has_plan": False, "days": [], "races": race_rows}
 
-    status = calculate_training_status_logic(athlete_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
+    status = calculate_training_status_logic(athlete_id, hr_max=current_user.max_hr, hr_rest=resolve_resting_hr(current_user))
     if not status:
         return {"has_plan": False, "days": [], "races": race_rows}
 

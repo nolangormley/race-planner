@@ -2,15 +2,16 @@
 the callback, Strava calls here when an activity is created, updated or
 deleted, and the warehouse follows without anyone pressing Sync.
 
-Strava does not sign events, only the subscription handshake carries the
-verify token. An event can therefore only do two things: start a sync for
-an athlete we already know (which just re-reads their Strava data) or
-remove one activity from the warehouse (which the next sync puts back if it
-still exists on Strava)."""
+Strava does not sign events, so the callback URL carries the secret: both
+routes answer only under /api/strava/webhook/<STRAVA_WEBHOOK_VERIFY_TOKEN>
+and return 404 for any other path. Without it, anyone who knows an athlete
+id could revoke that athlete's Strava link, delete activities older than the
+sync window for good, or keep a sync running against the shared rate limit."""
+import hmac
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 
 from src.api.database import SessionLocal, User
 from src.api.deps import get_db_connection
@@ -19,6 +20,11 @@ from src.api.routers.sync import start_sync_for
 
 logger = logging.getLogger("race_planner.webhook")
 router = APIRouter()
+
+
+def secret_matches(token, expected_token):
+    """True when the callback path carries the configured secret."""
+    return bool(expected_token) and hmac.compare_digest(token.encode(), expected_token.encode())
 
 
 def subscription_challenge(mode, token, challenge, expected_token):
@@ -74,7 +80,9 @@ def delete_for_user(user, activity_id):
             "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?", [int(activity_id), user.strava_athlete_id]
         ).fetchone()
         if owned:
-            delete_activity_rows(con, int(activity_id))
+            failed_tables = delete_activity_rows(con, int(activity_id))
+            if failed_tables:
+                logger.warning("Webhook delete of activity %s failed in %s", activity_id, failed_tables)
     finally:
         con.close()
 
@@ -90,25 +98,25 @@ def deauthorize(user):
         db.close()
 
 
-@router.get("/api/strava/webhook")
-def strava_webhook_validation(request: Request):
+@router.get("/api/strava/webhook/{token}")
+def strava_webhook_validation(token: str, request: Request):
+    expected = os.getenv("STRAVA_WEBHOOK_VERIFY_TOKEN", "")
+    if not secret_matches(token, expected):
+        raise HTTPException(status_code=404, detail="Not Found")
     params = request.query_params
-    body = subscription_challenge(
-        params.get("hub.mode"), params.get("hub.verify_token"), params.get("hub.challenge"),
-        os.getenv("STRAVA_WEBHOOK_VERIFY_TOKEN", ""),
-    )
+    body = subscription_challenge(params.get("hub.mode"), params.get("hub.verify_token"), params.get("hub.challenge"), expected)
     if body is None:
         raise HTTPException(status_code=403, detail="Verify token does not match")
     return body
 
 
-@router.post("/api/strava/webhook")
-async def strava_webhook_event(request: Request):
-    # Strava expects a 200 within two seconds; the sync itself runs in a thread.
-    try:
-        event = await request.json()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Expected a JSON event")
+@router.post("/api/strava/webhook/{token}")
+def strava_webhook_event(token: str, event: dict = Body(...)):
+    # A plain def runs in FastAPI's thread pool, so the database work below
+    # does not hold up other requests. Strava expects a 200 within two
+    # seconds; the sync itself runs in its own thread.
+    if not secret_matches(token, os.getenv("STRAVA_WEBHOOK_VERIFY_TOKEN", "")):
+        raise HTTPException(status_code=404, detail="Not Found")
     outcome = handle_event(
         event, find_user_by_athlete,
         lambda user: start_sync_for(user, queue_if_running=True),

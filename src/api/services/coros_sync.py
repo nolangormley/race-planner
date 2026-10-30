@@ -8,11 +8,10 @@ import logging
 from datetime import datetime, timedelta
 
 from src.coros import CorosClient, CorosAuthError, CorosError
-from src.pipeline import recompute_metrics
 from src.api.database import SessionLocal, User
 from src.api.deps import get_db_connection
-from src.api.services.metrics import resolve_resting_hr
-from src.api.services.sync import registry as sync_registry, SyncAlreadyRunning
+from src.api.services.metrics import coros_resting_hr, resolve_resting_hr
+from src.api.services.sync import queue_recompute
 
 logger = logging.getLogger("race_planner.coros")
 
@@ -46,36 +45,19 @@ def client_for(user):
     return CorosClient(user.coros_access_token, user.coros_user_id, user.coros_region or "us")
 
 
-def recompute_trigger(user):
-    """A callable that recomputes the warehouse with a new resting heart
-    rate, like a profile change does. Returns whether a job started."""
-    user_id, max_hr = user.id, user.max_hr
-
-    def start(resting_hr):
-        try:
-            sync_registry.start(
-                user_id,
-                run_sync=lambda progress: recompute_metrics(progress=progress, resting_hr=resting_hr, max_hr=max_hr),
-                on_success=lambda new_token: None,
-                kind="recompute",
-            )
-            return True
-        except SyncAlreadyRunning:
-            return False
-    return start
-
-
-def sync_coros(db, user, client, con, now=None, on_resting_hr_change=None):
+def sync_coros(db, user, client, con, now=None, recompute=None):
     """Fetches the nights since the last sync (a year on the first one),
     stores them and stamps the user. A failure is recorded on the user and
-    re-raised. Returns a summary for the UI."""
+    re-raised. When the 14-night median resting heart rate moves by
+    RESTING_HR_STEP or more it becomes the user's coros_resting_hr, and if the
+    profile has no typed resting heart rate, recompute() is called so the
+    stored metrics follow. Returns a summary for the UI."""
     now = now or datetime.now()
     today = now.date()
     if user.coros_synced_at:
         start = user.coros_synced_at.date() - timedelta(days=OVERLAP_DAYS)
     else:
         start = today - timedelta(days=FIRST_SYNC_DAYS)
-    before = resolve_resting_hr(con, user)
     try:
         rows = client.daily(start, today)
     except CorosError as error:
@@ -83,21 +65,24 @@ def sync_coros(db, user, client, con, now=None, on_resting_hr_change=None):
         db.commit()
         raise
     upsert_daily(con, user.athlete_id, rows)
+    previous = user.coros_resting_hr
+    median = coros_resting_hr(con, user.athlete_id)
+    if median and (previous is None or abs(median - previous) >= RESTING_HR_STEP):
+        user.coros_resting_hr = median
     user.coros_synced_at = now
     user.coros_error = None
     db.commit()
 
-    after = resolve_resting_hr(con, user)
-    recompute_started = False
-    if user.resting_hr is None and abs(after - before) >= RESTING_HR_STEP and on_resting_hr_change:
-        recompute_started = bool(on_resting_hr_change(after))
-    return {"rows": len(rows), "from": start.isoformat(), "to": today.isoformat(), "resting_hr": after, "recompute_started": recompute_started}
+    recompute_started = user.resting_hr is None and user.coros_resting_hr != previous and recompute is not None
+    if recompute_started:
+        recompute()
+    return {"rows": len(rows), "from": start.isoformat(), "to": today.isoformat(), "resting_hr": resolve_resting_hr(user), "recompute_started": recompute_started}
 
 
-def unlink_coros(db, user, con, on_resting_hr_change=None):
-    """Forgets the session and the stored nights. Recomputes when the resting
-    heart rate default falls back to the plain default."""
-    before = resolve_resting_hr(con, user)
+def unlink_coros(db, user, con, recompute=None):
+    """Forgets the session and the stored nights. Calls recompute() when the
+    metrics used the COROS resting heart rate, which falls back to the default."""
+    previous = user.coros_resting_hr
     con.execute("DELETE FROM coros_daily WHERE athlete_id = ?", [user.athlete_id])
     user.coros_access_token = None
     user.coros_user_id = None
@@ -105,10 +90,10 @@ def unlink_coros(db, user, con, on_resting_hr_change=None):
     user.coros_linked_at = None
     user.coros_synced_at = None
     user.coros_error = None
+    user.coros_resting_hr = None
     db.commit()
-    after = resolve_resting_hr(con, user)
-    if user.resting_hr is None and after != before and on_resting_hr_change:
-        on_resting_hr_change(after)
+    if user.resting_hr is None and previous is not None and recompute is not None:
+        recompute()
 
 
 def coros_sync_due(user, now):
@@ -132,7 +117,7 @@ def sync_due_coros(now=None):
                 continue
             con = get_db_connection()
             try:
-                sync_coros(db, user, client_for(user), con, now, on_resting_hr_change=recompute_trigger(user))
+                sync_coros(db, user, client_for(user), con, now, recompute=lambda user_id=user.id: queue_recompute(user_id))
                 synced += 1
             except CorosError as error:
                 logger.warning("COROS sync for %s failed: %s", user.email, error)
