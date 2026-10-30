@@ -226,7 +226,7 @@ def build_digest(db, user, today=None):
             records = new_records(con, athlete_id, last_week)
             recovery = recovery_week(con, athlete_id, last_week)
             hr_max = user.max_hr or detected_max_hr(con, athlete_id) or DEFAULT_MAX_HR
-            hr_rest = resolve_resting_hr(con, user)
+            hr_rest = resolve_resting_hr(user)
         finally:
             con.close()
         status = calculate_training_status_logic(athlete_id, hr_max, hr_rest)

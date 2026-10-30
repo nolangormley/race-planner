@@ -64,6 +64,9 @@ class User(Base):
     coros_linked_at = Column(DateTime, nullable=True)
     coros_synced_at = Column(DateTime, nullable=True)
     coros_error = Column(String, nullable=True)
+    # The 14-night COROS median the metrics use, moved only in steps of
+    # coros_sync.RESTING_HR_STEP so a 1 bpm wobble does not recompute everything.
+    coros_resting_hr = Column(Integer, nullable=True)
 
     races = relationship("Race", back_populates="user", cascade="all, delete-orphan")
 

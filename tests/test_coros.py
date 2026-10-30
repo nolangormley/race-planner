@@ -120,7 +120,7 @@ def nights(today, count, rhr):
 
 
 def athlete(**overrides):
-    values = {"id": 1, "strava_athlete_id": 424242, "athlete_id": 424242, "resting_hr": None, "max_hr": None, "coros_synced_at": None, "coros_error": None, "coros_access_token": "tok"}
+    values = {"id": 1, "strava_athlete_id": 424242, "athlete_id": 424242, "resting_hr": None, "max_hr": None, "coros_synced_at": None, "coros_error": None, "coros_access_token": "tok", "coros_resting_hr": None}
     values.update(overrides)
     return SimpleNamespace(**values)
 
@@ -129,27 +129,38 @@ def test_sync_stores_nights_and_the_resting_heart_rate_becomes_the_default():
     warehouse = StravaDB(":memory:")
     now = datetime.now().replace(microsecond=0)
     user = athlete()
-    changes = []
+    recomputes = []
 
-    summary = coros_sync.sync_coros(FakeDb(), user, FakeClient(nights(now.date(), 20, 48)), warehouse.con, now, on_resting_hr_change=lambda rhr: changes.append(rhr) or True)
+    summary = coros_sync.sync_coros(FakeDb(), user, FakeClient(nights(now.date(), 20, 48)), warehouse.con, now, recompute=lambda: recomputes.append(1))
 
     assert summary["rows"] == 20 and summary["resting_hr"] == 48 and summary["recompute_started"]
-    assert changes == [48]
+    assert recomputes == [1] and user.coros_resting_hr == 48
     assert user.coros_synced_at == now and user.coros_error is None
     assert warehouse.con.execute("SELECT COUNT(*) FROM coros_daily").fetchone()[0] == 20
     assert coros_resting_hr(warehouse.con, 424242) == 48
-    assert resolve_resting_hr(warehouse.con, user) == 48
+    assert resolve_resting_hr(user) == 48
     user.resting_hr = 52
-    assert resolve_resting_hr(warehouse.con, user) == 52          # a typed value wins
+    assert resolve_resting_hr(user) == 52                         # a typed value wins
     user.resting_hr = None
 
     # The next sync only asks for the last few nights and does not recompute
     # when the median barely moves.
     client = FakeClient(nights(now.date(), 25, 47))
-    summary = coros_sync.sync_coros(FakeDb(), user, client, warehouse.con, now, on_resting_hr_change=lambda rhr: changes.append(rhr) or True)
+    summary = coros_sync.sync_coros(FakeDb(), user, client, warehouse.con, now, recompute=lambda: recomputes.append(1))
     assert client.ranges == [(now.date() - timedelta(days=3), now.date())]
     assert warehouse.con.execute("SELECT COUNT(*) FROM coros_daily").fetchone()[0] == 20
-    assert not summary["recompute_started"] and changes == [48]
+    assert not summary["recompute_started"] and recomputes == [1]
+
+    # A one-beat move in the median is not applied, so nothing is recomputed.
+    coros_sync.upsert_daily(warehouse.con, 424242, nights(now.date(), 20, 47))
+    summary = coros_sync.sync_coros(FakeDb(), user, FakeClient([]), warehouse.con, now, recompute=lambda: recomputes.append(1))
+    assert coros_resting_hr(warehouse.con, 424242) == 47 and user.coros_resting_hr == 48
+    assert not summary["recompute_started"] and recomputes == [1]
+
+    # A move of two beats or more is applied.
+    coros_sync.upsert_daily(warehouse.con, 424242, nights(now.date(), 20, 45))
+    summary = coros_sync.sync_coros(FakeDb(), user, FakeClient([]), warehouse.con, now, recompute=lambda: recomputes.append(1))
+    assert summary["recompute_started"] and user.coros_resting_hr == 45 and recomputes == [1, 1]
 
 
 def test_sync_records_an_expired_session_on_the_user():
@@ -179,8 +190,9 @@ def test_unlink_forgets_the_nights_and_the_session():
     now = datetime.now()
     user = athlete(coros_user_id="42", coros_region="us", coros_linked_at=now)
     coros_sync.sync_coros(FakeDb(), user, FakeClient(nights(now.date(), 10, 45)), warehouse.con, now)
-    changes = []
-    coros_sync.unlink_coros(FakeDb(), user, warehouse.con, on_resting_hr_change=changes.append)
+    recomputes = []
+    coros_sync.unlink_coros(FakeDb(), user, warehouse.con, recompute=lambda: recomputes.append(1))
     assert warehouse.con.execute("SELECT COUNT(*) FROM coros_daily").fetchone()[0] == 0
     assert user.coros_access_token is None and user.coros_synced_at is None
-    assert changes == [60]                                        # back to the plain default
+    assert user.coros_resting_hr is None and resolve_resting_hr(user) == 60    # back to the plain default
+    assert recomputes == [1]

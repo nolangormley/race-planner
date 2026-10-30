@@ -64,17 +64,22 @@ def get_performance_standing(stats):
     }
 
 
-def detected_max_hr(con, athlete_id):
-    """The highest heart rate in the athlete's activities, or DEFAULT_MAX_HR.
-    The profile's max_hr overrides it wherever it is used."""
+def recorded_max_hr(con, athlete_id):
+    """The highest heart rate in the athlete's activities, or None without any."""
     try:
         row = con.execute(
             "SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id = ? AND max_heartrate > 100", [athlete_id]
         ).fetchone()
     except Exception:
         logger.exception("Failed to look up max heart rate for athlete %s", athlete_id)
-        return float(DEFAULT_MAX_HR)
-    return float(row[0]) if row and row[0] else float(DEFAULT_MAX_HR)
+        return None
+    return float(row[0]) if row and row[0] else None
+
+
+def detected_max_hr(con, athlete_id):
+    """recorded_max_hr, or DEFAULT_MAX_HR without any. The profile's max_hr
+    overrides it wherever it is used."""
+    return recorded_max_hr(con, athlete_id) or float(DEFAULT_MAX_HR)
 
 
 def calculate_training_status_logic(user_id: int, hr_max=None, hr_rest=None):
@@ -414,9 +419,7 @@ def coros_resting_hr(con, athlete_id, days=14):
     return int(round(row[0])) if row and row[0] else None
 
 
-def resolve_resting_hr(con, user):
+def resolve_resting_hr(user):
     """The resting heart rate the heart-rate-reserve model uses: the profile
-    value, else the COROS median, else the default."""
-    if user.resting_hr:
-        return user.resting_hr
-    return coros_resting_hr(con, user.athlete_id) or DEFAULT_REST_HR
+    value, else the COROS median the last COROS sync stored, else the default."""
+    return user.resting_hr or user.coros_resting_hr or DEFAULT_REST_HR

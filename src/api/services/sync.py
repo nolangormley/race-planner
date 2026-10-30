@@ -10,7 +10,9 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from src.pipeline import StravaAuthError
+from src.pipeline import StravaAuthError, recompute_metrics, sync_athlete
+from src.api.database import SessionLocal, User
+from src.api.services.metrics import resolve_resting_hr
 
 logger = logging.getLogger("race_planner.sync")
 
@@ -144,7 +146,11 @@ class SyncRegistry:
         with self.lock:
             current = self.jobs.get(user_id)
             if current and current.status == "running":
-                self.queued[user_id] = (run_sync, on_success, kind)
+                queued = self.queued.get(user_id)
+                # A queued sync reads the heart rate profile when it starts and
+                # recomputes whatever changed, so it already covers a recompute.
+                if not (queued and queued[2] == "sync" and kind == "recompute"):
+                    self.queued[user_id] = (run_sync, on_success, kind)
                 return current
             job = self.register(user_id, kind)
         self.launch(job, run_sync, on_success)
@@ -197,3 +203,36 @@ class SyncRegistry:
 
 
 registry = SyncRegistry()
+
+
+def stored_profile(user_id):
+    """(refresh token, warehouse athlete id, resting HR, max HR) as stored now."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        return user.strava_refresh_token, user.athlete_id, resolve_resting_hr(user), user.max_hr
+    finally:
+        db.close()
+
+
+def sync_job(user_id):
+    """run_sync for a Strava sync. It reads the token and the heart rate
+    profile when it starts, so a queued sync uses the values of that moment."""
+    def run(progress):
+        refresh_token, athlete_id, resting_hr, max_hr = stored_profile(user_id)
+        return sync_athlete(refresh_token, athlete_id, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+    return run
+
+
+def recompute_job(user_id):
+    """run_sync for a metrics recompute; it reads the profile when it starts."""
+    def run(progress):
+        _, athlete_id, resting_hr, max_hr = stored_profile(user_id)
+        return recompute_metrics(athlete_id, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+    return run
+
+
+def queue_recompute(user_id):
+    """Recomputes the user's metrics now, or once the running job ends, so a
+    heart rate change saved during a sync is not lost."""
+    return registry.start_or_queue(user_id, recompute_job(user_id), lambda new_token: None, kind="recompute")

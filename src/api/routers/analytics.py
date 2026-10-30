@@ -30,7 +30,7 @@ def get_status(user_id: int, current_user: User = Depends(get_current_user)):
     if user_id != current_user.athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's status")
 
-    status = calculate_training_status_logic(user_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
+    status = calculate_training_status_logic(user_id, hr_max=current_user.max_hr, hr_rest=resolve_resting_hr(current_user))
     if not status:
         raise HTTPException(status_code=404, detail="No training data found for user")
 
@@ -55,7 +55,7 @@ def get_vo2max(user_id: int, current_user: User = Depends(get_current_user)):
     # user_id here is the warehouse athlete id (see /status/{user_id} above).
     if user_id != current_user.athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's VO2max")
-    vo2max_data = calculate_vo2max(user_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
+    vo2max_data = calculate_vo2max(user_id, hr_max=current_user.max_hr, hr_rest=resolve_resting_hr(current_user))
     if not vo2max_data:
         raise HTTPException(status_code=404, detail="No stream data found to calculate VO2 Max for this user.")
     return vo2max_data
@@ -78,7 +78,7 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
         hr_max = float(current_user.max_hr or detected_max_hr(con, user_id))
-        hr_rest = resolve_resting_hr(con, current_user)
+        hr_rest = resolve_resting_hr(current_user)
 
         # Bounded to the same 30-day window as load_dist below, and
         # percentages are computed here rather than left for the frontend to
@@ -227,7 +227,7 @@ def get_predictions(user_id: int, current_user: User = Depends(get_current_user)
     if not efforts:
         raise HTTPException(status_code=404, detail="Predictions need runs with pace data. Sync Strava.")
 
-    vo2 = calculate_vo2max(user_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
+    vo2 = calculate_vo2max(user_id, hr_max=current_user.max_hr, hr_rest=resolve_resting_hr(current_user))
     vdot = vo2["latest_vo2_max"] if vo2 and vo2.get("latest_vo2_max") else None
 
     def row_for(label, distance_m):
@@ -272,7 +272,7 @@ def get_efficiency(user_id: int, days: int = 180, current_user: User = Depends(g
     con = get_db_connection()
     try:
         hr_max = float(current_user.max_hr or detected_max_hr(con, user_id))
-        hr_rest = resolve_resting_hr(con, current_user)
+        hr_rest = resolve_resting_hr(current_user)
         rows = con.execute("""
             SELECT da.start_date_local::DATE AS day, da.activity_id, da.name, ae.efficiency_factor,
                    da.average_heartrate, da.average_speed, da.moving_time

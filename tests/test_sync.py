@@ -130,3 +130,32 @@ def test_registry_queues_one_more_run_when_a_job_is_already_running():
         threading.Event().wait(0.01)
     assert len(runs) == 2                       # the queued run happened after the first finished
     assert registry.get(7) is not first
+
+
+def test_a_queued_sync_covers_a_later_recompute_but_not_the_other_way_round():
+    registry = SyncRegistry()
+    release = threading.Event()
+    kinds = []
+
+    def blocking(progress):
+        release.wait(timeout=5)
+        return None, 0
+
+    def recorder(kind):
+        def run(progress):
+            kinds.append(kind)
+            return None, 0
+        return run
+
+    registry.start(7, blocking, lambda token: None)
+    registry.start_or_queue(7, recorder("recompute"), lambda token: None, kind="recompute")
+    registry.start_or_queue(7, recorder("sync"), lambda token: None, kind="sync")         # replaces the recompute
+    registry.start_or_queue(7, recorder("recompute"), lambda token: None, kind="recompute")   # the sync covers it
+    assert registry.queued[7][2] == "sync"
+    release.set()
+    for _ in range(200):
+        if kinds:
+            break
+        threading.Event().wait(0.01)
+    assert kinds == ["sync"]
+

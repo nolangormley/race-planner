@@ -73,9 +73,9 @@ def import_files(db, user, files):
         imported += 1
         results.append({"file": filename, "status": "imported", "activity_id": summary["id"], "name": summary["name"], "type": summary["type"]})
     if imported:
-        run_detect_structure(db)
-        run_analyze_effectiveness(db, resting_hr=resolve_resting_hr(db.con, user), max_hr=user.max_hr)
-        run_best_efforts(db)
+        run_detect_structure(db, user.athlete_id)
+        run_analyze_effectiveness(db, user.athlete_id, resting_hr=resolve_resting_hr(user), max_hr=user.max_hr)
+        run_best_efforts(db, user.athlete_id)
         run_analyze_training_load(db)
     return results
 
