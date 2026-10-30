@@ -475,6 +475,14 @@ class StravaDB:
 
     def activity_exists(self, act_id): return self.con.execute("SELECT 1 FROM dim_activity WHERE activity_id = ?", [act_id]).fetchone() is not None
 
+    def activity_changed(self, a):
+        """True when Strava's summary differs from the stored row in a field
+        upsert_activity writes: a renamed run, a ride corrected to a run."""
+        row = self.con.execute(
+            f"SELECT {', '.join(SUMMARY_FIELDS)} FROM dim_activity WHERE activity_id = ?", [a.get('id')]
+        ).fetchone()
+        return row is not None and any(stored != a.get(field) for stored, field in zip(row, SUMMARY_FIELDS))
+
     def activity_has_streams(self, act_id):
         # Checks all seven stream tables, not just stream_velocity — an
         # activity genuinely lacking GPS/velocity data (treadmill run,
@@ -486,6 +494,13 @@ class StravaDB:
             if self.con.execute(f"SELECT 1 FROM {tbl} WHERE activity_id = ? LIMIT 1", [act_id]).fetchone() is not None:
                 return True
         return False
+
+# The summary fields upsert_activity updates on an existing row.
+SUMMARY_FIELDS = (
+    "name", "type", "distance", "moving_time", "elapsed_time", "total_elevation_gain",
+    "average_speed", "max_speed", "average_heartrate",
+)
+
 
 def _no_progress(phase, **info):
     pass
@@ -558,6 +573,10 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None, pro
             continue
         if not db.activity_exists(act_id) or not db.activity_has_streams(act_id):
             pending.append(act)
+        elif db.activity_changed(act):
+            # Edited on Strava since it was stored. The new updated_at makes
+            # the metric passes redo this activity.
+            db.upsert_activity(act)
 
     # Pass 2 makes one streams request per new (or stream-less) activity.
     for position, act in enumerate(pending, start=1):
@@ -759,6 +778,10 @@ def run_best_efforts(db, progress=None):
     if progress is None:
         progress = _no_progress
     con = db.con
+    # A run edited into another sport on Strava keeps no best efforts.
+    con.execute("""
+        DELETE FROM best_efforts WHERE activity_id IN (SELECT activity_id FROM dim_activity WHERE type <> 'Run')
+    """)
     pending = [row[0] for row in con.execute("""
         SELECT da.activity_id FROM dim_activity da
         WHERE da.type = 'Run'

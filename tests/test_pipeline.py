@@ -198,6 +198,34 @@ def test_ingest_only_fetches_streams_for_new_activities_and_reports_progress(mon
     assert db.activity_exists(101) and db.activity_has_streams(101)
 
 
+def test_ingest_refreshes_an_activity_edited_on_strava(monkeypatch):
+    db = _make_db()
+    db.insert_streams(100, {'time': {'data': [0, 1]}, 'heartrate': {'data': [120, 121]}})
+    listing = {'id': 100, 'name': 'Morning Ride', 'type': 'Ride', 'start_date_local': '2026-01-01T08:00:00Z', 'distance': 8000.0, 'moving_time': 1800}
+    _ingest(monkeypatch, _FakeStrava([listing]), db)
+    stored_at = db.con.execute("SELECT updated_at FROM dim_activity WHERE activity_id = 100").fetchone()[0]
+
+    # Unchanged on Strava: the row is left alone, so the metric passes skip it.
+    _ingest(monkeypatch, _FakeStrava([listing]), db)
+    assert db.con.execute("SELECT updated_at FROM dim_activity WHERE activity_id = 100").fetchone()[0] == stored_at
+
+    # Corrected to a run on Strava: the summary follows without refetching streams.
+    strava = _FakeStrava([{**listing, 'name': 'Morning Run', 'type': 'Run'}])
+    assert _ingest(monkeypatch, strava, db) == 0
+    assert strava.stream_calls == []
+    name, kind, updated_at = db.con.execute("SELECT name, type, updated_at FROM dim_activity WHERE activity_id = 100").fetchone()
+    assert (name, kind) == ('Morning Run', 'Run') and updated_at > stored_at
+
+
+def test_best_efforts_go_when_a_run_becomes_another_sport():
+    import src.pipeline as pipeline
+    db = _make_db()
+    db.con.execute("INSERT INTO best_efforts (activity_id, distance_m, seconds) VALUES (100, 5000, 1500)")
+    db.con.execute("UPDATE dim_activity SET type = 'Walk' WHERE activity_id = 100")
+    pipeline.run_best_efforts(db)
+    assert db.con.execute("SELECT COUNT(*) FROM best_efforts").fetchone()[0] == 0
+
+
 def test_ingest_retries_the_activity_list_after_reauth(monkeypatch):
     db = _make_db()
     strava = _FakeStrava(
