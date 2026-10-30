@@ -136,6 +136,15 @@ class SyncRegistry:
     def get(self, user_id):
         return self.jobs.get(user_id)
 
+    def snapshot(self, user_id):
+        """The current job's snapshot, or None. Read under the lock run()
+        holds while it ends a job and starts the queued one, so a poll never
+        sees the first job done before the queued one exists: the page would
+        stop polling and miss the queued job."""
+        with self.lock:
+            job = self.jobs.get(user_id)
+            return job.snapshot() if job else None
+
     def start_or_queue(self, user_id, run_sync, on_success, kind="sync"):
         """Like start, but a job already running queues one more run for when
         it finishes instead of raising. A Strava webhook arriving mid-sync
