@@ -681,12 +681,24 @@ function renderReadiness() {
 }
 
 async function loadReadiness() {
+  if (!qs('#readiness')) return;
   state.readiness = await fetchJson(`/api/readiness/${userId}`).catch(() => null);
   renderReadiness();
 }
 
 async function loadRecovery() {
-  state.recovery = await fetchJson(`/api/recovery/${userId}?days=42`).catch(() => null);
+  // The card is left out when COROS is switched off (COROS_ENABLED=false).
+  const card = qs('#recovery-card');
+  if (!card) return;
+  try {
+    state.recovery = await fetchJson(`/api/recovery/${userId}?days=42`);
+  } catch (error) {
+    state.recovery = null;
+    if (error.status === 404) {
+      card.classList.add('hidden');
+      return;
+    }
+  }
   renderRecovery(state.recovery);
 }
 

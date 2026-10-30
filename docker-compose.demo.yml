@@ -1,0 +1,31 @@
+# Race Planner with made-up data and no accounts: a fake Strava and a fake
+# COROS inside the app container (scripts/demo.py), a throwaway Postgres next
+# to it. Nothing leaves your machine.
+#
+#   docker compose -f docker-compose.demo.yml up --build
+#
+# then open http://localhost:8000 and log in as demo@example.com / demo1234.
+# DEMO_PORT=8080 picks another port; `down` throws everything away.
+services:
+  demo:
+    build: .
+    command: python scripts/demo.py --host 0.0.0.0 --port 8000 --public-url http://localhost:${DEMO_PORT:-8000}
+    environment:
+      DATABASE_URL: postgresql://demo:demo@db:5432/raceplanner
+    ports:
+      - "${DEMO_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: raceplanner
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d raceplanner"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

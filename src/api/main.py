@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 # plain `python -m`, or the tests).
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.api.auth_routes import router as auth_router  # noqa: E402
-from src.api.web import BASE_DIR  # noqa: E402
+from src.api.web import BASE_DIR, templates  # noqa: E402
 
 load_dotenv()
 # Also try loading .env.dev, overriding variables from .env if both exist
@@ -26,6 +26,13 @@ if os.path.exists(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env
 elif os.path.exists('.env.dev'):
     load_dotenv('.env.dev', override=True)
 
+# COROS goes through a private, unofficial API (see src/coros.py), so an
+# install can switch it off: COROS_ENABLED=false removes the profile card,
+# the dashboard recovery card, the routes and the nightly pull.
+COROS_ENABLED = os.getenv("COROS_ENABLED", "true").strip().lower() != "false"
+templates.env.globals["coros_enabled"] = COROS_ENABLED
+
+
 @asynccontextmanager
 async def lifespan(_app):
     # Half-hourly passes: Monday digests (services/digest.py) and the nightly
@@ -33,7 +40,7 @@ async def lifespan(_app):
     from src.api.services.scheduler import start_scheduler
     from src.api.services.digest import send_due_digests
     from src.api.services.coros_sync import sync_due_coros
-    start_scheduler([send_due_digests, sync_due_coros])
+    start_scheduler([send_due_digests, sync_due_coros] if COROS_ENABLED else [send_due_digests])
     yield
 
 
@@ -127,7 +134,8 @@ app.include_router(profile.router)
 app.include_router(plan.router)
 app.include_router(strava_webhook.router)
 app.include_router(digest.router)
-app.include_router(coros.router)
+if COROS_ENABLED:
+    app.include_router(coros.router)
 app.include_router(imports.router)
 app.include_router(pacing.router)
 

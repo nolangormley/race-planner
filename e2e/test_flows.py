@@ -314,3 +314,15 @@ def test_a_runner_without_strava_imports_a_gpx_file(app_server, page, tmp_path):
     page.wait_for_load_state("networkidle")
     page.wait_for_selector("#recent tr:has-text('Riverfront loop')")
 
+
+def test_coros_switched_off_leaves_out_the_cards_and_the_routes(app_without_coros, registered_user, page):
+    login(page, app_without_coros)
+    user_id = page.evaluate("document.body.dataset.userId")
+    page.goto(f"{app_without_coros}/profile")
+    page.wait_for_load_state("networkidle")
+    assert page.locator("#coros-card").count() == 0
+    page.goto(f"{app_without_coros}/dashboard")
+    page.wait_for_load_state("networkidle")
+    assert page.locator("#recovery-card").count() == 0
+    for path in (f"/api/coros/{user_id}", f"/api/recovery/{user_id}", f"/api/readiness/{user_id}"):
+        assert page.request.get(f"{app_without_coros}{path}").status == 404

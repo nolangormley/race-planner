@@ -6,4 +6,6 @@ Jinja2 pages rendered by `../routers/pages.py` and `../auth_routes.py`. `base.ht
 - `login.html`, `register.html`, `setup.html` (first race), `strava_auth.html`: the sign-up flow. Plain form posts; `register.html` has a small inline module that converts height and weight to meters and kilograms before submit.
 - `forgot_password.html`, `reset_password.html`: the emailed password reset. Plain form posts; the reset token rides in a hidden field.
 
+`coros_enabled` (a global set in `../main.py`) leaves the COROS card out of `profile.html` and the Recovery card out of `dashboard.html` when COROS is switched off.
+
 Keep markup here and behaviour in the page modules; the only inline script is the theme bootstrap in `base.html` and the unit conversion in `register.html`.
