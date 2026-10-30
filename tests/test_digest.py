@@ -58,6 +58,23 @@ def test_compose_digest_reads_like_a_summary():
     assert body.endswith("Race Planner  https://example.test")
 
 
+def test_compose_digest_reports_the_morning_energy_and_the_call():
+    empty = {"runs": 0, "distance_m": 0.0, "moving_s": 0.0, "climb_m": 0.0}
+    today = {
+        "morning": 64,
+        "reasons": ["+31 overnight: HRV 12% under your baseline", "-33 Intervals, yesterday"],
+        "call": {"label": "Easy", "hint": "Readiness says easy today: consider swapping Tempo for an easy run."},
+    }
+    _, body = digest.compose_digest("Nolan", date(2026, 11, 2), empty, empty, None, [], [], [], None, energy=today)
+    assert (
+        "Recovery (nightly averages)\n"
+        "  Today      Easy, energy 64 of 100 on waking\n"
+        "             +31 overnight: HRV 12% under your baseline\n"
+        "             -33 Intervals, yesterday\n"
+        "             Readiness says easy today: consider swapping Tempo for an easy run.\n"
+    ) in body
+
+
 def test_compose_digest_without_data_still_reads():
     empty = {"runs": 0, "distance_m": 0.0, "moving_s": 0.0, "climb_m": 0.0}
     subject, body = digest.compose_digest(None, date(2026, 11, 2), empty, empty, None, [], [], [], None)
@@ -81,7 +98,7 @@ def db_session(monkeypatch):
 def test_send_due_digests_sends_once_and_stamps_the_user(db_session, monkeypatch):
     sent = []
     monkeypatch.setattr(digest, "send_email", lambda to, subject, body: sent.append((to, subject)))
-    monkeypatch.setattr(digest, "build_digest", lambda db, user, today=None: ("Your week", "body"))
+    monkeypatch.setattr(digest, "build_digest", lambda db, user, now=None: ("Your week", "body"))
     db_session.add_all([
         User(email="in@example.com", password="x", name="In", weekly_digest=True),
         User(email="out@example.com", password="x", name="Out", weekly_digest=False),

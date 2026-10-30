@@ -1,38 +1,45 @@
-"""Gathers last night's COROS reading, the usual resting heart rate and
-today's form for src.readiness, for the dashboard and the digest."""
-from datetime import date, timedelta
+"""Today's energy and call for one athlete: reads the COROS nights and the
+TRIMP of each activity from the warehouse, then runs src.energy and
+src.readiness. Feeds GET /api/energy, GET /api/readiness and the digest."""
+from datetime import datetime, timedelta
 
-from src.readiness import readiness, session_hint
-from src.api.services.metrics import coros_resting_hr
+from src.energy import BASELINE_NIGHTS, DEFAULT_DAYS, energy, first_day
+from src.readiness import call, session_hint
 
-RECENT_NIGHTS = 2        # a reading older than this is stale for "today"
-
-
-def latest_night(con, athlete_id, today):
-    row = con.execute("""
-        SELECT day, hrv, hrv_baseline, rhr, time_in_bed_min FROM coros_daily
-        WHERE athlete_id = ? AND day >= ? AND (hrv IS NOT NULL OR rhr IS NOT NULL)
-        ORDER BY day DESC LIMIT 1
-    """, [athlete_id, today - timedelta(days=RECENT_NIGHTS)]).fetchone()
-    if not row:
-        return None
-    return {"day": row[0], "hrv": row[1], "hrv_baseline": row[2], "rhr": row[3], "sleep_min": row[4]}
+RECENT_NIGHTS = 2        # a call needs a reading from today or one of the two days before
 
 
-def readiness_for(con, athlete_id, tsb=None, today=None, planned_workout=None):
-    """Today's call with the inputs behind it, or {"available": False}."""
-    today = today or date.today()
-    night = latest_night(con, athlete_id, today) if athlete_id else None
-    if not night:
+def energy_for(con, athlete_id, now=None, days=DEFAULT_DAYS, planned_workout=None):
+    """The energy curve over the last days with today's call, or
+    {"available": False} without a COROS reading in that window. The call
+    is None when the newest reading is too old to speak for today."""
+    now = now or datetime.now()
+    today = now.date()
+    since = first_day(today, days)
+    nights = [
+        {"day": row[0], "hrv": row[1], "rhr": row[2], "sleep_min": row[3]}
+        for row in con.execute("""
+            SELECT day, hrv, rhr, time_in_bed_min FROM coros_daily
+            WHERE athlete_id = ? AND day >= ? AND day <= ?
+            ORDER BY day
+        """, [athlete_id, since - timedelta(days=BASELINE_NIGHTS), today]).fetchall()
+    ]
+    readings = [night["day"] for night in nights if night["hrv"] or night["rhr"]]
+    if not readings or readings[-1] <= today - timedelta(days=days):
         return {"available": False}
-    usual = coros_resting_hr(con, athlete_id)
-    call = readiness(hrv=night["hrv"], hrv_baseline=night["hrv_baseline"], rhr=night["rhr"], rhr_usual=usual, sleep_min=night["sleep_min"], tsb=tsb)
-    if not call:
-        return {"available": False}
-    return {
-        "available": True,
-        "night": night["day"].isoformat(),
-        **call,
-        "hint": session_hint(call["label"], planned_workout),
-        "inputs": {"hrv": night["hrv"], "hrv_baseline": night["hrv_baseline"], "rhr": night["rhr"], "rhr_usual": usual, "sleep_min": night["sleep_min"], "tsb": tsb},
-    }
+    activities = [
+        {"activity_id": row[0], "name": row[1], "type": row[2], "start": row[3], "seconds": row[4], "trimp": row[5]}
+        for row in con.execute("""
+            SELECT da.activity_id, da.name, da.type, da.start_date_local, COALESCE(da.elapsed_time, da.moving_time), ae.trimp_banister
+            FROM dim_activity da JOIN activity_effectiveness ae ON ae.activity_id = da.activity_id
+            WHERE da.athlete_id = ? AND da.start_date_local >= ? AND da.start_date_local <= ? AND ae.trimp_banister > 0
+            ORDER BY da.start_date_local
+        """, [athlete_id, since, now]).fetchall()
+    ]
+    result = energy(nights, activities, now, days)
+    today_call = None
+    if readings[-1] >= today - timedelta(days=RECENT_NIGHTS):
+        today_call = call(result["morning"], result["trend"])
+        result["reasons"] += today_call.pop("reasons")
+        today_call["hint"] = session_hint(today_call["label"], planned_workout)
+    return {"available": True, **result, "call": today_call}
