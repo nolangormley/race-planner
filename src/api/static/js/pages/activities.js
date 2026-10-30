@@ -1,7 +1,5 @@
 // Activities list (sortable, filterable, deletable, FIT/GPX import) and the workout library.
-import { fetchJson, units, fmtDate, fmtDuration, escapeHtml, showToast, qs, qsa, openModal, closeModal } from '../app.js';
-
-const PACE_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
+import { fetchJson, units, fmtDate, fmtDuration, escapeHtml, showToast, qs, qsa, openModal, closeModal, RUN_TYPES } from '../app.js';
 
 const state = {
   activities: [],
@@ -48,7 +46,7 @@ function renderActivities() {
       <td class="primary">${escapeHtml(activity.name)}<span class="cell-sub">${escapeHtml(activity.type)}</span></td>
       <td class="num">${units.distance(activity.distance, 2)}</td>
       <td class="num">${fmtDuration(activity.moving_time)}</td>
-      <td class="num">${PACE_TYPES.has(activity.type) ? units.pace(activity.average_speed) : '–'}</td>
+      <td class="num">${RUN_TYPES.has(activity.type) ? units.pace(activity.average_speed) : '–'}</td>
       <td class="num">${activity.average_heartrate ? Math.round(activity.average_heartrate) : '–'}</td>
       <td class="num">${activity.training_load ? Math.round(activity.training_load) : '–'}</td>
       <td class="actions"><button type="button" class="btn btn-ghost btn-sm btn-icon" data-delete="${activity.activity_id}" aria-label="Delete activity">
