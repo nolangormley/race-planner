@@ -246,6 +246,7 @@ select.input {
 .legend button[aria-pressed="false"] { opacity: 0.45; text-decoration: line-through; }
 .legend .key { width: 14px; height: 2px; border-radius: 1px; flex-shrink: 0; }
 .legend .key.square { width: 10px; height: 10px; border-radius: 2px; }
+.legend .key.dot { width: 8px; height: 8px; border-radius: 50%; }
 .legend .key.dashed { background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px); }
 .chart-table { max-height: 260px; overflow: auto; margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
 .chart-table .table { font-size: 12px; }

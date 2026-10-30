@@ -1,4 +1,5 @@
 import pandas as pd
+import math
 import numpy as np
 
 def calculate_ctl_atl(loads, ctl_decay=42, atl_decay=7):
@@ -120,3 +121,35 @@ def clean_val(val, decimals=1):
     if pd.isna(val) or val is None:
         return None
     return round(float(val), decimals)
+
+
+# Daniels and Gilbert (1979): the oxygen cost of running at a speed in
+# meters per minute, and the share of VO2 max a runner can hold for a race
+# lasting a given number of minutes. Together they turn a VO2 max (VDOT)
+# into race predictions.
+def daniels_cost(speed_m_per_min):
+    return 0.000104 * speed_m_per_min ** 2 + 0.182258 * speed_m_per_min - 4.60
+
+
+def daniels_fraction(minutes):
+    return 0.8 + 0.1894393 * math.exp(-0.012778 * minutes) + 0.2989558 * math.exp(-0.1932605 * minutes)
+
+
+def race_time_for_vdot(vdot, distance_m):
+    """Predicted race time in seconds: the duration at which the cost of the
+    speed needed equals the share of VDOT that duration allows. The gap
+    between the two falls as the time grows, so bisection finds it."""
+    low, high = 2.0, 900.0
+    for _ in range(80):
+        mid = (low + high) / 2
+        if daniels_cost(distance_m / mid) > daniels_fraction(mid) * vdot:
+            low = mid
+        else:
+            high = mid
+    return (low + high) / 2 * 60
+
+
+def vdot_from_race(distance_m, seconds):
+    """The VDOT implied by a race result, the inverse of race_time_for_vdot."""
+    minutes = seconds / 60
+    return daniels_cost(distance_m / minutes) / daniels_fraction(minutes)

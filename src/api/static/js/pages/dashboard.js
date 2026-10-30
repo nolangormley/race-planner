@@ -1,7 +1,7 @@
 // Dashboard: training status tiles, fitness/form chart, weekly volume, HR
 // zones, this week's plan, recent activities, pace zones, time by type.
 import {
-  config, fetchJson, units, fmtDate, fmtDuration, parseDate, isoDate, daysUntil,
+  config, fetchJson, units, fmtDate, fmtDuration, fmtClock, fmtMinutes, parseDate, isoDate, daysUntil,
   escapeHtml, renderEmpty, qs, qsa,
 } from '../app.js';
 import { panelChart } from '../charts/panels.js';
@@ -18,6 +18,8 @@ const state = {
   paceZones: null,
   activities: [],
   plan: [],
+  predictions: null,
+  efficiency: null,
   pmcDays: Number(localStorage.getItem('pmcWindow') || 42),
 };
 const charts = {};
@@ -261,6 +263,70 @@ function renderTypeShare() {
   charts.type = stackedBar(container, { ariaLabel: 'Share of moving time by activity type', segments, valueLabel: 'Moving time' });
 }
 
+// ---- Race predictions ----
+function renderPredictions(data) {
+  const container = qs('#predictions');
+  if (!data) {
+    renderEmpty(container, 'No prediction yet', 'Predictions need steady runs with heart rate.');
+    return;
+  }
+  qs('#pred-sub').textContent = `From a VO2 max estimate of ${data.vdot.toFixed(1)}, via Daniels' VDOT tables. A ceiling for a well-executed race, not a promise.`;
+  const standard = data.predictions.map((row) => `
+    <tr><td class="primary">${escapeHtml(row.label)}</td><td class="num">${fmtClock(row.seconds)}</td><td class="num muted">${units.pace(row.distance_m / row.seconds)}</td><td></td></tr>`).join('');
+  const races = data.races.filter((race) => race.predicted_seconds).map((race) => {
+    let verdict = '';
+    if (race.goal_seconds) {
+      const gap = race.goal_seconds - race.predicted_seconds;
+      verdict = gap >= 0
+        ? `<span class="badge badge-good">${fmtClock(Math.abs(gap))} inside goal</span>`
+        : `<span class="badge badge-warning">${fmtClock(Math.abs(gap))} outside goal</span>`;
+    }
+    return `<tr><td class="primary">${escapeHtml(race.name || race.race_length)}<span class="cell-sub">${escapeHtml(race.race_length)} · ${fmtDate(race.race_date)}${race.goal_time ? ` · goal ${escapeHtml(race.goal_time)}` : ''}</span></td><td class="num">${fmtClock(race.predicted_seconds)}</td><td class="num muted">${units.pace(RACE_DISTANCES[race.race_length.toLowerCase()] / race.predicted_seconds)}</td><td class="status">${verdict}</td></tr>`;
+  }).join('');
+  container.innerHTML = `<table class="table table-compact"><thead><tr><th>Distance</th><th class="num">Predicted</th><th class="num">Pace</th><th></th></tr></thead><tbody>${races}${standard}</tbody></table>`;
+}
+
+const RACE_DISTANCES = { '5k': 5000, '5 mile': 8046.72, '10k': 10000, '10 mile': 16093.44, 'half marathon': 21097.5, 'marathon': 42195 };
+
+// ---- Aerobic efficiency ----
+function renderEfficiency(data) {
+  const container = qs('#efficiency-chart');
+  charts.efficiency?.destroy();
+  container.replaceChildren();
+  if (!data || data.points.length < 3) {
+    renderEmpty(container, 'Not enough easy runs yet', 'Steady runs of 20 minutes or more between 60% and 82% of max heart rate show up here.');
+    return;
+  }
+  qs('#eff-sub').textContent = `Pace you would hold at ${data.reference_hr} bpm (middle of zone 2) on each easy run, with a 7-run median. Higher on the chart is faster.`;
+  const metersPerUnit = units.isMetric() ? 1000 : 1609.344;
+  // Efficiency is meters per minute per beat; at the reference heart rate
+  // that is a speed, and a speed is a pace.
+  const paceAt = (ef) => metersPerUnit / (ef * data.reference_hr);
+  // A couple of odd runs (a hike logged as a run, a watch glitch) would
+  // stretch the axis and flatten the trend, so the axis stops at the 2nd
+  // and 98th percentiles and the chart clips the rest.
+  const sortedPaces = data.points.map((point) => paceAt(point.ef)).sort((left, right) => left - right);
+  const percentile = (share) => sortedPaces[Math.min(sortedPaces.length - 1, Math.floor(sortedPaces.length * share))];
+  charts.efficiency = panelChart(container, {
+    x: data.points.map((point) => parseDate(point.date).getTime()),
+    xTicks: (min, max) => dateTicks(min, max, 6),
+    xFormat: fmtDateTick,
+    xTitle: (ts) => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+    tableXLabel: 'Date',
+    ariaLabel: 'Pace at an easy heart rate over time',
+    legend: true,
+    table: true,
+    panels: [{
+      kind: 'line', height: 200, reverse: true, yTicks: 4, min: percentile(0.02), max: percentile(0.98),
+      yFormat: (value) => `${fmtMinutes(value)}${units.paceLabel()}`,
+      series: [
+        { key: 'runs', label: 'Each run', color: 'series-muted', values: data.points.map((point) => paceAt(point.ef)), points: true, width: 0 },
+        { key: 'trend', label: '7-run median', color: 'series-1', values: data.points.map((point) => paceAt(point.trend)), endLabel: true },
+      ],
+    }],
+  });
+}
+
 // ---- Pace zones ----
 function renderPaceZones() {
   const container = qs('#pace-zones');
@@ -449,11 +515,23 @@ async function loadPlanAndActivities() {
   renderRecent();
 }
 
+async function loadPredictions() {
+  state.predictions = await fetchJson(`/api/predictions/${athleteId}`).catch(() => null);
+  renderPredictions(state.predictions);
+}
+
+async function loadEfficiency() {
+  state.efficiency = await fetchJson(`/api/efficiency/${athleteId}?days=180`).catch(() => null);
+  renderEfficiency(state.efficiency);
+}
+
 function loadAll() {
   loadStatus().then(loadVo2);
   loadAnalytics();
   loadPaceZones();
   loadPlanAndActivities();
+  loadPredictions();
+  loadEfficiency();
   fetchJson(`/api/races/${userId}`).then(renderHeader).catch(() => renderHeader([]));
 }
 
@@ -463,6 +541,8 @@ function rerenderUnits() {
   });
   if (state.analytics) renderVolume();
   if (state.paceZones) renderPaceZones();
+  if (state.predictions) renderPredictions(state.predictions);
+  if (state.efficiency) renderEfficiency(state.efficiency);
   if (state.activities.length) {
     renderWeek();
     renderRecent();
