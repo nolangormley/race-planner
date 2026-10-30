@@ -28,8 +28,42 @@ jobs:
         run: pytest
 
   # Server side of the deploy lives in deploy/ (see deploy/AGENTS.md).
+  # Browser tests against the real app with a fake Strava (see e2e/AGENTS.md).
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: raceplanner_e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run browser tests
+        env:
+          E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/raceplanner_e2e
+        run: pytest e2e -q
+
   deploy:
-    needs: test
+    needs: [test, e2e]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency:

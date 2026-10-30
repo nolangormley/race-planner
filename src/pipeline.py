@@ -19,6 +19,8 @@ from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category, b
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(env_path)
 
+# Overridable so tests can point the pipeline at a fake Strava.
+STRAVA_API_BASE = os.getenv("STRAVA_API_BASE", "https://www.strava.com")
 CLIENT_ID = os.getenv('STRAVA_CLIENT_ID')
 CLIENT_SECRET = os.getenv('STRAVA_CLIENT_SECRET')
 
@@ -28,7 +30,8 @@ SCOPES = "activity:read_all,activity:read"
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 os.makedirs(DATA_DIR, exist_ok=True)
-DB_PATH = os.path.join(DATA_DIR, 'strava_warehouse.duckdb')
+# Same variable the API reads (src/api/deps.py), so both sides always open the same warehouse.
+DB_PATH = os.getenv('DB_PATH', os.path.join(DATA_DIR, 'strava_warehouse.duckdb'))
 
 STREAMS_TO_FETCH = ["time", "heartrate", "velocity_smooth", "cadence", "watts", "temp", "altitude", "moving"]
 
@@ -94,7 +97,7 @@ class StravaManager:
         load_dotenv(env_path, override=True)
 
     def run_oauth_flow(self):
-        auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope={SCOPES}"
+        auth_url = f"{STRAVA_API_BASE}/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope={SCOPES}"
         print(f"Please open URL to authorize: {auth_url}")
         try: webbrowser.open(auth_url)
         except: pass
@@ -106,7 +109,7 @@ class StravaManager:
         return None
 
     def exchange_code_for_token(self, code):
-        data = requests.post("https://www.strava.com/oauth/token", data={
+        data = requests.post(f"{STRAVA_API_BASE}/oauth/token", data={
             'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 'code': code, 'grant_type': 'authorization_code'
         }).json()
         self.save_refresh_token(data['refresh_token'])
@@ -119,7 +122,7 @@ class StravaManager:
             return self.run_oauth_flow()
         try:
             print("Refreshing access token...")
-            resp = requests.post("https://www.strava.com/oauth/token", data={
+            resp = requests.post(f"{STRAVA_API_BASE}/oauth/token", data={
                 'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 'refresh_token': refresh_token, 'grant_type': 'refresh_token'
             })
             if resp.status_code in [400, 401]:
@@ -151,7 +154,7 @@ class StravaManager:
         sometimes rotates the refresh token on use; the caller is
         responsible for persisting new_refresh_token if it's not None.
         """
-        resp = requests.post("https://www.strava.com/oauth/token", data={
+        resp = requests.post(f"{STRAVA_API_BASE}/oauth/token", data={
             'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
             'refresh_token': refresh_token, 'grant_type': 'refresh_token'
         })
@@ -169,14 +172,14 @@ class StravaManager:
     def fetch_activities(self, access_token, count=5, page=1, after=None):
         params = {'per_page': count, 'page': page}
         if after: params['after'] = after
-        resp = _request_with_retry(requests.get, "https://www.strava.com/api/v3/athlete/activities", headers={'Authorization': f'Bearer {access_token}'}, params=params)
+        resp = _request_with_retry(requests.get, f"{STRAVA_API_BASE}/api/v3/athlete/activities", headers={'Authorization': f'Bearer {access_token}'}, params=params)
         if resp.status_code == 401: raise Exception("Unauthorized")
         resp.raise_for_status()
         return resp.json()
 
     def fetch_activity_streams(self, access_token, activity_id, keys=STREAMS_TO_FETCH):
         print(f"  Fetching streams for activity {activity_id}...")
-        resp = _request_with_retry(requests.get, f"https://www.strava.com/api/v3/activities/{activity_id}/streams", headers={'Authorization': f'Bearer {access_token}'}, params={'keys': ",".join(keys), 'key_by_type': 'true'})
+        resp = _request_with_retry(requests.get, f"{STRAVA_API_BASE}/api/v3/activities/{activity_id}/streams", headers={'Authorization': f'Bearer {access_token}'}, params={'keys': ",".join(keys), 'key_by_type': 'true'})
         if resp.status_code == 401: raise Exception("Unauthorized")
         if resp.status_code == 404:
             print(f"  Streams not found for activity {activity_id}")
@@ -260,6 +263,34 @@ class StravaDB:
         create_stream_table("temperature", "INTEGER")
         create_stream_table("altitude", "DOUBLE")
         create_stream_table("moving", "BOOLEAN")
+
+        # Derived tables, created here so the API works on a brand-new
+        # warehouse before the first sync fills them.
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS activity_effectiveness (
+                activity_id UBIGINT PRIMARY KEY, trimp_banister DOUBLE, trimp_edwards DOUBLE,
+                efficiency_factor DOUBLE, intensity_factor DOUBLE, aerobic_decoupling DOUBLE,
+                zone_1_sec INTEGER, zone_2_sec INTEGER, zone_3_sec INTEGER, zone_4_sec INTEGER, zone_5_sec INTEGER,
+                effectiveness_score DOUBLE, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                hr_max_used DOUBLE, hr_rest_used DOUBLE,
+                FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
+            );
+        """)
+        if not self._migration_applied("activity_effectiveness_add_hr_profile_columns"):
+            for column in ("hr_max_used", "hr_rest_used"):
+                try:
+                    self.con.execute(f"ALTER TABLE activity_effectiveness ADD COLUMN {column} DOUBLE")
+                except (duckdb.CatalogException, duckdb.BinderException):
+                    pass
+            self._mark_migration_applied("activity_effectiveness_add_hr_profile_columns")
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS best_efforts (
+                activity_id UBIGINT, distance_m DOUBLE, seconds DOUBLE,
+                computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (activity_id, distance_m),
+                FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
+            );
+        """)
 
     def _table_has_pk(self, table_name):
         try:
@@ -393,7 +424,7 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None, pro
 
     try:
         print("Fetching athlete profile...")
-        athlete = requests.get("https://www.strava.com/api/v3/athlete", headers={'Authorization': f'Bearer {access_token}'}).json()
+        athlete = requests.get(f"{STRAVA_API_BASE}/api/v3/athlete", headers={'Authorization': f'Bearer {access_token}'}).json()
         db.upsert_athlete(athlete)
         print(f"Athlete: {athlete.get('firstname')} {athlete.get('lastname')}")
     except Exception as e:
@@ -511,23 +542,6 @@ def run_analyze_effectiveness(db, progress=None, resting_hr=None, max_hr=None):
     # Upsert (activity_id is the PRIMARY KEY) instead of DROP+recreate: a
     # crash partway through used to lose every activity's previously-computed
     # row, not just the one that failed.
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS activity_effectiveness (
-            activity_id UBIGINT PRIMARY KEY, trimp_banister DOUBLE, trimp_edwards DOUBLE,
-            efficiency_factor DOUBLE, intensity_factor DOUBLE, aerobic_decoupling DOUBLE,
-            zone_1_sec INTEGER, zone_2_sec INTEGER, zone_3_sec INTEGER, zone_4_sec INTEGER, zone_5_sec INTEGER,
-            effectiveness_score DOUBLE, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            hr_max_used DOUBLE, hr_rest_used DOUBLE,
-            FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
-        );
-    """)
-    if not db._migration_applied("activity_effectiveness_add_hr_profile_columns"):
-        for column in ("hr_max_used", "hr_rest_used"):
-            try:
-                con.execute(f"ALTER TABLE activity_effectiveness ADD COLUMN {column} DOUBLE")
-            except (duckdb.CatalogException, duckdb.BinderException):
-                pass
-        db._mark_migration_applied("activity_effectiveness_add_hr_profile_columns")
     rest_hr = resting_hr or DEFAULT_REST_HR
 
     # Activities with a heartrate stream get a real per-sample TRIMP.
@@ -646,14 +660,6 @@ def run_best_efforts(db, progress=None):
     if progress is None:
         progress = _no_progress
     con = db.con
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS best_efforts (
-            activity_id UBIGINT, distance_m DOUBLE, seconds DOUBLE,
-            computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (activity_id, distance_m),
-            FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
-        );
-    """)
     pending = [row[0] for row in con.execute("""
         SELECT da.activity_id FROM dim_activity da
         WHERE da.type = 'Run'

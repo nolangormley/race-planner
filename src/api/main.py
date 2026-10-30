@@ -110,3 +110,11 @@ app.include_router(races.router)
 app.include_router(profile.router)
 app.include_router(plan.router)
 app.include_router(strava_webhook.router)
+
+# A new install has no warehouse until the first sync. Creating the schema
+# here means every page works from the first login instead of failing on
+# missing tables.
+from src.pipeline import StravaDB  # noqa: E402
+from src.api.deps import DB_PATH  # noqa: E402
+os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
+StravaDB(DB_PATH).con.close()
