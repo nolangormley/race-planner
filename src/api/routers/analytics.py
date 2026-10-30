@@ -307,3 +307,37 @@ def get_efficiency(user_id: int, days: int = 180, current_user: User = Depends(g
         # Middle of zone 2, the heart rate the UI converts efficiency to a pace at.
         "reference_hr": round(hr_rest + 0.65 * (hr_max - hr_rest)),
     }
+
+
+@router.get("/api/records/{user_id}")
+def get_records(user_id: int, current_user: User = Depends(get_current_user)):
+    """Personal records: the fastest mile, 5K, 10K and half marathon inside
+    any run, all time and this year, from the best_efforts table."""
+    # user_id here is the Strava athlete_id (see /status/{user_id} above).
+    if user_id != current_user.strava_athlete_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's records")
+    labels = {distance: label for label, distance in BEST_EFFORT_DISTANCES_M.items()}
+
+    def rows_to_records(rows):
+        return [
+            {"distance_m": distance, "label": labels.get(distance, f"{distance:.0f} m"), "seconds": round(seconds),
+             "date": str(day), "activity_id": activity_id, "name": name}
+            for distance, seconds, day, activity_id, name in rows
+        ]
+
+    con = get_db_connection()
+    try:
+        query = """
+            SELECT be.distance_m, be.seconds, da.start_date_local::DATE, da.activity_id, da.name
+            FROM best_efforts be JOIN dim_activity da ON da.activity_id = be.activity_id
+            WHERE da.athlete_id = ? {extra}
+            QUALIFY row_number() OVER (PARTITION BY be.distance_m ORDER BY be.seconds) = 1
+            ORDER BY be.distance_m
+        """
+        all_time = con.execute(query.format(extra=""), [user_id]).fetchall()
+        this_year = con.execute(
+            query.format(extra="AND date_part('year', da.start_date_local) = date_part('year', current_date)"), [user_id]
+        ).fetchall()
+    finally:
+        con.close()
+    return {"all_time": rows_to_records(all_time), "this_year": rows_to_records(this_year)}

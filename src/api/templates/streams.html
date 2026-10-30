@@ -35,15 +35,26 @@
     </section>
 
     <div class="grid grid-main mt-4">
-        <section class="card">
-            <div class="card-head">
-                <div>
-                    <h2 class="card-title">Streams</h2>
-                    <div class="card-sub" id="streams-sub">Heart rate, pace, cadence and elevation over elapsed time. Pace is smoothed over 15 seconds and shaded by your pace zones.</div>
+        <div class="stack" style="gap: 16px">
+            <section class="card">
+                <div class="card-head">
+                    <div>
+                        <h2 class="card-title">Streams</h2>
+                        <div class="card-sub" id="streams-sub">Heart rate, pace, cadence and elevation over elapsed time. Pace is smoothed over 15 seconds and shaded by your pace zones; lap starts are marked.</div>
+                    </div>
                 </div>
-            </div>
-            <div id="streams-chart" class="chart-slot"></div>
-        </section>
+                <div id="streams-chart" class="chart-slot"></div>
+            </section>
+            <section class="card hidden" id="splits-card">
+                <div class="card-head">
+                    <div>
+                        <h2 class="card-title">Splits</h2>
+                        <div class="card-sub" id="splits-sub">Laps as your watch recorded them.</div>
+                    </div>
+                </div>
+                <div class="table-wrap" id="splits"></div>
+            </section>
+        </div>
 
         <aside class="stack">
             <section class="card">

@@ -298,3 +298,26 @@ def delete_activity(activity_id: int, current_user: User = Depends(get_current_u
         raise HTTPException(status_code=500, detail="Internal server error.")
     finally:
         con.close()
+
+
+@router.get("/api/activities/{activity_id}/laps")
+def get_activity_laps(activity_id: int, current_user: User = Depends(get_current_user)):
+    """The watch's laps for an activity, in order, with start_offset in
+    seconds from the start of the streams."""
+    con = get_db_connection()
+    try:
+        owner_row = con.execute(
+            "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
+            [activity_id, current_user.strava_athlete_id]
+        ).fetchone()
+        if not owner_row:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        rows = con.execute("""
+            SELECT lap_index, name, start_offset, elapsed_time, moving_time, distance, average_speed,
+                   average_heartrate, max_heartrate, average_cadence, total_elevation_gain
+            FROM activity_laps WHERE activity_id = ? ORDER BY lap_index
+        """, [activity_id]).fetchall()
+        columns = [desc[0] for desc in con.description]
+        return [dict(zip(columns, row)) for row in rows]
+    finally:
+        con.close()

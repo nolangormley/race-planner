@@ -17,7 +17,7 @@ def test_percent_follows_phase_spans():
     assert job.snapshot()["detail"] == "page 2, 80 activities found"
 
     job.update("streams", done=15, total=30, name="Morning Run")
-    assert job.percent() == 40  # halfway through the 10-70 span
+    assert job.percent() == 34  # halfway through the 10-58 span
     assert job.snapshot()["detail"] == "Morning Run"
 
     job.update("metrics", done=0, total=0)
@@ -34,7 +34,7 @@ def test_percent_follows_phase_spans():
 def test_percent_never_exceeds_phase_end_when_done_overshoots_total():
     job = SyncJob(user_id=1)
     job.update("streams", done=12, total=10)
-    assert job.percent() == 70
+    assert job.percent() == 58
 
 
 def test_fail_records_error_kind():

@@ -19,7 +19,8 @@ logger = logging.getLogger("race_planner.sync")
 PHASE_SPAN = {
     "auth": (0, 3),
     "listing": (3, 10),
-    "streams": (10, 70),
+    "streams": (10, 58),
+    "laps": (58, 70),
     "metrics": (70, 95),
     "load": (95, 100),
 }
@@ -33,6 +34,7 @@ PHASE_LABEL = {
     "auth": "Refreshing Strava access",
     "listing": "Fetching your activity list",
     "streams": "Downloading activity streams",
+    "laps": "Fetching lap splits",
     "metrics": "Computing training metrics",
     "load": "Calculating training load",
     "done": "Sync complete",
