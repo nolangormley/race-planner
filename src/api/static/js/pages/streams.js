@@ -1,5 +1,6 @@
 // Activity detail: summary strip, linked stream panels with pace-zone
-// shading, effort metrics, time in zones and the optional coach's note.
+// shading, detected intervals or tempo, laps, effort metrics, time in zones
+// and the optional coach's note.
 import { config, fetchJson, units, fmtDuration, fmtClock, fmtMinutes, escapeHtml, renderEmpty, qs } from '../app.js';
 import { panelChart } from '../charts/panels.js';
 import { barList } from '../charts/bars.js';
@@ -150,7 +151,7 @@ function renderSplits(laps, activity) {
   card.classList.remove('hidden');
 }
 
-function renderStreams(streams, activity, paceZones, laps = []) {
+function renderStreams(streams, activity, paceZones, laps = [], structure = null) {
   const container = qs('#streams-chart');
   if (!streams.length) {
     renderEmpty(container, 'No stream data', 'This activity was synced without per-second data.');
@@ -208,8 +209,51 @@ function renderStreams(streams, activity, paceZones, laps = []) {
     legend: false,
     table: true,
     markers,
+    xBands: (structure?.reps || []).map((rep) => ({ from: rep.start_offset, to: rep.end_offset, label: structure.reps.length <= 20 ? String(rep.index) : '' })),
     panels,
   });
+}
+
+// ---- Detected structure ----
+function median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+// Track reps read in metres whatever the unit setting: 400 m, 800 m, 1200 m.
+function repDistance(meters) {
+  if (meters < 1000) return `${Math.round(meters / 50) * 50} m`;
+  if (meters < 2000) return `${Math.round(meters / 100) * 100} m`;
+  return units.distance(meters, 1);
+}
+
+function structureSummary(structure) {
+  const reps = structure.reps;
+  if (structure.kind === 'tempo') {
+    const seconds = reps.reduce((sum, rep) => sum + rep.moving_time, 0);
+    const meters = reps.reduce((sum, rep) => sum + rep.distance, 0);
+    const blocks = reps.length > 1 ? `${reps.length} × ${Math.round(median(reps.map((rep) => rep.moving_time)) / 60)} min` : `${Math.round(seconds / 60)} min`;
+    return `Tempo: ${blocks} at ${units.pace(meters / seconds)}`;
+  }
+  const recoveries = reps.map((rep) => rep.recovery_time).filter((value) => value != null);
+  const rest = recoveries.length ? `, ${fmtClock(median(recoveries))} recoveries` : '';
+  return `${reps.length} × ${repDistance(median(reps.map((rep) => rep.distance)))} at ${units.pace(median(reps.map((rep) => rep.average_speed)))}${rest}`;
+}
+
+function renderStructure(structure) {
+  if (!structure?.kind || !structure.reps.length) return;
+  qs('#structure-kind').textContent = structure.kind === 'tempo' ? 'Tempo' : 'Intervals';
+  qs('#structure-summary').textContent = structureSummary(structure);
+  const rows = structure.reps.map((rep) => `<tr>
+      <td class="num">${rep.index}</td>
+      <td class="num">${units.distance(rep.distance, 2)}</td>
+      <td class="num">${fmtClock(rep.moving_time)}</td>
+      <td class="num">${units.pace(rep.average_speed)}</td>
+      <td class="num">${rep.average_heartrate ? Math.round(rep.average_heartrate) : '–'}</td>
+      <td class="num">${rep.recovery_time != null ? fmtClock(rep.recovery_time) : '–'}</td>
+    </tr>`).join('');
+  qs('#structure-reps').innerHTML = `<table class="table table-compact"><thead><tr><th class="num">Rep</th><th class="num">Distance</th><th class="num">Time</th><th class="num">Pace</th><th class="num">Avg HR</th><th class="num">Recovery</th></tr></thead><tbody>${rows}</tbody></table>`;
+  qs('#structure-card').classList.remove('hidden');
 }
 
 async function loadNote() {
@@ -235,12 +279,14 @@ async function load() {
   renderSummary(activity);
   renderEffort(activity);
   renderZones(activity);
-  const [streams, paceZones, laps] = await Promise.all([
+  const [streams, paceZones, laps, structure] = await Promise.all([
     fetchJson(`/api/activities/${activityId}/streams`).catch(() => []),
     config.athleteId ? fetchJson(`/pace_zones/${config.athleteId}`).catch(() => null) : null,
     fetchJson(`/api/activities/${activityId}/laps`).catch(() => []),
+    fetchJson(`/api/activities/${activityId}/intervals`).catch(() => null),
   ]);
-  renderStreams(streams, activity, paceZones, laps);
+  renderStreams(streams, activity, paceZones, laps, structure);
+  renderStructure(structure);
   renderSplits(laps, activity);
   loadNote();
 }

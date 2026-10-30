@@ -15,6 +15,7 @@ from dotenv import load_dotenv, set_key
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category, best_effort_seconds, BEST_EFFORT_DISTANCES_M
+from src.structure_pass import run_detect_structure
 
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(env_path)
@@ -316,6 +317,24 @@ class StravaDB:
                 average_speed DOUBLE, max_speed DOUBLE, average_heartrate DOUBLE, max_heartrate DOUBLE,
                 average_cadence DOUBLE, total_elevation_gain DOUBLE,
                 PRIMARY KEY (activity_id, lap_index),
+                FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
+            );
+        """)
+        # Detected workout structure (src/intervals.py via src/structure_pass.py):
+        # one row per run, kind NULL when nothing was found, and the reps.
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS activity_structure (
+                activity_id UBIGINT PRIMARY KEY, kind VARCHAR, rep_count INTEGER,
+                detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
+            );
+        """)
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS activity_intervals (
+                activity_id UBIGINT, rep_index INTEGER, start_offset INTEGER, end_offset INTEGER,
+                distance DOUBLE, moving_time INTEGER, average_speed DOUBLE,
+                average_heartrate DOUBLE, max_heartrate DOUBLE, recovery_time INTEGER,
+                PRIMARY KEY (activity_id, rep_index),
                 FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
             );
         """)
@@ -837,7 +856,7 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None, 
     response rather than opening a browser.
 
     progress(phase, **info) receives the phases 'auth', 'listing', 'streams',
-    'metrics' and 'load' in that order; see src.api.services.sync for the
+    'laps', 'structure', 'metrics' and 'load' in that order; see src.api.services.sync for the
     consumer.
 
     NOTE: DuckDB allows only one read-write connection to a file at a time.
@@ -865,6 +884,7 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None, 
     try:
         count = ingest_data(manager, db, access_token, lookback_days=lookback_days, reauth_fn=_reauth_unavailable, progress=progress)
         run_fetch_missing_laps(manager, db, access_token, progress=progress)
+        run_detect_structure(db, progress=progress)
         progress('metrics')
         run_analyze_effectiveness(db, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
         run_best_efforts(db, progress=progress)

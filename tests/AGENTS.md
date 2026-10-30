@@ -6,6 +6,8 @@ Unit tests (`pytest`, no network, no database server). DuckDB tests use `StravaD
 - `test_pipeline.py`: TRIMP, decoupling, stream upserts, the incremental effectiveness pass, heart-rate zones, best efforts, and `ingest_data` with a fake Strava manager.
 - `test_plan_builder.py`: the plan generator: every day covered to race day, long runs on the chosen day, ramp/cutback/taper of weekly volume, quality sessions, metric output.
 - `test_sync.py`: the background job registry and its progress snapshots.
+- `test_intervals.py`: the interval detector on synthetic streams (track reps, steady run, tempo, a short fast block, rolling hills at even effort, auto-pauses, standing rests, missing readings) and the warehouse pass.
+- `test_plan_match.py`: marking planned sessions done from synced runs, with SQLite in place of Postgres and an in-memory warehouse.
 - `test_app.py`: the route table, so a router that fails to mount or a removed endpoint that returns fails CI.
 - `test_digest.py`: when the weekly digest is due, the email text, and a scheduler pass sending once and stamping the user (SQLite in place of Postgres).
 - `test_pacing.py`: clock parsing, even and negative splits summing to the goal, the grade cost curve, a hilly profile slowing the climbs, GPX parsing of an inline course, the stretched-course warning, rejected files, and the prediction the goal falls back to.

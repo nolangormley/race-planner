@@ -225,3 +225,51 @@ def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered
     assert "1:45:00" in rows.nth(13).text_content()             # the finish time does not move
     assert page.locator("#pace-band tr").count() == 14
 
+
+def wait_for_idle_sync(page, app_server, user_id, seconds=60):
+    """The last sync job once nothing is running (the COROS link above may
+    have started a recompute)."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        job = page.request.get(f"{app_server}/api/sync-strava/{user_id}").json()["job"]
+        if not job or job["status"] != "running":
+            return job
+        time.sleep(0.5)
+    raise AssertionError("a sync was still running")
+
+
+def test_activity_page_shows_what_the_structure_pass_found(app_server, registered_user, page):
+    login(page, app_server)
+    run = page.request.get(f"{app_server}/api/activities").json()[0]
+    assert run["structure_checked"]                                   # the sync ran the pass
+    structure = page.request.get(f"{app_server}/api/activities/{run['activity_id']}/intervals").json()
+    # The fake runs hold one ten-minute faster stretch: too short for a
+    # tempo and too few reps for intervals, so the card stays hidden.
+    assert structure["detected"] and structure["kind"] is None and structure["reps"] == []
+    page.goto(f"{app_server}/workout_streams/{run['activity_id']}")
+    page.wait_for_selector("#streams-chart svg path")
+    page.wait_for_load_state("networkidle")
+    assert "hidden" in page.get_attribute("#structure-card", "class")
+    assert page.locator("#streams-chart .x-band").count() == 0
+
+
+def test_a_sync_marks_the_planned_run_it_matches_done(app_server, registered_user, page):
+    login(page, app_server)
+    user_id = page.evaluate("document.body.dataset.userId")
+    latest = page.request.get(f"{app_server}/api/activities").json()[0]
+    created = page.request.post(f"{app_server}/api/training-plan/{user_id}/entry", data={
+        "date": latest["start_date_local"][:10], "workout_type": "Easy Run", "approximate_distance": "5 miles",
+    })
+    assert created.ok, created.text()
+
+    wait_for_idle_sync(page, app_server, user_id)
+    started = page.request.post(f"{app_server}/api/sync-strava/{user_id}")
+    assert started.status == 202, started.text()
+    job = wait_for_idle_sync(page, app_server, user_id)
+    assert job["status"] == "done", job
+
+    entries = page.request.get(f"{app_server}/api/training-plan/{user_id}").json()["entries"]
+    entry = next(item for item in entries if item["id"] == created.json()["id"])
+    assert entry["is_completed"]
+    assert entry["strava_activity_id"] == latest["activity_id"]          # an 11-digit Strava id
+

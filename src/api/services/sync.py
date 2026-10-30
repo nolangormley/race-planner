@@ -20,7 +20,8 @@ PHASE_SPAN = {
     "auth": (0, 3),
     "listing": (3, 10),
     "streams": (10, 58),
-    "laps": (58, 70),
+    "laps": (58, 66),
+    "structure": (66, 70),
     "metrics": (70, 95),
     "load": (95, 100),
 }
@@ -35,6 +36,7 @@ PHASE_LABEL = {
     "listing": "Fetching your activity list",
     "streams": "Downloading activity streams",
     "laps": "Fetching lap splits",
+    "structure": "Finding intervals and tempo blocks",
     "metrics": "Computing training metrics",
     "load": "Calculating training load",
     "done": "Sync complete",
