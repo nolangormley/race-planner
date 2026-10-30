@@ -1,19 +1,18 @@
 // Profile: athlete details, password change, preferences, races, Strava status, warehouse totals.
 import {
   config, fetchJson, units, fmtDate, relativeTime, daysUntil, escapeHtml, showToast,
-  applyTheme, currentTheme, qs, qsa, renderEmpty,
+  applyTheme, currentTheme, qs, qsa, renderEmpty, RUN_TYPES,
 } from '../app.js';
 import { refreshSync } from '../sync.js';
 
 const userId = config.userId;
 const root = qs('#profile');
-const RUN_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
 let heightMeters = root.dataset.height ? Number(root.dataset.height) : null;
 let weightKg = root.dataset.weight ? Number(root.dataset.weight) : null;
 // Accounts made with the old sign-up form stored height in centimeters.
 if (heightMeters > 3) heightMeters /= 100;
 // Heart rate profile: null fields mean the default/detected value is in use.
-let hrProfile = { resting_hr: null, max_hr: null, default_resting_hr: 60, detected_max_hr: null };
+let hrProfile = { resting_hr: null, max_hr: null, default_resting_hr: 60, detected_max_hr: null, default_max_hr: null };
 
 // ---- Athlete ----
 function renderAthleteView() {
@@ -32,18 +31,33 @@ function renderAthleteView() {
       : `${hrProfile.default_resting_hr} bpm (default)`;
   qs('#view-max-hr').textContent = hrProfile.max_hr
     ? `${hrProfile.max_hr} bpm`
-    : hrProfile.detected_max_hr ? `${Math.round(hrProfile.detected_max_hr)} bpm (highest recorded)` : '–';
+    : hrProfile.detected_max_hr
+      ? `${Math.round(hrProfile.detected_max_hr)} bpm (highest recorded)`
+      : hrProfile.default_max_hr ? `${hrProfile.default_max_hr} bpm (default)` : '–';
 }
 
 async function loadHrProfile() {
+  let loaded = true;
   try {
     hrProfile = await fetchJson(`/api/hr-profile/${userId}`);
   } catch {
+    loaded = false;
+  }
+  // The form shows the stored heart rates, so Edit waits for them. When they
+  // do not load, the rest of the form stays editable but the heart rates do not.
+  qs('#edit-athlete').disabled = false;
+  qs('#f-rest-hr').disabled = !loaded;
+  qs('#f-max-hr').disabled = !loaded;
+  const hint = qs('#max-hr-hint');
+  if (!loaded) {
+    hint.textContent = 'Heart rate settings did not load. Reload the page to change them.';
     return;
   }
   renderAthleteView();
   if (hrProfile.detected_max_hr) {
-    qs('#max-hr-hint').textContent = `Blank uses the highest heart rate in your activities, currently ${Math.round(hrProfile.detected_max_hr)} bpm.`;
+    hint.textContent = `Blank uses the highest heart rate in your activities, currently ${Math.round(hrProfile.detected_max_hr)} bpm.`;
+  } else if (hrProfile.default_max_hr) {
+    hint.textContent = `Blank uses the highest heart rate in your activities, or ${hrProfile.default_max_hr} bpm until one is recorded.`;
   }
 }
 
@@ -94,6 +108,13 @@ async function saveAthlete(event) {
     const lb = Number(qs('#f-weight').value);
     if (lb) weight = lb / 2.20462;
   }
+  // Only the heart rates the athlete changed: a value sent as null resets it
+  // to the detected or default one and recomputes every activity.
+  const heartRates = {};
+  for (const [key, input] of [['resting_hr', qs('#f-rest-hr')], ['max_hr', qs('#f-max-hr')]]) {
+    const value = input.value ? Number(input.value) : null;
+    if (!input.disabled && value !== hrProfile[key]) heartRates[key] = value;
+  }
   const payload = {
     name: qs('#f-name').value.trim(),
     email: qs('#f-email').value.trim(),
@@ -101,8 +122,7 @@ async function saveAthlete(event) {
     gender: qs('#f-sex').value,
     height,
     weight,
-    resting_hr: qs('#f-rest-hr').value ? Number(qs('#f-rest-hr').value) : null,
-    max_hr: qs('#f-max-hr').value ? Number(qs('#f-max-hr').value) : null,
+    ...heartRates,
   };
   const status = qs('#athlete-form .status');
   status.textContent = 'Saving…';
@@ -110,7 +130,7 @@ async function saveAthlete(event) {
     const result = await fetchJson(`/profile/${userId}`, { method: 'POST', body: payload });
     heightMeters = height;
     weightKg = weight;
-    hrProfile = { ...hrProfile, resting_hr: payload.resting_hr, max_hr: payload.max_hr };
+    hrProfile = { ...hrProfile, ...heartRates };
     qs('#view-name').textContent = payload.name;
     qs('#view-email').textContent = payload.email;
     qs('#view-dob').textContent = payload.date_of_birth || '–';
@@ -119,7 +139,7 @@ async function saveAthlete(event) {
     renderAthleteView();
     toggleAthleteForm(false);
     showToast(result.recompute_started ? 'Profile saved, recomputing your metrics' : 'Profile saved');
-    if (result.recompute_started) refreshSync();
+    if (result.recompute_started) refreshSync(true);
   } catch (error) {
     status.textContent = error.message;
   }
@@ -320,7 +340,7 @@ function afterCorosSync(result) {
   showToast(result.sync.recompute_started
     ? `COROS: ${nights} nights pulled, recomputing your metrics with the new resting heart rate`
     : `COROS: ${nights} nights pulled`);
-  if (result.sync.recompute_started) refreshSync();
+  if (result.sync.recompute_started) refreshSync(true);
 }
 
 qs('#coros-form')?.addEventListener('submit', async (event) => {
@@ -376,9 +396,15 @@ qs('#coros-unlink')?.addEventListener('click', async () => {
 
 // ---- Weekly digest ----
 async function loadDigest() {
-  const digest = await fetchJson(`/api/digest/${userId}`);
-  qs('#digest-enabled').checked = digest.enabled;
   const hint = qs('#digest-hint');
+  let digest;
+  try {
+    digest = await fetchJson(`/api/digest/${userId}`);
+  } catch (error) {
+    hint.textContent = `The digest settings did not load (${error.message}).`;
+    return;
+  }
+  qs('#digest-enabled').checked = digest.enabled;
   if (!digest.smtp_configured) {
     hint.textContent = 'Email is not set up on this server (SMTP_HOST); digests are written to the server log instead.';
   } else if (digest.last_sent_at) {

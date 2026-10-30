@@ -2,7 +2,7 @@
 // zones, this week's plan, recent activities, pace zones, time by type.
 import {
   config, fetchJson, units, fmtDate, fmtDuration, fmtClock, fmtMinutes, parseDate, isoDate, daysUntil,
-  escapeHtml, renderEmpty, qs, qsa,
+  escapeHtml, renderEmpty, qs, qsa, RUN_TYPES,
 } from '../app.js';
 import { panelChart } from '../charts/panels.js';
 import { barList, stackedBar, columnChart, sparkline } from '../charts/bars.js';
@@ -28,8 +28,6 @@ const state = {
   pmcDays: Number(localStorage.getItem('pmcWindow') || 42),
 };
 const charts = {};
-
-const RUN_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
 
 // Shares of heart rate reserve (resting to max), matching the TRIMP model.
 const ZONES = [
@@ -177,10 +175,10 @@ function pmcSpec() {
   const series = [
     { key: 'fitness', label: 'Fitness (CTL)', color: 'series-1', values: pad(history.map((row) => row.fitness)), area: true, endLabel: true },
     { key: 'fatigue', label: 'Fatigue (ATL)', color: 'series-2', values: pad(history.map((row) => row.fatigue)), endLabel: true },
-    { key: 'projected', label: planned ? 'Planned fitness' : 'Projected fitness', color: 'series-1', values: lead(last.fitness).concat(future.map((day) => day.ctl)), dash: true },
+    { key: 'projected', label: planned ? 'Planned fitness' : 'Projected fitness', color: 'series-1', values: lead(last.fitness).concat(future.map((day) => day.ctl)), dash: true, endLabel: future.length > 0 },
   ];
   if (planned) {
-    series.push({ key: 'projectedAtl', label: 'Planned fatigue', color: 'series-2', values: lead(last.fatigue).concat(future.map((day) => day.atl)), dash: true });
+    series.push({ key: 'projectedAtl', label: 'Planned fatigue', color: 'series-2', values: lead(last.fatigue).concat(future.map((day) => day.atl)), dash: true, endLabel: future.length > 0 });
   }
   return {
     x,
@@ -218,17 +216,28 @@ function pmcSpec() {
   };
 }
 
+// The empty state replaces the chart, so a later render starts a new one.
+function renderPmcEmpty(message) {
+  charts.pmc?.destroy();
+  charts.pmc = null;
+  renderEmpty(qs('#pmc-chart'), 'No training history yet', message);
+}
+
 function renderPmc() {
   const container = qs('#pmc-chart');
   if (!state.status?.history?.length) {
-    renderEmpty(container, 'No training history yet', 'Sync Strava to build your fitness curve.');
+    renderPmcEmpty('Sync Strava to build your fitness curve.');
     return;
   }
   qs('#pmc-sub').textContent = state.projection?.has_plan
     ? 'Daily training load rolled up as fitness (42-day) and fatigue (7-day); form is the gap. The dashed lines follow your planned workouts forward (days with nothing planned count as rest), and race days are marked.'
     : 'Daily training load rolled up as fitness (42-day) and fatigue (7-day). Form is the gap between them. The dashed line projects fitness two weeks ahead.';
-  if (charts.pmc) charts.pmc.update(pmcSpec());
-  else charts.pmc = panelChart(container, pmcSpec());
+  if (charts.pmc) {
+    charts.pmc.update(pmcSpec());
+  } else {
+    container.replaceChildren();
+    charts.pmc = panelChart(container, pmcSpec());
+  }
   qsa('#pmc-range button').forEach((button) => {
     button.setAttribute('aria-pressed', String(Number(button.dataset.days) === state.pmcDays));
   });
@@ -550,7 +559,7 @@ async function loadStatus() {
   } catch (error) {
     state.status = { history: [], forecast: [] };
     qsa('#stats .stat-value').forEach((node) => { node.textContent = '–'; });
-    renderEmpty(qs('#pmc-chart'), 'No training history yet', error.status === 404 ? 'Sync Strava to build your fitness curve.' : error.message);
+    renderPmcEmpty(error.status === 404 ? 'Sync Strava to build your fitness curve.' : error.message);
     return;
   }
   renderTiles();

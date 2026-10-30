@@ -8,9 +8,9 @@ from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User, TrainingPlan, TrainingPlanEntry
 from src.api.deps import get_db_connection
 from src.api.schemas import CorosLink
-from src.api.services.coros_sync import sync_coros, unlink_coros, client_for, recompute_trigger
-from src.api.services.metrics import coros_resting_hr
+from src.api.services.coros_sync import sync_coros, unlink_coros, client_for
 from src.api.services.readiness import energy_for
+from src.api.services.sync import queue_recompute
 from src.energy import DEFAULT_DAYS
 
 logger = logging.getLogger("race_planner.api")
@@ -31,17 +31,18 @@ def status_of(user, con):
     return {
         "linked": linked,
         "region": user.coros_region,
-        "linked_at": user.coros_linked_at.isoformat() if user.coros_linked_at else None,
-        "synced_at": user.coros_synced_at.isoformat() if user.coros_synced_at else None,
+        # Stored in server time without a zone; astimezone() adds the offset.
+        "linked_at": user.coros_linked_at.astimezone().isoformat() if user.coros_linked_at else None,
+        "synced_at": user.coros_synced_at.astimezone().isoformat() if user.coros_synced_at else None,
         "error": user.coros_error,
         "nights": nights,
-        "resting_hr": coros_resting_hr(con, user.athlete_id) if linked else None,
+        "resting_hr": user.coros_resting_hr if linked else None,
     }
 
 
 def run_sync(db, user, con):
     try:
-        return sync_coros(db, user, client_for(user), con, on_resting_hr_change=recompute_trigger(user))
+        return sync_coros(db, user, client_for(user), con, recompute=lambda: queue_recompute(user.id))
     except CorosAuthError as error:
         raise HTTPException(status_code=401, detail=str(error))
     except CorosError as error:
@@ -104,7 +105,7 @@ def unlink(user_id: int, current_user: User = Depends(get_current_user)):
     db, con = SessionLocal(), get_db_connection()
     try:
         user = own_user(db, user_id, current_user)
-        unlink_coros(db, user, con, on_resting_hr_change=recompute_trigger(user))
+        unlink_coros(db, user, con, recompute=lambda: queue_recompute(user.id))
         return status_of(user, con)
     finally:
         con.close()

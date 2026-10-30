@@ -67,12 +67,15 @@ def login(email, password, region="us", session=None):
     The password is sent to COROS once (MD5-hashed, as their app does) and
     not kept."""
     http = session or requests.Session()
-    response = http.post(
-        f"{base_url(region)}/account/login",
-        json={"account": email, "accountType": 2, "pwd": hashlib.md5(password.encode()).hexdigest()},
-        headers={"User-Agent": USER_AGENT},
-        timeout=TIMEOUT_S,
-    )
+    try:
+        response = http.post(
+            f"{base_url(region)}/account/login",
+            json={"account": email, "accountType": 2, "pwd": hashlib.md5(password.encode()).hexdigest()},
+            headers={"User-Agent": USER_AGENT},
+            timeout=TIMEOUT_S,
+        )
+    except requests.RequestException as error:
+        raise CorosError(f"Could not reach COROS: {error}")
     data = parse_response(response).get("data") or {}
     if not data.get("accessToken"):
         raise CorosAuthError("COROS did not return a session token.")
@@ -125,7 +128,10 @@ class CorosClient:
         return {"accessToken": self.access_token, "yfheader": json.dumps({"userId": self.user_id}), "User-Agent": USER_AGENT}
 
     def get(self, path, params=None):
-        response = self.http.get(f"{self.base}{path}", params=params, headers=self.headers(), timeout=TIMEOUT_S)
+        try:
+            response = self.http.get(f"{self.base}{path}", params=params, headers=self.headers(), timeout=TIMEOUT_S)
+        except requests.RequestException as error:
+            raise CorosError(f"Could not reach COROS: {error}")
         return parse_response(response).get("data") or {}
 
     def verify(self):

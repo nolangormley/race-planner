@@ -3,13 +3,12 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime
 import logging
 
-from src.pipeline import recompute_metrics
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User
-from src.api.deps import get_db_connection, DEFAULT_REST_HR
+from src.api.deps import get_db_connection, DEFAULT_MAX_HR, DEFAULT_REST_HR
 from src.api.schemas import ProfileUpdate
-from src.api.services.metrics import detected_max_hr, coros_resting_hr, resolve_resting_hr
-from src.api.services.sync import registry as sync_registry, SyncAlreadyRunning
+from src.api.services.metrics import recorded_max_hr
+from src.api.services.sync import queue_recompute
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
@@ -17,21 +16,22 @@ router = APIRouter()
 
 @router.get("/api/hr-profile/{user_id}")
 def hr_profile(user_id: int, current_user: User = Depends(get_current_user)):
-    """The resting and max heart rate in use, and where each comes from."""
+    """The resting and max heart rate in use, and where each comes from.
+    detected_max_hr is null when no activity recorded a heart rate."""
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this profile")
     con = get_db_connection()
     try:
-        detected = detected_max_hr(con, current_user.athlete_id)
-        from_coros = coros_resting_hr(con, current_user.athlete_id)
+        detected = recorded_max_hr(con, current_user.athlete_id)
     finally:
         con.close()
     return {
         "resting_hr": current_user.resting_hr,
         "max_hr": current_user.max_hr,
         "default_resting_hr": DEFAULT_REST_HR,
-        "coros_resting_hr": from_coros,
+        "coros_resting_hr": current_user.coros_resting_hr,
         "detected_max_hr": detected,
+        "default_max_hr": DEFAULT_MAX_HR,
     }
 
 
@@ -68,12 +68,6 @@ def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = De
                 setattr(user, field, getattr(profile, field))
                 hr_changed = True
         db.commit()
-        max_hr = user.max_hr
-        con = get_db_connection()
-        try:
-            resting_hr = resolve_resting_hr(con, user)
-        finally:
-            con.close()
     except HTTPException:
         raise
     except Exception as e:
@@ -83,18 +77,8 @@ def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = De
         db.close()
 
     # Every stored zone, TRIMP and VO2 estimate depends on these two numbers,
-    # so a change recomputes the warehouse in the background. The UI shows it
-    # with the same progress panel as a sync.
-    recompute_started = False
+    # so a change recomputes the warehouse in the background, after any job
+    # already running. The UI shows it with the same progress panel as a sync.
     if hr_changed:
-        try:
-            sync_registry.start(
-                user_id,
-                run_sync=lambda progress: recompute_metrics(progress=progress, resting_hr=resting_hr, max_hr=max_hr),
-                on_success=lambda new_token: None,
-                kind="recompute",
-            )
-            recompute_started = True
-        except SyncAlreadyRunning:
-            pass
-    return {"message": "Profile updated", "recompute_started": recompute_started}
+        queue_recompute(user_id)
+    return {"message": "Profile updated", "recompute_started": hr_changed}

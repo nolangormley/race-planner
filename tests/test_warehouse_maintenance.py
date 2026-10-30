@@ -54,9 +54,10 @@ def test_rebuild_copies_every_table(tmp_path):
     warehouse = StravaDB(str(source))
     add_activity_with_children(warehouse.con)
     warehouse.con.execute("INSERT INTO coros_daily (athlete_id, day, rhr, hrv) VALUES (?, ?, 48, 61)", [ATHLETE_ID, date(2026, 10, 29)])
+    warehouse.con.execute("INSERT INTO dim_workouts (workout_id, name) VALUES ('https://example.test/w/1', '6 x 800 m')")
     expected = {
         table: warehouse.con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        for table in ("dim_activity", "stream_heartrate", "best_efforts", "activity_laps", "coros_daily", "schema_migrations")
+        for table in ("dim_activity", "stream_heartrate", "best_efforts", "activity_laps", "coros_daily", "dim_workouts", "schema_migrations")
     }
     warehouse.con.close()
 

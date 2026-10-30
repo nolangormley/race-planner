@@ -165,17 +165,19 @@ Known blind spots: a run-walk easy run reads as intervals (the walks look like r
 
 ### Strava webhooks (automatic sync)
 
-With a push subscription, Strava calls `/api/strava/webhook` whenever an activity is created, updated or deleted and the warehouse syncs itself; the Sync button becomes a fallback.
+With a push subscription, Strava calls the app whenever an activity is created, updated or deleted and the warehouse syncs itself; the Sync button becomes a fallback.
 
-1. Set `STRAVA_WEBHOOK_VERIFY_TOKEN` to any secret string in the app's `.env` and restart the app.
-2. With the same variables in your shell or `.env`, register the callback once per Strava application:
+1. Set `STRAVA_WEBHOOK_VERIFY_TOKEN` to a long random string in the app's `.env` (for example `python -c "import secrets; print(secrets.token_urlsafe(32))"`) and restart the app.
+2. With the same variables in your shell or `.env`, register the callback once per Strava application, giving the site's base URL:
 
     ```bash
-    python scripts/strava_webhook.py create https://your-host/api/strava/webhook
+    python scripts/strava_webhook.py create https://your-host
     python scripts/strava_webhook.py view
     ```
 
-Strava validates the URL during `create`, so the app must already be reachable there. Events are not signed; an event can only start a sync for a known athlete or remove one activity, which the next sync restores if it still exists on Strava.
+The script registers `https://your-host/api/strava/webhook/<token>`.
+Strava does not sign its events, so that secret path is what keeps anyone else from posting fake ones; every other path gets a 404.
+Strava validates the URL during `create`, so the app must already be reachable there.
 
 ### Weekly digest email
 Tick **Weekly digest** on the profile page to get a Monday morning email: last week's runs against the week before, how the plan went, fitness and form, new best efforts, this week's sessions and upcoming races.

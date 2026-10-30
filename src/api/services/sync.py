@@ -10,7 +10,9 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from src.pipeline import StravaAuthError
+from src.pipeline import StravaAuthError, recompute_metrics, sync_athlete
+from src.api.database import SessionLocal, User
+from src.api.services.metrics import resolve_resting_hr
 
 logger = logging.getLogger("race_planner.sync")
 
@@ -134,17 +136,34 @@ class SyncRegistry:
     def get(self, user_id):
         return self.jobs.get(user_id)
 
+    def snapshot(self, user_id):
+        """The current job's snapshot, or None. Read under the lock run()
+        holds while it ends a job and starts the queued one, so a poll never
+        sees the first job done before the queued one exists: the page would
+        stop polling and miss the queued job."""
+        with self.lock:
+            job = self.jobs.get(user_id)
+            return job.snapshot() if job else None
+
     def start_or_queue(self, user_id, run_sync, on_success, kind="sync"):
         """Like start, but a job already running queues one more run for when
         it finishes instead of raising. A Strava webhook arriving mid-sync
         must not be lost: the running sync may have listed activities before
-        the new one existed."""
-        try:
-            return self.start(user_id, run_sync, on_success, kind)
-        except SyncAlreadyRunning:
-            with self.lock:
-                self.queued[user_id] = (run_sync, on_success, kind)
-            return self.jobs[user_id]
+        the new one existed. The check and the queueing share one critical
+        section with the end of a job (see run), so a run is never queued
+        behind a job that has already finished."""
+        with self.lock:
+            current = self.jobs.get(user_id)
+            if current and current.status == "running":
+                queued = self.queued.get(user_id)
+                # A queued sync reads the heart rate profile when it starts and
+                # recomputes whatever changed, so it already covers a recompute.
+                if not (queued and queued[2] == "sync" and kind == "recompute"):
+                    self.queued[user_id] = (run_sync, on_success, kind)
+                return current
+            job = self.register(user_id, kind)
+        self.launch(job, run_sync, on_success)
+        return job
 
     def start(self, user_id, run_sync, on_success, kind="sync"):
         """run_sync(progress) does the sync and returns (new_refresh_token, count).
@@ -155,28 +174,74 @@ class SyncRegistry:
             current = self.jobs.get(user_id)
             if current and current.status == "running":
                 raise SyncAlreadyRunning()
-            job = SyncJob(user_id, kind=kind)
-            self.jobs[user_id] = job
-        worker = threading.Thread(
-            target=self.run, args=(job, run_sync, on_success), daemon=True, name=f"strava-sync-{user_id}"
-        )
-        worker.start()
+            job = self.register(user_id, kind)
+        self.launch(job, run_sync, on_success)
         return job
 
+    def register(self, user_id, kind):
+        """A new job as the user's current one. The caller holds self.lock."""
+        job = SyncJob(user_id, kind=kind)
+        self.jobs[user_id] = job
+        return job
+
+    def launch(self, job, run_sync, on_success):
+        worker = threading.Thread(
+            target=self.run, args=(job, run_sync, on_success), daemon=True, name=f"strava-sync-{job.user_id}"
+        )
+        worker.start()
+
     def run(self, job, run_sync, on_success):
+        count, error, error_kind = 0, None, "error"
         try:
             new_refresh_token, count = run_sync(job.update)
             on_success(new_refresh_token)
-            job.finish(count)
         except StravaAuthError as exc:
-            job.fail(str(exc), kind="auth")
+            error, error_kind = str(exc), "auth"
         except Exception as exc:
             logger.exception("Strava sync failed for user %s", job.user_id)
-            job.fail(str(exc))
+            error = str(exc)
         with self.lock:
+            if error is None:
+                job.finish(count)
+            else:
+                job.fail(error, kind=error_kind)
             queued = self.queued.pop(job.user_id, None)
-        if queued:
-            self.start(job.user_id, *queued)
+            next_job = self.register(job.user_id, queued[2]) if queued else None
+        if next_job:
+            self.launch(next_job, queued[0], queued[1])
 
 
 registry = SyncRegistry()
+
+
+def stored_profile(user_id):
+    """(refresh token, warehouse athlete id, resting HR, max HR) as stored now."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        return user.strava_refresh_token, user.athlete_id, resolve_resting_hr(user), user.max_hr
+    finally:
+        db.close()
+
+
+def sync_job(user_id):
+    """run_sync for a Strava sync. It reads the token and the heart rate
+    profile when it starts, so a queued sync uses the values of that moment."""
+    def run(progress):
+        refresh_token, athlete_id, resting_hr, max_hr = stored_profile(user_id)
+        return sync_athlete(refresh_token, athlete_id, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+    return run
+
+
+def recompute_job(user_id):
+    """run_sync for a metrics recompute; it reads the profile when it starts."""
+    def run(progress):
+        _, athlete_id, resting_hr, max_hr = stored_profile(user_id)
+        return recompute_metrics(athlete_id, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+    return run
+
+
+def queue_recompute(user_id):
+    """Recomputes the user's metrics now, or once the running job ends, so a
+    heart rate change saved during a sync is not lost."""
+    return registry.start_or_queue(user_id, recompute_job(user_id), lambda new_token: None, kind="recompute")

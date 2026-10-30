@@ -12,6 +12,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 import psycopg2
 import pytest
@@ -25,6 +26,14 @@ from e2e.fake_coros import make_app as fake_coros_app
 REPO = Path(__file__).resolve().parents[1]
 DATABASE_URL = os.environ.get("E2E_DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/raceplanner_e2e")
 USER = {"email": "e2e@example.com", "password": "e2e-password-123", "name": "E2E Runner"}
+# The app reads the repo's .env whatever its working directory (dotenv looks
+# next to the code), but never over a variable that is already set, even to
+# an empty value. These are set empty so a developer's mail server, model
+# keys and public URL stay out of the test app.
+BLANK_SETTINGS = {name: "" for name in (
+    "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM",
+    "GROQ_API_KEY", "DEEPSEEK_API_KEY", "GEMINI_API_KEY", "APP_URL",
+)}
 
 
 def free_port():
@@ -90,6 +99,7 @@ def running_app(workdir, settings):
     base = f"http://127.0.0.1:{port}"
     env = {
         **os.environ,
+        **BLANK_SETTINGS,
         "DB_PATH": str(workdir / "warehouse.duckdb"),
         "STRAVA_CLIENT_ID": "e2e", "STRAVA_CLIENT_SECRET": "e2e",
         "SECRET_KEY": "e2e-secret", "SECURE_COOKIES": "false",
@@ -97,7 +107,7 @@ def running_app(workdir, settings):
         "HOST_URL": base, "ALLOWED_ORIGINS": base,
         **settings,
     }
-    # cwd is the temp dir so the repo's .env/.env.dev are not picked up.
+    # cwd is the temp dir, so a .env.dev in the repo root is not read.
     process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "src.api.main:app", "--app-dir", str(REPO), "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
         cwd=workdir, env=env,
@@ -133,21 +143,29 @@ def browser():
         browser.close()
 
 
-# favicon: none is served. 404: how the data endpoints say "nothing yet"; the
-# pages render an empty state. The net:: errors are fetches cut off by a
-# navigation, not server failures.
-IGNORED_CONSOLE = ("favicon", "status of 404", "net::ERR_SOCKET_NOT_CONNECTED", "net::ERR_ABORTED")
+# The data endpoints answer 404 for "nothing yet" and the pages render an
+# empty state for it. Some predate the /api/ prefix.
+DATA_PATHS = ("/api/", "/status/", "/vo2max/", "/pace_zones/", "/analytics/")
+# Fetches cut off by a navigation, not server failures.
+IGNORED_CONSOLE = ("net::ERR_SOCKET_NOT_CONNECTED", "net::ERR_ABORTED")
+
+
+def expected_console_error(message):
+    if any(skip in message.text for skip in IGNORED_CONSOLE):
+        return True
+    path = urlparse(message.location.get("url", "")).path
+    return "status of 404" in message.text and path.startswith(DATA_PATHS)
 
 
 class Problems(list):
-    """Console errors and page errors collected during a test. A 404 is how
-    the data endpoints say "nothing yet" and the pages render an empty
-    state for it, so those are not failures; a 500 or a script error is."""
+    """Console errors and page errors collected during a test. A 404 from a
+    data endpoint is how it says "nothing yet", so it is not a failure; a
+    404 for a page, script or icon is, and so is a 500 or a script error."""
 
     def attach(self, page):
         page.on("pageerror", lambda error: self.append(f"pageerror: {error}"))
-        page.on("console", lambda message: self.append(f"console: {message.text}")
-                if message.type == "error" and not any(skip in message.text for skip in IGNORED_CONSOLE) else None)
+        page.on("console", lambda message: self.append(f"console: {message.text} ({message.location.get('url')})")
+                if message.type == "error" and not expected_console_error(message) else None)
 
 
 @pytest.fixture
