@@ -6,7 +6,7 @@
 <div class="page-head">
     <div>
         <h1>Profile</h1>
-        <p class="sub">Your details, races, Strava connection and preferences.</p>
+        <p class="sub">Your details, races, Strava connection and settings.</p>
     </div>
 </div>
 
@@ -73,8 +73,8 @@
     <section class="card">
         <div class="card-head">
             <div>
-                <h2 class="card-title">Preferences</h2>
-                <div class="card-sub">Saved in this browser.</div>
+                <h2 class="card-title">Settings</h2>
+                <div class="card-sub">Units and theme are saved in this browser.</div>
             </div>
         </div>
         <div class="list-row">
@@ -91,6 +91,29 @@
                 <button type="button" data-theme="light">Light</button>
             </div>
         </div>
+        <div class="list-row">
+            <span>Password</span>
+            <button type="button" class="btn btn-sm" id="edit-password">Change</button>
+        </div>
+        <form id="password-form" class="stack hidden mt-3">
+            <div class="field">
+                <label for="p-current">Current password</label>
+                <input id="p-current" type="password" class="input" required autocomplete="current-password">
+            </div>
+            <div class="field">
+                <label for="p-new">New password <span class="faint">(at least 8 characters)</span></label>
+                <input id="p-new" type="password" class="input" required minlength="8" maxlength="72" autocomplete="new-password">
+            </div>
+            <div class="field">
+                <label for="p-confirm">Confirm new password</label>
+                <input id="p-confirm" type="password" class="input" required minlength="8" maxlength="72" autocomplete="new-password">
+            </div>
+            <div class="form-actions">
+                <span class="status"></span>
+                <button type="button" class="btn" id="cancel-password">Cancel</button>
+                <button type="submit" class="btn btn-primary">Change password</button>
+            </div>
+        </form>
     </section>
 
     <section class="card">
