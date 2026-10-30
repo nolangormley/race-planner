@@ -81,6 +81,9 @@ if not SECRET_KEY:
         "Set SECRET_KEY in your .env for any shared or production deployment."
     )
 
+# Password reset links are signed with the same key (see auth_routes.py).
+app.state.secret_key = SECRET_KEY
+
 # https_only should be True in any deployment served over HTTPS (e.g. Render).
 # It defaults to False so local http://localhost dev keeps working; set
 # SECURE_COOKIES=true in production environments.

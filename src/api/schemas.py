@@ -44,6 +44,11 @@ class ProfileUpdate(BaseModel):
     weight: Optional[float] = None  # stored in kg
 
 
+class PasswordChange(BaseModel):
+    current_password: str = Field(max_length=200)
+    new_password: str = Field(max_length=200)
+
+
 class PlanEntryCreate(BaseModel):
     date: str
     workout_type: Optional[str] = Field(default=None, max_length=200)

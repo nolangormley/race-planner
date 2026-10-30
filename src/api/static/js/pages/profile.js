@@ -1,4 +1,4 @@
-// Profile: athlete details, preferences, races, Strava status, warehouse totals.
+// Profile: athlete details, password change, preferences, races, Strava status, warehouse totals.
 import {
   config, fetchJson, units, fmtDate, relativeTime, daysUntil, escapeHtml, showToast,
   applyTheme, currentTheme, qs, qsa, renderEmpty,
@@ -91,6 +91,36 @@ async function saveAthlete(event) {
     renderAthleteView();
     toggleAthleteForm(false);
     showToast('Profile saved');
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+// ---- Password ----
+function togglePasswordForm(open) {
+  const form = qs('#password-form');
+  form.classList.toggle('hidden', !open);
+  qs('#edit-password').classList.toggle('hidden', open);
+  form.reset();
+  qs('#password-form .status').textContent = '';
+  if (open) qs('#p-current').focus();
+}
+
+async function savePassword(event) {
+  event.preventDefault();
+  const status = qs('#password-form .status');
+  if (qs('#p-new').value !== qs('#p-confirm').value) {
+    status.textContent = "The new passwords don't match.";
+    return;
+  }
+  status.textContent = 'Saving…';
+  try {
+    await fetchJson('/api/password', {
+      method: 'POST',
+      body: { current_password: qs('#p-current').value, new_password: qs('#p-new').value },
+    });
+    togglePasswordForm(false);
+    showToast('Password changed');
   } catch (error) {
     status.textContent = error.message;
   }
@@ -203,6 +233,9 @@ async function loadWarehouseStats() {
 qs('#edit-athlete').addEventListener('click', () => toggleAthleteForm(true));
 qs('#cancel-athlete').addEventListener('click', () => toggleAthleteForm(false));
 qs('#athlete-form').addEventListener('submit', saveAthlete);
+qs('#edit-password').addEventListener('click', () => togglePasswordForm(true));
+qs('#cancel-password').addEventListener('click', () => togglePasswordForm(false));
+qs('#password-form').addEventListener('submit', savePassword);
 qs('#add-race').addEventListener('click', () => {
   qs('#race-form').classList.remove('hidden');
   qs('#r-name').focus();
