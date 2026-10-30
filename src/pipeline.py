@@ -177,6 +177,15 @@ class StravaManager:
         resp.raise_for_status()
         return resp.json()
 
+    def fetch_activity_laps(self, access_token, activity_id):
+        """The watch's laps for an activity (auto-laps or manual), or None."""
+        resp = _request_with_retry(requests.get, f"{STRAVA_API_BASE}/api/v3/activities/{activity_id}/laps", headers={'Authorization': f'Bearer {access_token}'})
+        if resp.status_code == 401: raise Exception("Unauthorized")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
     def fetch_activity_streams(self, access_token, activity_id, keys=STREAMS_TO_FETCH):
         print(f"  Fetching streams for activity {activity_id}...")
         resp = _request_with_retry(requests.get, f"{STRAVA_API_BASE}/api/v3/activities/{activity_id}/streams", headers={'Authorization': f'Bearer {access_token}'}, params={'keys': ",".join(keys), 'key_by_type': 'true'})
@@ -238,9 +247,16 @@ class StravaDB:
                 elapsed_time INTEGER, total_elevation_gain DOUBLE, average_speed DOUBLE, max_speed DOUBLE,
                 average_heartrate DOUBLE, max_heartrate DOUBLE, average_cadence DOUBLE, calories DOUBLE,
                 device_name VARCHAR, description VARCHAR, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                laps_fetched_at TIMESTAMP,
                 FOREIGN KEY (athlete_id) REFERENCES dim_athlete(athlete_id)
             );
         """)
+        if not self._migration_applied("dim_activity_add_laps_fetched_at"):
+            try:
+                self.con.execute("ALTER TABLE dim_activity ADD COLUMN laps_fetched_at TIMESTAMP;")
+            except (duckdb.CatalogException, duckdb.BinderException):
+                pass
+            self._mark_migration_applied("dim_activity_add_laps_fetched_at")
         def create_stream_table(name, val_type="DOUBLE"):
             # PRIMARY KEY (activity_id, time_offset) makes a fresh table
             # idempotent under upsert. CREATE TABLE IF NOT EXISTS is a no-op
@@ -288,6 +304,18 @@ class StravaDB:
                 activity_id UBIGINT, distance_m DOUBLE, seconds DOUBLE,
                 computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (activity_id, distance_m),
+                FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
+            );
+        """)
+        # Laps as the watch recorded them (auto-laps or manual).
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS activity_laps (
+                activity_id UBIGINT, lap_index INTEGER, name VARCHAR,
+                start_index INTEGER, end_index INTEGER, start_offset INTEGER,
+                elapsed_time INTEGER, moving_time INTEGER, distance DOUBLE,
+                average_speed DOUBLE, max_speed DOUBLE, average_heartrate DOUBLE, max_heartrate DOUBLE,
+                average_cadence DOUBLE, total_elevation_gain DOUBLE,
+                PRIMARY KEY (activity_id, lap_index),
                 FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
             );
         """)
@@ -381,6 +409,27 @@ class StravaDB:
         proc('altitude', 'altitude', 'DOUBLE')
         proc('moving', 'moving', 'BOOLEAN')
 
+    def insert_laps(self, activity_id, laps, time_offsets=None):
+        """Replaces an activity's laps. time_offsets (the activity's time
+        stream) turns Strava's sample indexes into seconds from the start.
+        Marks the activity so laps are not fetched again, even when the
+        watch recorded none."""
+        self.con.execute("DELETE FROM activity_laps WHERE activity_id = ?", [activity_id])
+        for position, lap in enumerate(laps or [], start=1):
+            start_index = lap.get('start_index')
+            start_offset = None
+            if time_offsets and start_index is not None and 0 <= start_index < len(time_offsets):
+                start_offset = time_offsets[start_index]
+            self.con.execute("""
+                INSERT INTO activity_laps (activity_id, lap_index, name, start_index, end_index, start_offset,
+                    elapsed_time, moving_time, distance, average_speed, max_speed, average_heartrate, max_heartrate,
+                    average_cadence, total_elevation_gain)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [activity_id, lap.get('lap_index', position), lap.get('name'), start_index, lap.get('end_index'), start_offset,
+                  lap.get('elapsed_time'), lap.get('moving_time'), lap.get('distance'), lap.get('average_speed'), lap.get('max_speed'),
+                  lap.get('average_heartrate'), lap.get('max_heartrate'), lap.get('average_cadence'), lap.get('total_elevation_gain')])
+        self.con.execute("UPDATE dim_activity SET laps_fetched_at = now() WHERE activity_id = ?", [activity_id])
+
     def activity_exists(self, act_id): return self.con.execute("SELECT 1 FROM dim_activity WHERE activity_id = ?", [act_id]).fetchone() is not None
 
     def activity_has_streams(self, act_id):
@@ -473,6 +522,7 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None, pro
         act_name = act.get('name', '(unnamed)')
         print(f"  Syncing {act_name} ({act_id})")
         db.upsert_activity(act)
+        streams = None
         try:
             streams = manager.fetch_activity_streams(access_token, act_id)
             if streams:
@@ -486,6 +536,12 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None, pro
                 if access_token:
                     streams = manager.fetch_activity_streams(access_token, act_id)
                     if streams: db.insert_streams(act_id, streams)
+        if act.get('type') == 'Run':
+            try:
+                laps = manager.fetch_activity_laps(access_token, act_id)
+                db.insert_laps(act_id, laps, ((streams or {}).get('time') or {}).get('data'))
+            except Exception as lap_e:
+                print(f"    Error fetching laps for {act_id}: {lap_e}")
         progress('streams', done=position, total=len(pending), name=act_name)
     return len(pending)
 
@@ -705,6 +761,36 @@ def run_analyze_training_load(db):
     return {"CTL": today['CTL'], "ATL": today['ATL'], "TSB": today['TSB']}
 
 
+def run_fetch_missing_laps(manager, db, access_token, progress=None, limit=60):
+    """Fetches laps for runs synced before laps were stored, a batch per sync
+    so a big backlog stays inside Strava's rate limit (100 requests per 15
+    minutes). An activity is marked fetched even when it has no laps."""
+    if progress is None:
+        progress = _no_progress
+    con = db.con
+    pending = [row[0] for row in con.execute("""
+        SELECT da.activity_id FROM dim_activity da
+        WHERE da.type = 'Run' AND da.laps_fetched_at IS NULL
+          AND EXISTS (SELECT 1 FROM stream_velocity sv WHERE sv.activity_id = da.activity_id)
+        ORDER BY da.start_date_local DESC
+        LIMIT ?
+    """, [limit]).fetchall()]
+    for position, act_id in enumerate(pending, start=1):
+        progress('laps', done=position, total=len(pending))
+        times = [row[0] for row in con.execute(
+            "SELECT time_offset FROM stream_velocity WHERE activity_id = ? ORDER BY time_offset", [act_id]
+        ).fetchall()]
+        try:
+            laps = manager.fetch_activity_laps(access_token, act_id)
+        except Exception as e:
+            print(f"  Error fetching laps for {act_id}: {e}")
+            if "Unauthorized" in str(e):
+                break
+            continue
+        db.insert_laps(act_id, laps, times)
+    return len(pending)
+
+
 def recompute_metrics(db_path=None, progress=None, resting_hr=None, max_hr=None):
     """Re-runs the effectiveness and training-load passes without talking to
     Strava, for when the athlete changes their heart rate profile. Returns
@@ -764,6 +850,7 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None, 
     db = StravaDB(db_path=db_path or DB_PATH)
     try:
         count = ingest_data(manager, db, access_token, lookback_days=lookback_days, reauth_fn=_reauth_unavailable, progress=progress)
+        run_fetch_missing_laps(manager, db, access_token, progress=progress)
         progress('metrics')
         run_analyze_effectiveness(db, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
         run_best_efforts(db, progress=progress)

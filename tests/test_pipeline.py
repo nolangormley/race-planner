@@ -164,6 +164,12 @@ class _FakeStrava:
         self.stream_calls.append(activity_id)
         return {'time': {'data': [0, 1, 2]}, 'heartrate': {'data': [130, 131, 132]}}
 
+    def fetch_activity_laps(self, access_token, activity_id):
+        return [
+            {'lap_index': 1, 'name': 'Lap 1', 'start_index': 0, 'end_index': 1, 'elapsed_time': 2, 'moving_time': 2, 'distance': 6.0, 'average_speed': 3.0},
+            {'lap_index': 2, 'name': 'Lap 2', 'start_index': 2, 'end_index': 2, 'elapsed_time': 1, 'moving_time': 1, 'distance': 3.0, 'average_speed': 3.0},
+        ]
+
 
 def _ingest(monkeypatch, strava, db, **kwargs):
     import src.pipeline as pipeline
@@ -270,3 +276,24 @@ def test_best_efforts_pass_is_incremental():
     # 5.4 km run: no 10K or half rows.
     assert db.con.execute("SELECT count(*) FROM best_efforts WHERE activity_id = 100").fetchone()[0] == 2
     assert run_best_efforts(db) == 0
+
+
+# ---- laps ----
+
+def test_ingest_stores_laps_with_start_offsets(monkeypatch):
+    db = _make_db()
+    strava = _FakeStrava([{'id': 105, 'name': 'Lapped run', 'type': 'Run', 'start_date_local': '2026-01-05T08:00:00Z'}])
+    _ingest(monkeypatch, strava, db)
+    laps = db.con.execute("SELECT lap_index, start_offset, distance FROM activity_laps WHERE activity_id = 105 ORDER BY lap_index").fetchall()
+    assert laps == [(1, 0, 6.0), (2, 2, 3.0)]
+    assert db.con.execute("SELECT laps_fetched_at IS NOT NULL FROM dim_activity WHERE activity_id = 105").fetchone()[0]
+
+
+def test_missing_laps_are_backfilled_once():
+    from src.pipeline import run_fetch_missing_laps
+    db = _make_db()
+    db.insert_streams(100, {'time': {'data': [0, 1, 2]}, 'velocity_smooth': {'data': [3.0, 3.0, 3.0]}})
+    strava = _FakeStrava([])
+    assert run_fetch_missing_laps(strava, db, "token") == 1
+    assert db.con.execute("SELECT count(*) FROM activity_laps WHERE activity_id = 100").fetchone()[0] == 2
+    assert run_fetch_missing_laps(strava, db, "token") == 0   # marked fetched

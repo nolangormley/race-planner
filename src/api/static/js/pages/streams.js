@@ -125,7 +125,32 @@ function paceBands(paceZones, paceValues) {
   return bands;
 }
 
-function renderStreams(streams, activity, paceZones) {
+function renderSplits(laps, activity) {
+  if (!laps.length) return;
+  const card = qs('#splits-card');
+  const isRun = ['Run', 'Walk', 'Hike', 'TrailRun'].includes(activity.type);
+  const fastest = laps.reduce((best, lap) => ((lap.average_speed || 0) > (best.average_speed || 0) ? lap : best), laps[0]);
+  const average = activity.average_speed || 0;
+  const rows = laps.map((lap) => {
+    const delta = average && lap.average_speed ? units.paceMinutes(lap.average_speed) - units.paceMinutes(average) : null;
+    const deltaText = delta == null || Math.abs(delta) < 0.01 ? '' : `<span class="cell-sub ${delta < 0 ? 'faint' : 'faint'}">${delta < 0 ? '−' : '+'}${fmtMinutes(Math.abs(delta))} vs avg</span>`;
+    return `<tr>
+      <td class="num">${lap.lap_index}${lap === fastest && laps.length > 1 ? ' <span class="badge badge-good">fastest</span>' : ''}</td>
+      <td class="num">${units.distance(lap.distance, 2)}</td>
+      <td class="num">${fmtClock(lap.moving_time ?? lap.elapsed_time ?? 0)}</td>
+      <td class="num">${isRun ? units.pace(lap.average_speed) : `${((lap.average_speed || 0) * (units.isMetric() ? 3.6 : 2.23694)).toFixed(1)} ${units.isMetric() ? 'km/h' : 'mph'}`}${deltaText}</td>
+      <td class="num">${lap.average_heartrate ? Math.round(lap.average_heartrate) : '–'}</td>
+      <td class="num">${lap.max_heartrate ? Math.round(lap.max_heartrate) : '–'}</td>
+      <td class="num">${lap.average_cadence ? Math.round(lap.average_cadence * 2) : '–'}</td>
+      <td class="num">${lap.total_elevation_gain != null ? units.elevation(lap.total_elevation_gain) : '–'}</td>
+    </tr>`;
+  }).join('');
+  qs('#splits').innerHTML = `<table class="table table-compact"><thead><tr><th class="num">Lap</th><th class="num">Distance</th><th class="num">Time</th><th class="num">${isRun ? 'Pace' : 'Speed'}</th><th class="num">Avg HR</th><th class="num">Max HR</th><th class="num">Cadence</th><th class="num">Elev</th></tr></thead><tbody>${rows}</tbody></table>`;
+  qs('#splits-sub').textContent = `${laps.length} laps as your watch recorded them.`;
+  card.classList.remove('hidden');
+}
+
+function renderStreams(streams, activity, paceZones, laps = []) {
   const container = qs('#streams-chart');
   if (!streams.length) {
     renderEmpty(container, 'No stream data', 'This activity was synced without per-second data.');
@@ -171,6 +196,8 @@ function renderStreams(streams, activity, paceZones) {
     renderEmpty(container, 'No stream data', 'This activity has no heart rate, pace, cadence or elevation samples.');
     return;
   }
+  // Lap starts after the first; numbered when there are few enough to read.
+  const markers = laps.filter((lap) => lap.start_offset > 0).map((lap) => ({ x: lap.start_offset, label: laps.length <= 20 ? String(lap.lap_index) : '' }));
   panelChart(container, {
     x,
     xTicks: (min, max) => secondsTicks(max, 7),
@@ -180,6 +207,7 @@ function renderStreams(streams, activity, paceZones) {
     ariaLabel: 'Activity streams over time',
     legend: false,
     table: true,
+    markers,
     panels,
   });
 }
@@ -207,11 +235,13 @@ async function load() {
   renderSummary(activity);
   renderEffort(activity);
   renderZones(activity);
-  const [streams, paceZones] = await Promise.all([
+  const [streams, paceZones, laps] = await Promise.all([
     fetchJson(`/api/activities/${activityId}/streams`).catch(() => []),
     config.athleteId ? fetchJson(`/pace_zones/${config.athleteId}`).catch(() => null) : null,
+    fetchJson(`/api/activities/${activityId}/laps`).catch(() => []),
   ]);
-  renderStreams(streams, activity, paceZones);
+  renderStreams(streams, activity, paceZones, laps);
+  renderSplits(laps, activity);
   loadNote();
 }
 

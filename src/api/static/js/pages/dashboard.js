@@ -21,6 +21,7 @@ const state = {
   predictions: null,
   efficiency: null,
   projection: null,
+  records: null,
   pmcDays: Number(localStorage.getItem('pmcWindow') || 42),
 };
 const charts = {};
@@ -330,6 +331,30 @@ function renderPredictions(data) {
   container.innerHTML = `<table class="table table-compact"><thead><tr><th>Distance</th><th class="num">Predicted</th><th>Based on</th><th class="num">Ceiling</th></tr></thead><tbody>${races}${standard}</tbody></table>`;
 }
 
+// ---- Personal records ----
+function renderRecords(data) {
+  const container = qs('#records');
+  if (!data || !data.all_time.length) {
+    renderEmpty(container, 'No records yet', 'Records appear once runs with pace data are synced.');
+    return;
+  }
+  const yearByDistance = new Map(data.this_year.map((row) => [row.distance_m, row]));
+  const cell = (row) => (row
+    ? `<td class="num"><a href="/workout_streams/${row.activity_id}" class="strong">${fmtClock(row.seconds)}</a><span class="cell-sub">${units.pace(row.distance_m / row.seconds)} · ${fmtDate(row.date, { month: 'short', day: 'numeric', year: 'numeric' })}</span></td>`
+    : '<td class="num faint">–</td>');
+  const rows = data.all_time.map((row) => {
+    const year = yearByDistance.get(row.distance_m);
+    const isNew = year && year.seconds === row.seconds;
+    return `<tr><td class="primary">${escapeHtml(row.label)}${isNew ? ' <span class="badge badge-good">this year</span>' : ''}</td>${cell(row)}${cell(year)}</tr>`;
+  }).join('');
+  container.innerHTML = `<table class="table table-compact"><thead><tr><th>Distance</th><th class="num">All time</th><th class="num">${new Date().getFullYear()}</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function loadRecords() {
+  state.records = await fetchJson(`/api/records/${athleteId}`).catch(() => null);
+  renderRecords(state.records);
+}
+
 // ---- Aerobic efficiency ----
 function renderEfficiency(data) {
   const container = qs('#efficiency-chart');
@@ -579,6 +604,7 @@ function loadAll() {
   loadPlanAndActivities();
   loadPredictions();
   loadEfficiency();
+  loadRecords();
   fetchJson(`/api/races/${userId}`).then(renderHeader).catch(() => renderHeader([]));
 }
 
@@ -590,6 +616,7 @@ function rerenderUnits() {
   if (state.paceZones) renderPaceZones();
   if (state.predictions) renderPredictions(state.predictions);
   if (state.efficiency) renderEfficiency(state.efficiency);
+  if (state.records) renderRecords(state.records);
   if (state.activities.length) {
     renderWeek();
     renderRecent();

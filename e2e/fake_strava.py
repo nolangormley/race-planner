@@ -70,4 +70,20 @@ def make_app():
     def streams(activity_id: int):
         return synthetic_streams(activity_id)
 
+    @app.get("/api/v3/activities/{activity_id}/laps")
+    def laps(activity_id: int):
+        data = synthetic_streams(activity_id)
+        velocity, heartrate = data["velocity_smooth"]["data"], data["heartrate"]["data"]
+        laps = []
+        for index, start in enumerate(range(0, RUN_SECONDS, 600)):
+            end = start + 600
+            distance = sum(velocity[start:end])
+            laps.append({
+                "lap_index": index + 1, "name": f"Lap {index + 1}", "start_index": start, "end_index": end - 1,
+                "elapsed_time": 600, "moving_time": 600, "distance": distance, "average_speed": distance / 600,
+                "max_speed": max(velocity[start:end]), "average_heartrate": sum(heartrate[start:end]) / 600,
+                "max_heartrate": max(heartrate[start:end]), "average_cadence": 85.0, "total_elevation_gain": 10.0,
+            })
+        return laps
+
     return app
