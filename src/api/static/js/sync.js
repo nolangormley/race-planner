@@ -72,7 +72,8 @@ function renderJob(job) {
     count.textContent = '';
   } else if (job.status === 'done') {
     const n = job.new_activities ?? 0;
-    detail.textContent = n === 0 ? 'Everything was already up to date.' : `${n} new ${n === 1 ? 'activity' : 'activities'} added.`;
+    if (job.kind === 'recompute') detail.textContent = 'Zones, training load and VO2 max recomputed for every activity.';
+    else detail.textContent = n === 0 ? 'Everything was already up to date.' : `${n} new ${n === 1 ? 'activity' : 'activities'} added.`;
     count.textContent = '';
   } else {
     detail.textContent = job.detail || '';
@@ -113,7 +114,8 @@ function apply(state) {
     stopPolling();
     renderJob(job);
     if (job.status === 'done') {
-      showToast(job.new_activities ? `Synced ${job.new_activities} new ${job.new_activities === 1 ? 'activity' : 'activities'}` : 'Strava is up to date');
+      if (job.kind === 'recompute') showToast('Metrics updated');
+      else showToast(job.new_activities ? `Synced ${job.new_activities} new ${job.new_activities === 1 ? 'activity' : 'activities'}` : 'Strava is up to date');
       document.dispatchEvent(new CustomEvent('strava:synced', { detail: job }));
       hideTimer = setTimeout(hidePanel, 6000);
     } else {

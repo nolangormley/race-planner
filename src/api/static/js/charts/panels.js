@@ -60,7 +60,7 @@ export function panelChart(container, initialSpec) {
       const button = htmlEl('button', '', legend);
       button.type = 'button';
       button.setAttribute('aria-pressed', String(!hidden.has(series.key)));
-      const key = htmlEl('span', `key${series.kind === 'columns' ? ' square' : ''}${series.dash ? ' dashed' : ''}`, button);
+      const key = htmlEl('span', `key${series.kind === 'columns' ? ' square' : ''}${series.points && series.width === 0 ? ' dot' : ''}${series.dash ? ' dashed' : ''}`, button);
       key.style.background = series.dash ? '' : colorOf(series.color);
       key.style.color = colorOf(series.color);
       const label = htmlEl('span', '', button);
@@ -186,6 +186,16 @@ export function panelChart(container, initialSpec) {
   }
 
   function drawLine(group, series, entry) {
+    if (series.points) {
+      series.values.forEach((value, index) => {
+        if (value == null) return;
+        svgEl('circle', {
+          cx: layout.xScale(spec.x[index]), cy: entry.yScale(value), r: 3.5,
+          fill: colorOf(series.color), stroke: 'var(--surface)', 'stroke-width': 1.5,
+        }, group);
+      });
+    }
+    if (series.width === 0) return;
     const path = linePath(series, entry);
     if (!path) return;
     if (series.area) {

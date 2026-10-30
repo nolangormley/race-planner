@@ -1,10 +1,11 @@
-"""Training status, VO2 max, pace zones and the dashboard analytics."""
+"""Training status, VO2 max, pace zones, race predictions, aerobic efficiency and the dashboard analytics."""
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import date, timedelta
 import logging
 
 from src.api.auth_routes import get_current_user
-from src.api.database import User
+from src.api.database import SessionLocal, Race, User
+from src.metrics import race_time_for_vdot
 from src.api.services.coach import get_ai_insight
 from src.api.services.llm import cached_call
 from src.api.deps import get_db_connection, DEFAULT_REST_HR
@@ -162,3 +163,110 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
         return {"error": str(e)}
     finally:
         con.close()
+
+
+RACE_DISTANCES_M = {
+    "5k": 5000.0, "5 mile": 8046.72, "10k": 10000.0, "10 mile": 16093.44,
+    "half marathon": 21097.5, "marathon": 42195.0,
+}
+STANDARD_DISTANCES = [("5K", 5000.0), ("10K", 10000.0), ("Half marathon", 21097.5), ("Marathon", 42195.0)]
+
+
+def goal_seconds(text):
+    """'1:45:00' or '45:00' to seconds; None when it does not parse."""
+    if not text:
+        return None
+    try:
+        parts = [int(part) for part in text.strip().split(":")]
+    except ValueError:
+        return None
+    if len(parts) == 2:
+        return parts[0] * 60 + parts[1]
+    if len(parts) == 3:
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    return None
+
+
+@router.get("/api/predictions/{user_id}")
+def get_predictions(user_id: int, current_user: User = Depends(get_current_user)):
+    """Race time predictions from the VO2 max estimate (Daniels' VDOT), for
+    the standard distances and for each of the user's upcoming races."""
+    # user_id here is the Strava athlete_id (see /status/{user_id} above).
+    if user_id != current_user.strava_athlete_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's predictions")
+    vo2 = calculate_vo2max(user_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
+    if not vo2 or not vo2.get("latest_vo2_max"):
+        raise HTTPException(status_code=404, detail="Predictions need steady runs with heart rate.")
+    vdot = vo2["latest_vo2_max"]
+
+    db = SessionLocal()
+    try:
+        races = db.query(Race).filter(Race.user_id == current_user.id, Race.race_date >= date.today()).order_by(Race.race_date).all()
+        race_rows = []
+        for race in races:
+            distance = RACE_DISTANCES_M.get((race.race_length or "").lower())
+            race_rows.append({
+                "id": race.id,
+                "name": race.name,
+                "race_length": race.race_length,
+                "race_date": str(race.race_date),
+                "goal_time": race.goal_time,
+                "goal_seconds": goal_seconds(race.goal_time),
+                "predicted_seconds": round(race_time_for_vdot(vdot, distance)) if distance else None,
+            })
+    finally:
+        db.close()
+
+    return {
+        "vdot": vdot,
+        "predictions": [
+            {"label": label, "distance_m": distance, "seconds": round(race_time_for_vdot(vdot, distance))}
+            for label, distance in STANDARD_DISTANCES
+        ],
+        "races": race_rows,
+    }
+
+
+@router.get("/api/efficiency/{user_id}")
+def get_efficiency(user_id: int, days: int = 180, current_user: User = Depends(get_current_user)):
+    """Aerobic efficiency on easy runs: meters per minute per heartbeat, per
+    run, with a rolling median. Easy means 60-82% of max heart rate and at
+    least 20 minutes. A rising line at the same heart rate is real fitness."""
+    # user_id here is the Strava athlete_id (see /status/{user_id} above).
+    if user_id != current_user.strava_athlete_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this athlete's efficiency")
+    days = max(30, min(days, 730))
+    con = get_db_connection()
+    try:
+        hr_max = float(current_user.max_hr or detected_max_hr(con, user_id))
+        hr_rest = current_user.resting_hr or DEFAULT_REST_HR
+        rows = con.execute("""
+            SELECT da.start_date_local::DATE AS day, da.activity_id, da.name, ae.efficiency_factor,
+                   da.average_heartrate, da.average_speed, da.moving_time
+            FROM dim_activity da
+            JOIN activity_effectiveness ae ON ae.activity_id = da.activity_id
+            WHERE da.athlete_id = ? AND da.type = 'Run' AND da.moving_time >= 1200
+              AND ae.efficiency_factor > 0 AND ae.intensity_factor BETWEEN 0.60 AND 0.82
+              AND da.start_date_local >= current_date - to_days(?)
+            ORDER BY da.start_date_local
+        """, [user_id, days]).fetchall()
+    finally:
+        con.close()
+
+    points = []
+    window = []
+    for day, activity_id, name, ef, avg_hr, avg_speed, moving_time in rows:
+        window.append(ef)
+        window = window[-7:]
+        points.append({
+            "date": str(day), "activity_id": activity_id, "name": name,
+            "ef": round(ef, 3), "trend": round(sorted(window)[len(window) // 2], 3),
+            "avg_hr": round(avg_hr) if avg_hr else None, "avg_speed": avg_speed, "moving_time": moving_time,
+        })
+    return {
+        "points": points,
+        "hr_max": hr_max,
+        "hr_rest": hr_rest,
+        # Middle of zone 2, the heart rate the UI converts efficiency to a pace at.
+        "reference_hr": round(hr_rest + 0.65 * (hr_max - hr_rest)),
+    }

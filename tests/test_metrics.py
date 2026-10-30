@@ -121,3 +121,14 @@ def test_add_grade_uses_climb_over_distance():
     graded = add_grade(frame)
     assert graded['grade'].iloc[-1] == pytest.approx(0.05, abs=1e-6)
     assert graded['grade'].iloc[0] == 0.0
+
+
+def test_vdot_race_predictions_match_daniels_tables():
+    from src.metrics import race_time_for_vdot, vdot_from_race
+    # Daniels' Running Formula, VDOT 50: 5K 19:57, 10K 41:21, half 1:31:35, marathon 3:10:49.
+    table = {5000: 19 * 60 + 57, 10000: 41 * 60 + 21, 21097.5: 91 * 60 + 35, 42195: 190 * 60 + 49}
+    for distance, expected in table.items():
+        assert race_time_for_vdot(50, distance) == pytest.approx(expected, rel=0.015)
+    assert vdot_from_race(5000, 19 * 60 + 57) == pytest.approx(50, rel=0.015)
+    # A fitter runner is faster at every distance.
+    assert race_time_for_vdot(55, 10000) < race_time_for_vdot(50, 10000)
