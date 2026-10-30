@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 
-from src.api.routers.strava_webhook import subscription_challenge, handle_event
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from src.api.routers import strava_webhook
+from src.api.routers.strava_webhook import subscription_challenge, handle_event, secret_matches
 
 
 def test_subscription_handshake_echoes_the_challenge_only_for_the_right_token():
@@ -41,3 +45,22 @@ def test_unknown_athletes_and_other_events_are_ignored():
     assert calls == [] and outcome.startswith("ignored")
     outcome, calls = _dispatch({"object_type": "athlete", "aspect_type": "update", "owner_id": 42, "updates": {"authorized": "false"}})
     assert calls == [("deauthorize", 7)]
+
+
+def test_secret_path_must_match_a_configured_token():
+    assert secret_matches("s3cret", "s3cret")
+    assert not secret_matches("guess", "s3cret")
+    assert not secret_matches("", "")                 # an unset token never matches
+
+
+def test_webhook_routes_answer_only_under_the_secret_path(monkeypatch):
+    monkeypatch.setenv("STRAVA_WEBHOOK_VERIFY_TOKEN", "s3cret")
+    app = FastAPI()
+    app.include_router(strava_webhook.router)
+    client = TestClient(app)
+    handshake = {"hub.mode": "subscribe", "hub.verify_token": "s3cret", "hub.challenge": "abc"}
+    assert client.get("/api/strava/webhook/s3cret", params=handshake).json() == {"hub.challenge": "abc"}
+    assert client.get("/api/strava/webhook/guess", params=handshake).status_code == 404
+    forged = {"object_type": "athlete", "aspect_type": "update", "owner_id": 42, "updates": {"authorized": "false"}}
+    assert client.post("/api/strava/webhook/guess", json=forged).status_code == 404
+

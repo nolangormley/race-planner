@@ -48,8 +48,8 @@ def test_every_router_is_mounted(app):
         ("DELETE", "/api/races/{race_id}/course"),
         ("GET", "/api/training-plan/{user_id}"),
         ("PUT", "/api/training-plan/entry/{entry_id}"),
-        ("GET", "/api/strava/webhook"),
-        ("POST", "/api/strava/webhook"),
+        ("GET", "/api/strava/webhook/{token}"),
+        ("POST", "/api/strava/webhook/{token}"),
         ("POST", "/login"),
         ("GET", "/strava-callback"),
     }
