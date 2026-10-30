@@ -22,6 +22,7 @@ const state = {
   efficiency: null,
   projection: null,
   records: null,
+  recovery: null,
   pmcDays: Number(localStorage.getItem('pmcWindow') || 42),
 };
 const charts = {};
@@ -592,6 +593,66 @@ async function loadPredictions() {
   renderPredictions(state.predictions);
 }
 
+// ---- Recovery (COROS) ----
+function hoursMinutes(minutes) {
+  if (minutes == null) return '–';
+  return `${Math.floor(minutes / 60)}h ${String(Math.round(minutes % 60)).padStart(2, '0')}m`;
+}
+
+function recoveryTile(label, value, unit, foot) {
+  const node = document.createElement('div');
+  node.className = 'recovery-tile';
+  node.innerHTML = `<div class="stat-label">${label}</div><div class="stat-value">${value}${unit ? `<small>${unit}</small>` : ''}</div><div class="stat-foot">${foot}</div>`;
+  return node;
+}
+
+function renderRecovery(data) {
+  const container = qs('#recovery-chart');
+  const tiles = qs('#recovery-tiles');
+  charts.recovery?.destroy();
+  container.replaceChildren();
+  tiles.replaceChildren();
+  if (!data || !data.days.length) {
+    renderEmpty(container, 'No COROS data yet', 'Connect COROS on your profile to see overnight HRV, resting heart rate and time in bed here.');
+    return;
+  }
+  const latest = data.latest;
+  tiles.append(
+    recoveryTile('Overnight HRV', latest.hrv ?? '–', 'ms', latest.hrv_baseline ? `baseline ${latest.hrv_baseline} ms` : ''),
+    recoveryTile('Resting heart rate', latest.rhr ?? '–', 'bpm', data.resting_hr_7d ? `7-night average ${data.resting_hr_7d} bpm` : ''),
+    recoveryTile('Time in bed', hoursMinutes(latest.time_in_bed_min), '', data.sleep_7d_min ? `7-night average ${hoursMinutes(data.sleep_7d_min)}` : ''),
+  );
+  qs('#recovery-sub').textContent = `The last ${data.days.length} nights from COROS. HRV at or above its baseline with a steady resting heart rate means you are absorbing the training.`;
+  charts.recovery = panelChart(container, {
+    x: data.days.map((night) => parseDate(night.day).getTime()),
+    xTicks: (min, max) => dateTicks(min, max, 6),
+    xFormat: fmtDateTick,
+    xTitle: (ts) => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+    tableXLabel: 'Night',
+    ariaLabel: 'Overnight HRV and resting heart rate by night',
+    legend: true,
+    table: true,
+    panels: [
+      {
+        kind: 'line', height: 140, yTicks: 3, yFormat: (value) => `${Math.round(value)} ms`,
+        series: [
+          { key: 'hrv', label: 'HRV', color: 'series-1', values: data.days.map((night) => night.hrv), points: true },
+          { key: 'baseline', label: 'Baseline', color: 'series-muted', values: data.days.map((night) => night.hrv_baseline), dash: true },
+        ],
+      },
+      {
+        kind: 'line', height: 110, yTicks: 3, yFormat: (value) => `${Math.round(value)} bpm`,
+        series: [{ key: 'rhr', label: 'Resting heart rate', color: 'series-2', values: data.days.map((night) => night.rhr), points: true }],
+      },
+    ],
+  });
+}
+
+async function loadRecovery() {
+  state.recovery = await fetchJson(`/api/recovery/${userId}?days=42`).catch(() => null);
+  renderRecovery(state.recovery);
+}
+
 async function loadEfficiency() {
   state.efficiency = await fetchJson(`/api/efficiency/${athleteId}?days=180`).catch(() => null);
   renderEfficiency(state.efficiency);
@@ -605,6 +666,7 @@ function loadAll() {
   loadPredictions();
   loadEfficiency();
   loadRecords();
+  loadRecovery();
   fetchJson(`/api/races/${userId}`).then(renderHeader).catch(() => renderHeader([]));
 }
 

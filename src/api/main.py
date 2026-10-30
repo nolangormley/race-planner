@@ -28,9 +28,12 @@ elif os.path.exists('.env.dev'):
 
 @asynccontextmanager
 async def lifespan(_app):
-    # Monday morning emails for users who opted in (services/digest.py).
-    from src.api.services.digest import start_scheduler
-    start_scheduler()
+    # Half-hourly passes: Monday digests (services/digest.py) and the nightly
+    # COROS pull (services/coros_sync.py).
+    from src.api.services.scheduler import start_scheduler
+    from src.api.services.digest import send_due_digests
+    from src.api.services.coros_sync import sync_due_coros
+    start_scheduler([send_due_digests, sync_due_coros])
     yield
 
 
@@ -110,6 +113,7 @@ from src.api.routers import profile  # noqa: E402
 from src.api.routers import plan  # noqa: E402
 from src.api.routers import strava_webhook  # noqa: E402
 from src.api.routers import digest  # noqa: E402
+from src.api.routers import coros  # noqa: E402
 
 app.include_router(pages.router)
 app.include_router(activities.router)
@@ -121,6 +125,7 @@ app.include_router(profile.router)
 app.include_router(plan.router)
 app.include_router(strava_webhook.router)
 app.include_router(digest.router)
+app.include_router(coros.router)
 
 # A new install has no warehouse until the first sync. Creating the schema
 # here means every page works from the first login instead of failing on

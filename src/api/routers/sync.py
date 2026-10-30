@@ -6,6 +6,8 @@ import logging
 from src.pipeline import sync_athlete
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User
+from src.api.deps import get_db_connection
+from src.api.services.metrics import resolve_resting_hr
 from src.api.services.sync import registry as sync_registry, SyncAlreadyRunning
 
 logger = logging.getLogger("race_planner.api")
@@ -31,7 +33,12 @@ def start_sync_for(user, queue_if_running=False):
     request's session is gone. With queue_if_running, a sync already in
     progress gets one more run queued instead of raising."""
     user_id, refresh_token = user.id, user.strava_refresh_token
-    resting_hr, max_hr = user.resting_hr, user.max_hr
+    con = get_db_connection()
+    try:
+        resting_hr = resolve_resting_hr(con, user)
+    finally:
+        con.close()
+    max_hr = user.max_hr
     run_sync = lambda progress: sync_athlete(refresh_token, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
     on_success = lambda new_token: record_sync_result(user_id, new_token)
     if queue_if_running:

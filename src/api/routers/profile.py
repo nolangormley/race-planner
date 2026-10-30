@@ -8,7 +8,7 @@ from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User
 from src.api.deps import get_db_connection, DEFAULT_REST_HR
 from src.api.schemas import ProfileUpdate
-from src.api.services.metrics import detected_max_hr
+from src.api.services.metrics import detected_max_hr, coros_resting_hr, resolve_resting_hr
 from src.api.services.sync import registry as sync_registry, SyncAlreadyRunning
 
 logger = logging.getLogger("race_planner.api")
@@ -20,17 +20,19 @@ def hr_profile(user_id: int, current_user: User = Depends(get_current_user)):
     """The resting and max heart rate in use, and where each comes from."""
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this profile")
-    detected = None
+    detected = from_coros = None
     if current_user.strava_athlete_id:
         con = get_db_connection()
         try:
             detected = detected_max_hr(con, current_user.strava_athlete_id)
+            from_coros = coros_resting_hr(con, current_user.strava_athlete_id)
         finally:
             con.close()
     return {
         "resting_hr": current_user.resting_hr,
         "max_hr": current_user.max_hr,
         "default_resting_hr": DEFAULT_REST_HR,
+        "coros_resting_hr": from_coros,
         "detected_max_hr": detected,
     }
 
@@ -68,7 +70,12 @@ def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = De
                 setattr(user, field, getattr(profile, field))
                 hr_changed = True
         db.commit()
-        resting_hr, max_hr, athlete_id = user.resting_hr, user.max_hr, user.strava_athlete_id
+        max_hr, athlete_id = user.max_hr, user.strava_athlete_id
+        con = get_db_connection()
+        try:
+            resting_hr = resolve_resting_hr(con, user)
+        finally:
+            con.close()
     except HTTPException:
         raise
     except Exception as e:

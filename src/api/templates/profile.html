@@ -205,6 +205,58 @@
         {% endif %}
     </section>
 
+    <section class="card" id="coros-card">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">COROS</h2>
+                <div class="card-sub">Overnight resting heart rate, HRV and time in bed from your watch, read from the Training Hub. Your password is used once to log in and is not stored.</div>
+            </div>
+        </div>
+        {% if user.strava_athlete_id %}
+        <div id="coros-linked" class="hidden">
+            <dl class="kv">
+                <dt>Status</dt><dd id="coros-status"></dd>
+                <dt>Nights</dt><dd id="coros-nights">–</dd>
+                <dt>Resting heart rate</dt><dd id="coros-rhr">–</dd>
+                <dt>Last sync</dt><dd id="coros-synced">–</dd>
+            </dl>
+            <p class="small hidden mt-2" id="coros-error"></p>
+            <div class="row wrap mt-4">
+                <button type="button" class="btn btn-primary btn-sm" id="coros-sync">Sync now</button>
+                <button type="button" class="btn btn-sm" id="coros-reconnect">Reconnect</button>
+                <button type="button" class="btn btn-sm btn-danger" id="coros-unlink">Unlink</button>
+            </div>
+        </div>
+        <form id="coros-form" class="stack hidden">
+            <div class="form-grid">
+                <div class="field">
+                    <label for="coros-email">Training Hub email</label>
+                    <input id="coros-email" class="input" type="email" required autocomplete="off">
+                </div>
+                <div class="field">
+                    <label for="coros-password">Password</label>
+                    <input id="coros-password" class="input" type="password" required autocomplete="off">
+                </div>
+                <div class="field">
+                    <label for="coros-region">Region</label>
+                    <select id="coros-region" class="input">
+                        <option value="us">Americas</option>
+                        <option value="eu">Europe</option>
+                        <option value="asia">Asia</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-actions">
+                <span class="status"></span>
+                <button type="button" class="btn hidden" id="coros-cancel">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="coros-link">Connect COROS</button>
+            </div>
+        </form>
+        {% else %}
+        <p class="muted small">Connect Strava first; COROS readings are stored with your Strava athlete.</p>
+        {% endif %}
+    </section>
+
     <section class="card span-2">
         <div class="card-head">
             <div>

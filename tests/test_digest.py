@@ -38,6 +38,7 @@ def test_compose_digest_reads_like_a_summary():
 
     subject, body = digest.compose_digest(
         "Nolan Gormley", date(2026, 11, 2), week, previous, plan, sessions, races, records, status, app_url="https://example.test",
+        recovery={"rhr": 48.2, "hrv": 61.7, "hrv_baseline": 58, "sleep_min": 430},
     )
 
     assert subject == "Your week in running: 28.4 mi over 4 runs"
@@ -48,6 +49,9 @@ def test_compose_digest_reads_like_a_summary():
     assert "Climb      1,250 ft" in body
     assert "3 of 4 planned sessions done, 28.4 mi of 30.0 mi planned" in body
     assert "Form       -7  (neutral)" in body
+    assert "Resting HR 48 bpm" in body
+    assert "HRV        62 ms (baseline 58)" in body
+    assert "In bed     7h 10m a night" in body
     assert "22:31 on Oct 28" in body
     assert "Tue  Tempo · 5 miles" in body
     assert "Winter Half · half marathon · in 83 days (Jan 24)" in body
