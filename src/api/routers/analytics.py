@@ -8,12 +8,13 @@ from src.api.database import SessionLocal, Race, User
 from src.metrics import race_time_for_vdot, riegel_prediction, BEST_EFFORT_DISTANCES_M
 from src.api.services.coach import get_ai_insight
 from src.api.services.llm import cached_call
-from src.api.deps import get_db_connection, DEFAULT_REST_HR
+from src.api.deps import get_db_connection
 from src.api.services.metrics import (
     calculate_training_status_logic,
     calculate_vo2max,
     calculate_pace_zones,
     detected_max_hr,
+    resolve_resting_hr,
 )
 
 logger = logging.getLogger("race_planner.api")
@@ -76,7 +77,7 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
     con = get_db_connection()
     try:
         hr_max = float(current_user.max_hr or detected_max_hr(con, user_id))
-        hr_rest = current_user.resting_hr or DEFAULT_REST_HR
+        hr_rest = resolve_resting_hr(con, current_user)
 
         # Bounded to the same 30-day window as load_dist below, and
         # percentages are computed here rather than left for the frontend to
@@ -276,7 +277,7 @@ def get_efficiency(user_id: int, days: int = 180, current_user: User = Depends(g
     con = get_db_connection()
     try:
         hr_max = float(current_user.max_hr or detected_max_hr(con, user_id))
-        hr_rest = current_user.resting_hr or DEFAULT_REST_HR
+        hr_rest = resolve_resting_hr(con, current_user)
         rows = con.execute("""
             SELECT da.start_date_local::DATE AS day, da.activity_id, da.name, ae.efficiency_factor,
                    da.average_heartrate, da.average_speed, da.moving_time

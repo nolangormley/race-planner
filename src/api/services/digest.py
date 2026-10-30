@@ -3,19 +3,17 @@ the plan went, fitness and form, new best efforts, this week's sessions
 and upcoming races. Sent on Monday mornings to users who opted in.
 
 compose_digest turns plain values into the email text so it can be tested
-without a database; build_digest gathers those values for one user. The
-scheduler is a daemon thread that checks every half hour.
+without a database; build_digest gathers those values for one user.
+send_due_digests is the pass the scheduler (services/scheduler.py) runs.
 """
 import logging
 import os
-import threading
-import time
 from datetime import date, datetime, timedelta
 
 from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry
-from src.api.deps import get_db_connection, DEFAULT_MAX_HR, DEFAULT_REST_HR
+from src.api.deps import get_db_connection, DEFAULT_MAX_HR
 from src.api.services.email import send_email
-from src.api.services.metrics import calculate_training_status_logic, detected_max_hr
+from src.api.services.metrics import calculate_training_status_logic, detected_max_hr, resolve_resting_hr
 from src.metrics import planned_distance_km
 
 logger = logging.getLogger("race_planner.digest")
@@ -23,7 +21,6 @@ logger = logging.getLogger("race_planner.digest")
 METERS_PER_MILE = 1609.344
 FEET_PER_METER = 3.28084
 SEND_HOUR = 6               # server local time, on Mondays
-CHECK_INTERVAL_S = 1800
 DISTANCE_LABELS = {1609: "1 mile", 3219: "2 miles", 5000: "5K", 8047: "5 miles", 10000: "10K", 16093: "10 miles", 21097: "Half marathon", 42195: "Marathon"}
 
 
@@ -79,7 +76,7 @@ def form_label(tsb):
     return "overreaching"
 
 
-def compose_digest(name, today, week, previous, plan, sessions, races, records, status, app_url=None):
+def compose_digest(name, today, week, previous, plan, sessions, races, records, status, app_url=None, recovery=None):
     """The subject and body of the digest as of today; last week is the
     Monday to Sunday before today's week.
 
@@ -88,6 +85,7 @@ def compose_digest(name, today, week, previous, plan, sessions, races, records, 
     sessions: this week's (date, workout_type, approximate_distance), rests left out.
     races: upcoming (name, race_length, race_date). records: (label, seconds, date)
     for best efforts set last week. status: the training status dict, or None.
+    recovery: last week's nightly averages from COROS {"rhr", "hrv", "hrv_baseline", "sleep_min"}, or None.
     """
     last_week = week_start(today) - timedelta(days=7)
     first_name = (name or "there").split()[0]
@@ -114,6 +112,16 @@ def compose_digest(name, today, week, previous, plan, sessions, races, records, 
             f"  Fatigue    {status['fatigue_atl']:.0f}",
             f"  Form       {status['form_tsb']:+.0f}  ({form_label(status['form_tsb'])})",
         ]
+
+    if recovery:
+        lines += ["", "Recovery (nightly averages)"]
+        if recovery.get("rhr"):
+            lines.append(f"  Resting HR {recovery['rhr']:.0f} bpm")
+        if recovery.get("hrv"):
+            baseline = f" (baseline {recovery['hrv_baseline']:.0f})" if recovery.get("hrv_baseline") else ""
+            lines.append(f"  HRV        {recovery['hrv']:.0f} ms{baseline}")
+        if recovery.get("sleep_min"):
+            lines.append(f"  In bed     {duration(recovery['sleep_min'] * 60)} a night")
 
     if records:
         lines += ["", "New bests"]
@@ -163,6 +171,17 @@ def new_records(con, athlete_id, start):
     return [(distance_label(row[0]), row[1], row[2]) for row in rows]
 
 
+def recovery_week(con, athlete_id, start):
+    """Nightly averages from COROS for the week from start, or None without readings."""
+    row = con.execute("""
+        SELECT AVG(rhr), AVG(hrv), AVG(hrv_baseline), AVG(time_in_bed_min)
+        FROM coros_daily WHERE athlete_id = ? AND day >= ? AND day < ?
+    """, [athlete_id, start, start + timedelta(days=7)]).fetchone()
+    if not row or (row[0] is None and row[1] is None and row[3] is None):
+        return None
+    return {"rhr": row[0], "hrv": row[1], "hrv_baseline": row[2], "sleep_min": row[3]}
+
+
 def plan_week(db, user_id, start):
     """Planned sessions, completed count and planned distance in the week from start."""
     plan_ids = [row[0] for row in db.query(TrainingPlan.id).filter(TrainingPlan.user_id == user_id).all()]
@@ -188,17 +207,19 @@ def build_digest(db, user, today=None):
     athlete_id = user.strava_athlete_id
 
     week = previous = {"runs": 0, "distance_m": 0.0, "moving_s": 0.0, "climb_m": 0.0}
-    records, status = [], None
+    records, status, recovery = [], None, None
     if athlete_id:
         con = get_db_connection()
         try:
             week = week_totals(con, athlete_id, last_week)
             previous = week_totals(con, athlete_id, last_week - timedelta(days=7))
             records = new_records(con, athlete_id, last_week)
+            recovery = recovery_week(con, athlete_id, last_week)
             hr_max = user.max_hr or detected_max_hr(con, athlete_id) or DEFAULT_MAX_HR
+            hr_rest = resolve_resting_hr(con, user)
         finally:
             con.close()
-        status = calculate_training_status_logic(athlete_id, hr_max, user.resting_hr or DEFAULT_REST_HR)
+        status = calculate_training_status_logic(athlete_id, hr_max, hr_rest)
 
     plan, _ = plan_week(db, user.id, last_week)
     _, this_week_entries = plan_week(db, user.id, this_week)
@@ -207,7 +228,7 @@ def build_digest(db, user, today=None):
         (race.name, race.race_length, race.race_date)
         for race in db.query(Race).filter(Race.user_id == user.id, Race.race_date >= today).order_by(Race.race_date).limit(3).all()
     ]
-    return compose_digest(user.name, today, week, previous, plan, sessions, races, records, status, app_url=os.getenv("APP_URL"))
+    return compose_digest(user.name, today, week, previous, plan, sessions, races, records, status, app_url=os.getenv("APP_URL"), recovery=recovery)
 
 
 # ---- Sending ----
@@ -240,21 +261,3 @@ def send_due_digests(now=None):
     finally:
         db.close()
     return sent
-
-
-def start_scheduler(interval_s=CHECK_INTERVAL_S):
-    """Starts the daemon thread that sends due digests. The first check is
-    one interval after start, so a restart never sends anything by itself."""
-    def loop():
-        while True:
-            time.sleep(interval_s)
-            try:
-                sent = send_due_digests()
-                if sent:
-                    logger.info("Sent %d weekly digest(s)", sent)
-            except Exception:
-                logger.exception("Weekly digest pass failed")
-
-    thread = threading.Thread(target=loop, name="weekly-digest", daemon=True)
-    thread.start()
-    return thread

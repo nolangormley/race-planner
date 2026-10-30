@@ -101,6 +101,13 @@ Set `APP_URL` for the link in the footer.
 Without `SMTP_HOST` the digest is written to the server log, and **Preview** on the profile page shows it in the browser.
 A thread in the app checks every half hour and sends after 06:00 server time on Mondays; **Send now** sends it straight away.
 
+## COROS (unofficial)
+The COROS card on the profile page links a COROS Training Hub account and pulls the nightly readings the watch uploads: resting heart rate, overnight HRV with its baseline, time in bed and training load.
+They show up in the Recovery card on the dashboard, and the 14-night median resting heart rate becomes the default for the heart-rate-reserve model whenever you have not typed a resting heart rate on your profile (a change of 2 bpm or more recomputes your metrics, as a profile change does).
+Linking sends your email and password to COROS once, the way their web app does; only the session token is stored.
+The app syncs once a day after 05:00 server time and the card has **Sync now**.
+This uses the private API behind the Training Hub web app, not a public one: COROS can change it at any time, it rate-limits, and logging in to the Training Hub elsewhere can invalidate the stored session, in which case the card asks you to reconnect.
+
 ## Repairing the warehouse
 
 Stream tables that were migrated with a rename in an earlier version keep a foreign-key reference to their old name inside DuckDB, and every delete on them fails at commit (`Table with name stream_x_new does not exist`). That breaks the activity Delete button and webhook deletes. Rebuild the file once, with the app stopped:

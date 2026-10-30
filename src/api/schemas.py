@@ -89,3 +89,9 @@ class PlanBuildRequest(BaseModel):
 
 class DigestSettings(BaseModel):
     enabled: bool
+
+
+class CorosLink(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(min_length=1, max_length=200)
+    region: str = Field(default="us", pattern="^(us|eu|asia)$")

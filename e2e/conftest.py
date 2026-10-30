@@ -19,6 +19,7 @@ import uvicorn
 from playwright.sync_api import sync_playwright
 
 from e2e.fake_strava import ATHLETE_ID, make_app
+from e2e.fake_coros import make_app as fake_coros_app
 
 REPO = Path(__file__).resolve().parents[1]
 DATABASE_URL = os.environ.get("E2E_DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/raceplanner_e2e")
@@ -69,7 +70,19 @@ def database():
 
 
 @pytest.fixture(scope="session")
-def app_server(tmp_path_factory, fake_strava, database):
+def fake_coros():
+    port = free_port()
+    server = uvicorn.Server(uvicorn.Config(fake_coros_app(), host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{port}"
+    wait_for(f"{base}/dashboard/query", 30)
+    yield base
+    server.should_exit = True
+
+
+@pytest.fixture(scope="session")
+def app_server(tmp_path_factory, fake_strava, fake_coros, database):
     port = free_port()
     workdir = tmp_path_factory.mktemp("app")
     env = {
@@ -77,6 +90,7 @@ def app_server(tmp_path_factory, fake_strava, database):
         "DATABASE_URL": database,
         "DB_PATH": str(workdir / "warehouse.duckdb"),
         "STRAVA_API_BASE": fake_strava,
+        "COROS_API_BASE": fake_coros,
         "STRAVA_CLIENT_ID": "e2e", "STRAVA_CLIENT_SECRET": "e2e",
         "SECRET_KEY": "e2e-secret", "SECURE_COOKIES": "false",
         "LLM_PROVIDER": "local",

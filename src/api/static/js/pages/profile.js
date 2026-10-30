@@ -27,7 +27,9 @@ function renderAthleteView() {
   else weight.textContent = '–';
   qs('#view-rest-hr').textContent = hrProfile.resting_hr
     ? `${hrProfile.resting_hr} bpm`
-    : `${hrProfile.default_resting_hr} bpm (default)`;
+    : hrProfile.coros_resting_hr
+      ? `${hrProfile.coros_resting_hr} bpm (from COROS)`
+      : `${hrProfile.default_resting_hr} bpm (default)`;
   qs('#view-max-hr').textContent = hrProfile.max_hr
     ? `${hrProfile.max_hr} bpm`
     : hrProfile.detected_max_hr ? `${Math.round(hrProfile.detected_max_hr)} bpm (highest recorded)` : '–';
@@ -283,6 +285,95 @@ qsa('#pref-theme button').forEach((button) => {
     renderPrefs();
   });
 });
+// ---- COROS ----
+function renderCoros(status) {
+  const linked = qs('#coros-linked');
+  const form = qs('#coros-form');
+  linked.classList.toggle('hidden', !status.linked);
+  form.classList.toggle('hidden', status.linked);
+  qs('#coros-cancel').classList.toggle('hidden', !status.linked);
+  if (!status.linked) return;
+  qs('#coros-status').innerHTML = status.error
+    ? '<span class="badge badge-warning">Needs attention</span>'
+    : '<span class="badge badge-good">Connected</span>';
+  qs('#coros-nights').textContent = status.nights ? `${status.nights} nights` : 'Nothing yet';
+  qs('#coros-rhr').textContent = status.resting_hr ? `${status.resting_hr} bpm, median of the last 14 nights` : '–';
+  qs('#coros-synced').textContent = status.synced_at ? relativeTime(status.synced_at) : 'Never';
+  const error = qs('#coros-error');
+  error.textContent = status.error || '';
+  error.classList.toggle('hidden', !status.error);
+}
+
+async function loadCoros() {
+  if (!qs('#coros-form')) return;
+  try {
+    renderCoros(await fetchJson(`/api/coros/${userId}`));
+  } catch {
+    // The card keeps its empty state.
+  }
+}
+
+function afterCorosSync(result) {
+  renderCoros(result.status);
+  loadHrProfile();
+  const nights = result.sync.rows;
+  showToast(result.sync.recompute_started
+    ? `COROS: ${nights} nights pulled, recomputing your metrics with the new resting heart rate`
+    : `COROS: ${nights} nights pulled`);
+  if (result.sync.recompute_started) refreshSync();
+}
+
+qs('#coros-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const status = qs('#coros-form .status');
+  const button = qs('#coros-link');
+  button.disabled = true;
+  status.textContent = 'Logging in and pulling the last year…';
+  try {
+    const result = await fetchJson(`/api/coros/${userId}/link`, {
+      method: 'POST',
+      body: { email: qs('#coros-email').value.trim(), password: qs('#coros-password').value, region: qs('#coros-region').value },
+    });
+    qs('#coros-password').value = '';
+    status.textContent = '';
+    afterCorosSync(result);
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+qs('#coros-cancel')?.addEventListener('click', () => {
+  qs('#coros-form').classList.add('hidden');
+  qs('#coros-linked').classList.remove('hidden');
+});
+qs('#coros-reconnect')?.addEventListener('click', () => {
+  qs('#coros-linked').classList.add('hidden');
+  qs('#coros-form').classList.remove('hidden');
+  qs('#coros-email').focus();
+});
+qs('#coros-sync')?.addEventListener('click', async (event) => {
+  event.target.disabled = true;
+  try {
+    afterCorosSync(await fetchJson(`/api/coros/${userId}/sync`, { method: 'POST' }));
+  } catch (error) {
+    showToast(error.message, 'error');
+    loadCoros();
+  } finally {
+    event.target.disabled = false;
+  }
+});
+qs('#coros-unlink')?.addEventListener('click', async () => {
+  if (!window.confirm('Unlink COROS and delete the stored nights?')) return;
+  try {
+    renderCoros(await fetchJson(`/api/coros/${userId}`, { method: 'DELETE' }));
+    loadHrProfile();
+    showToast('COROS unlinked');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+});
+
 // ---- Weekly digest ----
 async function loadDigest() {
   const digest = await fetchJson(`/api/digest/${userId}`);
@@ -347,3 +438,4 @@ loadRaces();
 loadSyncState();
 loadWarehouseStats();
 loadDigest();
+loadCoros();

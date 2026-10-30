@@ -41,6 +41,15 @@ class User(Base):
     weekly_digest = Column(Boolean, nullable=False, default=False, server_default="false")
     digest_sent_at = Column(DateTime, nullable=True)
 
+    # COROS Training Hub link (see services/coros_sync.py). Only the session
+    # token is kept, never the password.
+    coros_user_id = Column(String, nullable=True)
+    coros_access_token = Column(String, nullable=True)
+    coros_region = Column(String(8), nullable=True)
+    coros_linked_at = Column(DateTime, nullable=True)
+    coros_synced_at = Column(DateTime, nullable=True)
+    coros_error = Column(String, nullable=True)
+
     races = relationship("Race", back_populates="user", cascade="all, delete-orphan")
 
 class Race(Base):

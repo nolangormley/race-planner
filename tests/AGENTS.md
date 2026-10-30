@@ -8,6 +8,7 @@ Unit tests (`pytest`, no network, no database server). DuckDB tests use `StravaD
 - `test_sync.py`: the background job registry and its progress snapshots.
 - `test_app.py`: the route table, so a router that fails to mount or a removed endpoint that returns fails CI.
 - `test_digest.py`: when the weekly digest is due, the email text, and a scheduler pass sending once and stamping the user (SQLite in place of Postgres).
+- `test_coros.py`: the COROS client against a fake HTTP session (login hashing, chunked daily fetch, auth and rate-limit errors), and the sync into an in-memory warehouse: nights stored, resting heart rate default and recompute trigger, expired sessions, unlink.
 - `test_webhook.py`, `test_password_reset.py`, `test_llm_parsing.py`: the webhook dispatcher, reset tokens, LLM response cleaning.
 
 Browser tests live in `../e2e/`.

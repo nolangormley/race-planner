@@ -174,3 +174,21 @@ def test_weekly_digest_can_be_previewed_and_switched_on(app_server, registered_u
     page.wait_for_load_state("networkidle")
     assert page.is_checked("#digest-enabled")
 
+
+def test_coros_link_pulls_nights_and_fills_the_recovery_card(app_server, registered_user, page):
+    login(page, app_server)
+    page.goto(f"{app_server}/profile")
+    page.wait_for_load_state("networkidle")
+    page.fill("#coros-email", "coros@example.com")
+    page.fill("#coros-password", "coros-pass")
+    page.click("#coros-link")
+    page.wait_for_selector("#coros-linked:not(.hidden)")
+    assert "14 nights" in page.text_content("#coros-nights")
+    assert "bpm" in page.text_content("#coros-rhr")
+
+    page.goto(f"{app_server}/dashboard")
+    page.wait_for_selector("#recovery-tiles .recovery-tile")
+    tiles = page.text_content("#recovery-tiles")
+    assert "ms" in tiles and "bpm" in tiles
+    page.wait_for_selector("#recovery-chart svg")
+

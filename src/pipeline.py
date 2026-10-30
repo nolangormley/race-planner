@@ -319,6 +319,16 @@ class StravaDB:
                 FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
             );
         """)
+        # Nightly wellness readings from a linked COROS account (src/coros.py).
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS coros_daily (
+                athlete_id UBIGINT, day DATE,
+                rhr INTEGER, hrv INTEGER, hrv_baseline INTEGER, time_in_bed_min INTEGER,
+                training_load INTEGER, vo2max DOUBLE, stamina INTEGER,
+                fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (athlete_id, day)
+            );
+        """)
 
     def _table_has_pk(self, table_name):
         try:

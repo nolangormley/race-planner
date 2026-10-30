@@ -8,7 +8,7 @@ landed in Phase 2 (this module's calculate_training_status_logic already
 reflects that reconciliation).
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -402,3 +402,25 @@ def calculate_pace_zones(user_id: int, hr_max=None):
         "pace_zones_min_per_mile": result,
         "pace_zones_speeds": speeds
     }
+
+
+def coros_resting_hr(con, athlete_id, days=14):
+    """Median overnight resting heart rate from the linked COROS account over
+    the last nights, or None without readings."""
+    row = con.execute(
+        "SELECT median(rhr) FROM coros_daily WHERE athlete_id = ? AND rhr IS NOT NULL AND day >= ?",
+        [athlete_id, date.today() - timedelta(days=days)],
+    ).fetchone()
+    return int(round(row[0])) if row and row[0] else None
+
+
+def resolve_resting_hr(con, user):
+    """The resting heart rate the heart-rate-reserve model uses: the profile
+    value, else the COROS median, else the default."""
+    if user.resting_hr:
+        return user.resting_hr
+    if user.strava_athlete_id:
+        from_coros = coros_resting_hr(con, user.strava_athlete_id)
+        if from_coros:
+            return from_coros
+    return DEFAULT_REST_HR
