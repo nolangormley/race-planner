@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from e2e import fake_coros, fake_strava
 from src.coros import normalize_day
+from src.intervals import detect_structure
 
 
 def started(run):
@@ -52,6 +53,20 @@ def test_history_streams_agree_with_the_summary_and_laps_follow_the_miles():
     assert [lap["end_index"] + 1 for lap in laps[:-1]] == starts[1:]
     assert all(abs(lap["distance"] - fake_strava.METERS_PER_MILE) < 6 for lap in laps[:-1])
     assert abs(sum(lap["distance"] for lap in laps) - run["distance"]) < 1
+
+
+def test_history_workouts_are_what_the_interval_detector_finds():
+    """The demo shows detected structure on its fake runs, so the fakes must
+    read as intended: steady runs hold the effort over the hills."""
+    expected = {"Easy run": None, "Long run": None, "Tempo run": "tempo", "6 x 3 min": "intervals"}
+    for run in fake_strava.synthetic_runs(60, span_days=175)[:24]:
+        if run["name"] not in expected:
+            continue
+        streams = fake_strava.shaped_streams(run)
+        found = detect_structure(*(streams[key]["data"] for key in ("time", "velocity_smooth", "altitude", "heartrate")))
+        assert found["kind"] == expected[run["name"]], run["name"]
+        if found["kind"] == "intervals":
+            assert len(found["reps"]) == 6
 
 
 def test_activity_list_pages_and_honours_after():

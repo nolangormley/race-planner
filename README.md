@@ -211,7 +211,7 @@ sudo systemctl start race-planner
 
 The rebuild copies every table into a fresh schema (about 4 s for 400 activities) and leaves the original untouched until you swap it.
 
-## 🏗 Project Structure
+## Project structure
 
 *   **/src/api**: FastAPI backend, Jinja2 templates and the front end (plain ES modules, no build step).
 *   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB — including `run_analyze_effectiveness()`, which computes per-activity physiological metrics from activity streams.
@@ -226,7 +226,7 @@ The rebuild copies every table into a fresh schema (about 4 s for 400 activities
 
 Most code folders have a short `AGENTS.md` describing what is in them and how the files fit together.
 
-## 📊 Methodology
+## Methodology
 *   **Training Load**: Uses the Banister TRIMP model where `Fitness (CTL)` is a 42-day exponentially weighted moving average (EWMA) and `Fatigue (ATL)` is a 7-day EWMA.
 *   **Pace Zones**: Calculated (`calculate_pace_zones()` in `src/api/services/metrics.py`) from a 90-day rolling window: the threshold speed is the 80th percentile of speed samples in the 85–92% max-HR band (or, with fewer than 30 such samples, the 90th percentile of all speed samples as a fallback), then Coros-style zone bands are derived as percentages of that threshold pace.
 

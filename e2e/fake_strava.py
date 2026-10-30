@@ -137,12 +137,22 @@ def intensity_profile(run):
 
 def shaped_streams(run):
     """Streams for a history run that agree with its summary: velocity
-    averages average_speed and heart rate averages average_heartrate. Heart
-    rate follows effort with a lag and drifts up over the run; the course rolls."""
+    averages average_speed and heart rate averages average_heartrate. The
+    course rolls and the runner holds the effort, not the pace, on the hills
+    (the uphill and downhill cost of the ACSM equation the app uses). Heart
+    rate follows effort with a lag and drifts up over the run."""
     profile = intensity_profile(run)
     mean_level = sum(profile) / len(profile)
-    velocity = [run["average_speed"] * level / mean_level for level in profile]
     wobble = (run["id"] % 97) / 97 * 2 * math.pi
+    hills = 25 if run["workout_type"] == LONG_RUN else 12
+    seconds = range(len(profile))
+    altitude = [300 + hills * math.sin(second / 420 + wobble) + 4 * math.sin(second / 95 + 2 * wobble) for second in seconds]
+    paced = []
+    for second, level in enumerate(profile):
+        grade = (altitude[min(second + 1, len(profile) - 1)] - altitude[second]) / (run["average_speed"] * level / mean_level)
+        paced.append(level / (1 + 4.5 * max(grade, 0.0) + 2.25 * min(grade, 0.0)))
+    mean_paced = sum(paced) / len(paced)
+    velocity = [run["average_speed"] * value / mean_paced for value in paced]
     drift = 10 if run["workout_type"] == LONG_RUN else 5
     lagged, effort = [], -20.0
     for second, level in enumerate(profile):
@@ -150,13 +160,11 @@ def shaped_streams(run):
         effort += (target - effort) / 25
         lagged.append(effort)
     shift = run["average_heartrate"] - sum(lagged) / len(lagged)
-    hills = 25 if run["workout_type"] == LONG_RUN else 12
-    seconds = range(len(profile))
     return {
         "time": {"data": list(seconds)},
         "velocity_smooth": {"data": velocity},
         "heartrate": {"data": [round(value + shift) for value in lagged]},
-        "altitude": {"data": [300 + hills * math.sin(second / 420 + wobble) + 4 * math.sin(second / 95 + 2 * wobble) for second in seconds]},
+        "altitude": {"data": altitude},
         "cadence": {"data": [max(76, min(95, round(84 + 12 * (level - 1)))) for level in profile]},
         "moving": {"data": [True] * len(profile)},
     }
