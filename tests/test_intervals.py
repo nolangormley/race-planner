@@ -145,7 +145,7 @@ def test_the_warehouse_pass_stores_structure_once():
     add_run(db, 100, *track_session())
     add_run(db, 101, *run_from_blocks([(2400, 3.3, 150)]))
 
-    assert run_detect_structure(db) == 2
+    assert run_detect_structure(db, 1) == 2
     intervals = stored_structure(db.con, 100)
     assert intervals["kind"] == "intervals" and intervals["detected"]
     assert [rep["index"] for rep in intervals["reps"]] == [1, 2, 3, 4, 5, 6]
@@ -154,7 +154,7 @@ def test_the_warehouse_pass_stores_structure_once():
     assert stored_structure(db.con, 101) == {"kind": None, "detected": True, "reps": [], "recoveries": []}
     assert stored_structure(db.con, 999)["detected"] is False
 
-    assert run_detect_structure(db) == 0                                  # nothing new
+    assert run_detect_structure(db, 1) == 0                                  # nothing new
     db.con.execute("UPDATE dim_activity SET updated_at = now() + INTERVAL 1 MINUTE WHERE activity_id = 100")
-    assert run_detect_structure(db) == 1                                  # re-synced run is redone
+    assert run_detect_structure(db, 1) == 1                                  # re-synced run is redone
     assert db.con.execute("SELECT count(*) FROM activity_intervals WHERE activity_id = 100").fetchone()[0] == 6

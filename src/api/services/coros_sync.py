@@ -49,13 +49,13 @@ def client_for(user):
 def recompute_trigger(user):
     """A callable that recomputes the warehouse with a new resting heart
     rate, like a profile change does. Returns whether a job started."""
-    user_id, max_hr = user.id, user.max_hr
+    user_id, athlete_id, max_hr = user.id, user.strava_athlete_id, user.max_hr
 
     def start(resting_hr):
         try:
             sync_registry.start(
                 user_id,
-                run_sync=lambda progress: recompute_metrics(progress=progress, resting_hr=resting_hr, max_hr=max_hr),
+                run_sync=lambda progress: recompute_metrics(athlete_id, progress=progress, resting_hr=resting_hr, max_hr=max_hr),
                 on_success=lambda new_token: None,
                 kind="recompute",
             )

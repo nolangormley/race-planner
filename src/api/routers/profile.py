@@ -92,7 +92,7 @@ def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = De
         try:
             sync_registry.start(
                 user_id,
-                run_sync=lambda progress: recompute_metrics(progress=progress, resting_hr=resting_hr, max_hr=max_hr),
+                run_sync=lambda progress: recompute_metrics(athlete_id, progress=progress, resting_hr=resting_hr, max_hr=max_hr),
                 on_success=lambda new_token: None,
                 kind="recompute",
             )

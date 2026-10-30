@@ -74,20 +74,21 @@ def stored_structure(con, activity_id):
     return {"kind": row[0], "detected": True, "reps": reps, "recoveries": recoveries}
 
 
-def run_detect_structure(db, progress=None):
-    """Detects and stores the structure of every run whose streams the pass
-    has not seen since the run was last synced. Returns how many it looked at."""
+def run_detect_structure(db, athlete_id, progress=None):
+    """Detects and stores the structure of each of one athlete's runs whose
+    streams the pass has not seen since the run was last synced. Returns how
+    many it looked at."""
     con = db.con
     pending = [row[0] for row in con.execute("""
         SELECT da.activity_id FROM dim_activity da
-        WHERE da.type = 'Run'
+        WHERE da.athlete_id = ? AND da.type = 'Run'
           AND EXISTS (SELECT 1 FROM stream_velocity sv WHERE sv.activity_id = da.activity_id)
           AND NOT EXISTS (
               SELECT 1 FROM activity_structure ast
               WHERE ast.activity_id = da.activity_id AND ast.detected_at >= da.updated_at
           )
         ORDER BY da.start_date_local
-    """).fetchall()]
+    """, [athlete_id]).fetchall()]
     for position, activity_id in enumerate(pending, start=1):
         if progress:
             progress('structure', done=position, total=len(pending))
