@@ -4,8 +4,11 @@ from types import SimpleNamespace
 from src.api.database import SYNTHETIC_ATHLETE_BASE, User, synthetic_athlete_id
 from src.api.services.imports import import_files, move_to_strava_athlete
 from src.pipeline import StravaDB
+from src.structure_pass import stored_structure
 
 START = datetime(2026, 10, 25, 11, 0, tzinfo=timezone.utc)
+# Warm-up, 6 x 800 m at 4.5 m/s with 400 m jogs at 2.5 m/s, cool-down.
+TRACK_SESSION = [(600, 3.0)] + [(178, 4.5), (160, 2.5)] * 5 + [(178, 4.5), (600, 3.0)]
 
 
 def runner(**overrides):
@@ -38,6 +41,15 @@ def test_import_writes_the_activity_and_runs_the_analysis(make_gpx):
     assert count(con, "SELECT COUNT(*) FROM stream_heartrate WHERE activity_id = ?", [activity_id]) == 700
     assert count(con, "SELECT COUNT(*) FROM activity_effectiveness WHERE activity_id = ? AND trimp_banister > 0", [activity_id]) == 1
     assert count(con, "SELECT COUNT(*) FROM best_efforts WHERE activity_id = ?", [activity_id]) >= 2      # a mile and a 5K
+    assert stored_structure(con, activity_id)["detected"]                                               # steady: no kind, but looked at
+
+
+def test_an_imported_track_session_gets_its_reps_detected(make_gpx):
+    db = StravaDB(":memory:")
+    activity_id = import_files(db, runner(), [("track.gpx", make_gpx(START, blocks=TRACK_SESSION))])[0]["activity_id"]
+    structure = stored_structure(db.con, activity_id)
+    assert structure["kind"] == "intervals"
+    assert len(structure["reps"]) == 6
 
 
 def test_repeats_and_runs_already_synced_are_skipped(make_gpx):
@@ -67,7 +79,7 @@ def test_connecting_strava_moves_imported_rows_to_the_strava_id(make_gpx, tmp_pa
     path = str(tmp_path / "warehouse.duckdb")
     db = StravaDB(db_path=path)
     user = runner()
-    activity_id = import_files(db, user, [("track.gpx", make_gpx(START, points=300))])[0]["activity_id"]
+    activity_id = import_files(db, user, [("track.gpx", make_gpx(START, blocks=TRACK_SESSION))])[0]["activity_id"]
     db.con.execute("INSERT INTO coros_daily (athlete_id, day, rhr) VALUES (?, DATE '2026-10-25', 47)", [user.athlete_id])
     db.con.close()
 
@@ -77,8 +89,10 @@ def test_connecting_strava_moves_imported_rows_to_the_strava_id(make_gpx, tmp_pa
 
     con = StravaDB(db_path=path).con
     assert con.execute("SELECT athlete_id FROM dim_activity WHERE activity_id = ?", [activity_id]).fetchone() == (424242,)
-    assert count(con, "SELECT COUNT(*) FROM stream_heartrate WHERE activity_id = ?", [activity_id]) == 300
+    assert count(con, "SELECT COUNT(*) FROM stream_heartrate WHERE activity_id = ?", [activity_id]) == sum(seconds for seconds, _ in TRACK_SESSION) + 1
     assert count(con, "SELECT COUNT(*) FROM activity_effectiveness WHERE activity_id = ?", [activity_id]) == 1
+    assert stored_structure(con, activity_id)["kind"] == "intervals"
+    assert count(con, "SELECT COUNT(*) FROM activity_intervals WHERE activity_id = ?", [activity_id]) == 6
     assert con.execute("SELECT athlete_id, rhr FROM coros_daily").fetchall() == [(424242, 47)]
     assert con.execute("SELECT athlete_id, firstname FROM dim_athlete").fetchall() == [(424242, "Strava")]
     assert not con.execute("SELECT table_name FROM duckdb_tables() WHERE table_name LIKE 'move_%'").fetchall()

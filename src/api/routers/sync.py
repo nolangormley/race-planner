@@ -26,7 +26,7 @@ def record_sync_result(user_id, new_refresh_token):
         if new_refresh_token:
             user.strava_refresh_token = new_refresh_token
         user.strava_last_synced_at = datetime.utcnow()
-        athlete_id = user.strava_athlete_id
+        athlete_id = user.athlete_id
         db.commit()
     finally:
         db.close()

@@ -1,12 +1,16 @@
 """Imports FIT and GPX files for a user: parse, skip duplicates, write the
 activity with its streams and laps, then run the analysis passes a Strava
-sync runs so the new activities carry load, zones and best efforts. Also
-moves a file-only user's rows to their Strava id when they connect later.
+sync runs so the new activities carry structure, load, zones and best
+efforts. Also moves a file-only user's rows to their Strava id when they
+connect later.
 """
 import logging
 
 from src.importers import parse_file, UnreadableFile
-from src.pipeline import StravaDB, run_analyze_effectiveness, run_best_efforts, run_analyze_training_load
+from src.pipeline import (
+    ACTIVITY_CHILD_TABLES, StravaDB, run_analyze_effectiveness, run_analyze_training_load, run_best_efforts,
+)
+from src.structure_pass import run_detect_structure
 from src.api.database import synthetic_athlete_id
 from src.api.services.metrics import resolve_resting_hr
 
@@ -14,11 +18,6 @@ logger = logging.getLogger("race_planner.imports")
 
 DUPLICATE_WINDOW_S = 60
 SEX_CODES = {"male": "M", "female": "F"}
-# Every warehouse table with a foreign key to dim_activity.
-ACTIVITY_CHILD_TABLES = (
-    "stream_heartrate", "stream_velocity", "stream_cadence", "stream_watts", "stream_temperature",
-    "stream_altitude", "stream_moving", "activity_effectiveness", "best_efforts", "activity_laps",
-)
 
 
 def ensure_athlete(db, user):
@@ -74,6 +73,7 @@ def import_files(db, user, files):
         imported += 1
         results.append({"file": filename, "status": "imported", "activity_id": summary["id"], "name": summary["name"], "type": summary["type"]})
     if imported:
+        run_detect_structure(db)
         run_analyze_effectiveness(db, resting_hr=resolve_resting_hr(db.con, user), max_hr=user.max_hr)
         run_best_efforts(db)
         run_analyze_training_load(db)

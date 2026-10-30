@@ -97,8 +97,6 @@ def complete_matching_entries(db, con, user_id, athlete_id, today=None):
 
 
 def auto_complete_plan(user_id, athlete_id):
-    if not athlete_id:
-        return []
     db = SessionLocal()
     con = get_db_connection()
     try:

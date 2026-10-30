@@ -12,14 +12,23 @@ METERS_PER_DEGREE_LATITUDE = 111_194.93
 def make_gpx():
     """Builds GPX bytes for a straight run north: one point every spacing_s
     seconds at speed_mps from start (an aware UTC datetime), with heart rate
-    and cadence in Garmin's TrackPointExtension."""
-    def build(start, points=200, spacing_s=3, speed_mps=3.2, name=None):
-        latitude_step = speed_mps * spacing_s / METERS_PER_DEGREE_LATITUDE
+    and cadence in Garmin's TrackPointExtension. blocks, a list of
+    (seconds, speed_mps), replaces the steady pace with one point a second
+    at those speeds."""
+    def build(start, points=200, spacing_s=3, speed_mps=3.2, name=None, blocks=None):
+        if blocks:
+            spacing_s = 1
+            speeds = [speed for seconds, speed in blocks for _ in range(seconds)]
+        else:
+            speeds = [speed_mps] * (points - 1)
+        latitudes = [40.44]
+        for speed in speeds:
+            latitudes.append(latitudes[-1] + speed * spacing_s / METERS_PER_DEGREE_LATITUDE)
         rows = []
-        for index in range(points):
+        for index, latitude in enumerate(latitudes):
             moment = start + timedelta(seconds=index * spacing_s)
             rows.append(
-                f'<trkpt lat="{40.44 + index * latitude_step:.7f}" lon="-79.9959"><ele>{230 + index * 0.1:.1f}</ele>'
+                f'<trkpt lat="{latitude:.7f}" lon="-79.9959"><ele>{230 + index * 0.1:.1f}</ele>'
                 f'<time>{moment.strftime("%Y-%m-%dT%H:%M:%SZ")}</time><extensions><gpxtpx:TrackPointExtension>'
                 f'<gpxtpx:hr>{150 + index % 5}</gpxtpx:hr><gpxtpx:cad>86</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>'
             )

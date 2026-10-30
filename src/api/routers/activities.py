@@ -1,4 +1,4 @@
-"""Synced Strava activities: list, detail, streams, effectiveness, AI note, delete."""
+"""Synced and imported activities: list, detail, streams, effectiveness, AI note, delete."""
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 import numpy as np
@@ -8,6 +8,7 @@ from src.api.auth_routes import get_current_user
 from src.api.database import User
 from src.api.services.coach import get_ai_insight
 from src.api.deps import get_db_connection
+from src.pipeline import ACTIVITY_CHILD_TABLES
 from src.structure_pass import stored_structure
 from src.api.services.metrics import (
     calculate_training_status_logic,
@@ -17,29 +18,15 @@ logger = logging.getLogger("race_planner.api")
 router = APIRouter()
 
 
-# Fixed allowlist for delete_activity's per-table DELETE loop below. `table`
-# is never user input today, but interpolating it into an f-string SQL
-# statement is exactly the shape a real injection would take if that ever
-# changed — asserting against this constant enforces the safety in code
-# rather than by convention alone.
-# Every table keyed by activity_id, with dim_activity last: the others
-# reference it, so it can only go once they are empty for the activity.
-ACTIVITY_TABLES_TO_DELETE = (
-    "stream_altitude", "stream_cadence", "stream_heartrate", "stream_moving",
-    "stream_temperature", "stream_velocity", "stream_watts", "activity_effectiveness",
-    "best_efforts", "activity_laps", "activity_intervals", "activity_structure",
-    "dim_activity"
-)
-
 def delete_activity_rows(con, activity_id):
-    """Removes an activity from every warehouse table. Returns the tables
-    that failed, so the caller can decide how bad that is."""
+    """Removes an activity from every warehouse table: the child tables in
+    src.pipeline.ACTIVITY_CHILD_TABLES, then dim_activity, which they
+    reference. Returns the tables that failed, so the caller can decide how
+    bad that is."""
     failed_tables = []
-    for table in ACTIVITY_TABLES_TO_DELETE:
-        # table is never user input, but an f-string table name is exactly
-        # the shape a SQL injection would take, so the allowlist is enforced
-        # in code rather than by convention.
-        assert table in ACTIVITY_TABLES_TO_DELETE
+    # Table names come only from that fixed tuple: an f-string table name is
+    # the shape a SQL injection would take if one ever came from input.
+    for table in ACTIVITY_CHILD_TABLES + ("dim_activity",):
         try:
             con.execute(f"DELETE FROM {table} WHERE activity_id = ?", [activity_id])
         except Exception as e:
@@ -338,7 +325,7 @@ def get_activity_intervals(activity_id: int, current_user: User = Depends(get_cu
     try:
         owner_row = con.execute(
             "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
-            [activity_id, current_user.strava_athlete_id]
+            [activity_id, current_user.athlete_id]
         ).fetchone()
         if not owner_row:
             raise HTTPException(status_code=404, detail="Activity not found")

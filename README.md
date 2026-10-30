@@ -74,7 +74,7 @@ The running app holds the warehouse file open, so stop it first (`sudo systemctl
 
 ### Importing FIT and GPX files
 **Import files** on the Activities page reads `.fit` files (from Garmin, COROS, Wahoo and most other watches) and `.gpx` tracks, up to 20 files of 25 MB each at a time, without Strava.
-`src/importers.py` turns each file into the same activity, streams (heart rate, pace, cadence, elevation, power) and laps a Strava sync stores, and the import then runs the same analysis passes, so load, zones, best efforts and the dashboard include the new runs straight away.
+`src/importers.py` turns each file into the same activity, streams (heart rate, pace, cadence, elevation, power) and laps a Strava sync stores, and the import then runs the same analysis passes, so interval detection, load, zones, best efforts and the dashboard include the new runs straight away.
 A file is skipped when it was imported before (the activity id is a hash of the file) or when it starts within a minute of an activity you already have, so a run that also came in through Strava is not counted twice.
 You can use the app with imports only, without connecting Strava: your activities are stored under a placeholder athlete id, and they move to your Strava athlete id when you connect Strava later.
 
