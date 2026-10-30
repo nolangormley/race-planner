@@ -15,12 +15,14 @@ from dotenv import load_dotenv, set_key
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 from src.metrics import calculate_ctl_atl, calculate_tsb, get_target_category, best_effort_seconds, BEST_EFFORT_DISTANCES_M
+from src.structure_pass import run_detect_structure
 
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(env_path)
 
 # Overridable so tests can point the pipeline at a fake Strava.
 STRAVA_API_BASE = os.getenv("STRAVA_API_BASE", "https://www.strava.com")
+STRAVA_TIMEOUT_S = 30
 CLIENT_ID = os.getenv('STRAVA_CLIENT_ID')
 CLIENT_SECRET = os.getenv('STRAVA_CLIENT_SECRET')
 
@@ -41,6 +43,16 @@ STREAMS_TO_FETCH = ["time", "heartrate", "velocity_smooth", "cadence", "watts", 
 DEFAULT_MAX_HR = 192
 DEFAULT_REST_HR = 60
 
+# Every warehouse table keyed by activity_id apart from dim_activity, which
+# they all reference. Deleting or moving an activity handles these first.
+# A new activity-keyed table goes here (tests/test_warehouse_maintenance.py
+# fails until it does).
+ACTIVITY_CHILD_TABLES = (
+    "stream_altitude", "stream_cadence", "stream_heartrate", "stream_moving",
+    "stream_temperature", "stream_velocity", "stream_watts", "activity_effectiveness",
+    "best_efforts", "activity_laps", "activity_intervals", "activity_structure",
+)
+
 
 class StravaAuthError(Exception):
     """Raised when a specific stored Strava refresh_token is invalid/revoked
@@ -58,6 +70,7 @@ def _request_with_retry(method, url, max_retries=3, **kwargs):
     ingestion partway through.
     """
     resp = None
+    kwargs.setdefault("timeout", STRAVA_TIMEOUT_S)
     for attempt in range(max_retries + 1):
         resp = method(url, **kwargs)
         if resp.status_code == 429 and attempt < max_retries:
@@ -111,7 +124,7 @@ class StravaManager:
     def exchange_code_for_token(self, code):
         data = requests.post(f"{STRAVA_API_BASE}/oauth/token", data={
             'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 'code': code, 'grant_type': 'authorization_code'
-        }).json()
+        }, timeout=STRAVA_TIMEOUT_S).json()
         self.save_refresh_token(data['refresh_token'])
         return data['access_token']
 
@@ -124,7 +137,7 @@ class StravaManager:
             print("Refreshing access token...")
             resp = requests.post(f"{STRAVA_API_BASE}/oauth/token", data={
                 'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 'refresh_token': refresh_token, 'grant_type': 'refresh_token'
-            })
+            }, timeout=STRAVA_TIMEOUT_S)
             if resp.status_code in [400, 401]:
                 print(f"Refresh token invalid (status {resp.status_code}). Starting OAuth flow...")
                 return self.run_oauth_flow()
@@ -157,7 +170,7 @@ class StravaManager:
         resp = requests.post(f"{STRAVA_API_BASE}/oauth/token", data={
             'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
             'refresh_token': refresh_token, 'grant_type': 'refresh_token'
-        })
+        }, timeout=STRAVA_TIMEOUT_S)
         if resp.status_code in (400, 401):
             raise StravaAuthError(
                 "Strava refresh token is invalid or has been revoked. Reconnect Strava to sync again."
@@ -319,6 +332,32 @@ class StravaDB:
                 FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
             );
         """)
+        # Detected workout structure (src/intervals.py via src/structure_pass.py):
+        # one row per run, kind NULL when nothing was found, and the reps.
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS activity_structure (
+                activity_id UBIGINT PRIMARY KEY, kind VARCHAR, rep_count INTEGER,
+                detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
+            );
+        """)
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS activity_intervals (
+                activity_id UBIGINT, rep_index INTEGER, start_offset INTEGER, end_offset INTEGER,
+                distance DOUBLE, moving_time INTEGER, average_speed DOUBLE,
+                average_heartrate DOUBLE, max_heartrate DOUBLE, recovery_time INTEGER,
+                PRIMARY KEY (activity_id, rep_index),
+                FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
+            );
+        """)
+        # The workout library. src/scrape_coros_workouts.py fills it and
+        # creates the same table when it runs on its own.
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS dim_workouts (
+                workout_id VARCHAR PRIMARY KEY, name VARCHAR, description VARCHAR,
+                category VARCHAR, tags VARCHAR, url VARCHAR, source VARCHAR DEFAULT 'COROS'
+            );
+        """)
         # Nightly wellness readings from a linked COROS account (src/coros.py).
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS coros_daily (
@@ -446,6 +485,14 @@ class StravaDB:
 
     def activity_exists(self, act_id): return self.con.execute("SELECT 1 FROM dim_activity WHERE activity_id = ?", [act_id]).fetchone() is not None
 
+    def activity_changed(self, a):
+        """True when Strava's summary differs from the stored row in a field
+        upsert_activity writes: a renamed run, a ride corrected to a run."""
+        row = self.con.execute(
+            f"SELECT {', '.join(SUMMARY_FIELDS)} FROM dim_activity WHERE activity_id = ?", [a.get('id')]
+        ).fetchone()
+        return row is not None and any(stored != a.get(field) for stored, field in zip(row, SUMMARY_FIELDS))
+
     def activity_has_streams(self, act_id):
         # Checks all seven stream tables, not just stream_velocity — an
         # activity genuinely lacking GPS/velocity data (treadmill run,
@@ -457,6 +504,13 @@ class StravaDB:
             if self.con.execute(f"SELECT 1 FROM {tbl} WHERE activity_id = ? LIMIT 1", [act_id]).fetchone() is not None:
                 return True
         return False
+
+# The summary fields upsert_activity updates on an existing row.
+SUMMARY_FIELDS = (
+    "name", "type", "distance", "moving_time", "elapsed_time", "total_elevation_gain",
+    "average_speed", "max_speed", "average_heartrate",
+)
+
 
 def _no_progress(phase, **info):
     pass
@@ -487,7 +541,7 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None, pro
 
     try:
         print("Fetching athlete profile...")
-        athlete = requests.get(f"{STRAVA_API_BASE}/api/v3/athlete", headers={'Authorization': f'Bearer {access_token}'}).json()
+        athlete = requests.get(f"{STRAVA_API_BASE}/api/v3/athlete", headers={'Authorization': f'Bearer {access_token}'}, timeout=STRAVA_TIMEOUT_S).json()
         db.upsert_athlete(athlete)
         print(f"Athlete: {athlete.get('firstname')} {athlete.get('lastname')}")
     except Exception as e:
@@ -529,6 +583,10 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None, pro
             continue
         if not db.activity_exists(act_id) or not db.activity_has_streams(act_id):
             pending.append(act)
+        elif db.activity_changed(act):
+            # Edited on Strava since it was stored. The new updated_at makes
+            # the metric passes redo this activity.
+            db.upsert_activity(act)
 
     # Pass 2 makes one streams request per new (or stream-less) activity.
     for position, act in enumerate(pending, start=1):
@@ -590,15 +648,17 @@ def calculate_aerobic_decoupling(hr_times, hr_values, vel_times, vel_values):
     if ef1 == 0: return 0
     return ((ef1 - ef2) / ef1) * 100
 
-def run_analyze_effectiveness(db, progress=None, resting_hr=None, max_hr=None):
+def run_analyze_effectiveness(db, athlete_id, progress=None, resting_hr=None, max_hr=None):
     """Computes per-activity TRIMP/EF/zones/decoupling into
     activity_effectiveness. This is the sole implementation of that math in
     the codebase (see calculate_training_status_logic in src/api/main.py,
     which now just aggregates this table's output) — unify any future change
     here rather than adding a second copy elsewhere.
 
-    Only activities that are new, re-synced since their last computation, or
-    computed against a different heart rate profile are processed. Each row
+    Works on one athlete's activities, with that athlete's heart rate
+    profile. Only activities that are new, re-synced since their last
+    computation, or computed against a different heart rate profile are
+    processed. Each row
     records the max and resting heart rate it used, so changing either
     recomputes every activity on the next run.
 
@@ -622,9 +682,10 @@ def run_analyze_effectiveness(db, progress=None, resting_hr=None, max_hr=None):
     # from a rest day).
     # Zones and intensity are relative to the athlete's max heart rate (set
     # on the profile, or the highest on record), the same figure the API uses.
-    athlete_max_hr = dict(con.execute(
-        "SELECT athlete_id, MAX(max_heartrate) FROM dim_activity WHERE max_heartrate > 100 GROUP BY athlete_id"
-    ).fetchall())
+    recorded_max_hr = con.execute(
+        "SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id = ? AND max_heartrate > 100", [athlete_id]
+    ).fetchone()[0]
+    user_max_hr = max_hr or recorded_max_hr or DEFAULT_MAX_HR
 
     candidates = con.execute("""
         SELECT da.activity_id, da.name, da.start_date_local, da.athlete_id, da.average_speed, ath.sex,
@@ -634,20 +695,20 @@ def run_analyze_effectiveness(db, progress=None, resting_hr=None, max_hr=None):
         FROM dim_activity da
         JOIN dim_athlete ath ON da.athlete_id = ath.athlete_id
         LEFT JOIN activity_effectiveness ae ON ae.activity_id = da.activity_id
-        WHERE EXISTS (SELECT 1 FROM stream_heartrate sh WHERE sh.activity_id = da.activity_id)
-           OR (da.average_heartrate IS NOT NULL AND da.average_heartrate > 0)
-    """).fetchall()
+        WHERE da.athlete_id = ?
+          AND (EXISTS (SELECT 1 FROM stream_heartrate sh WHERE sh.activity_id = da.activity_id)
+               OR (da.average_heartrate IS NOT NULL AND da.average_heartrate > 0))
+    """, [athlete_id]).fetchall()
     acts = []
     for row in candidates:
-        athlete_id, computed, used_max, used_rest, resynced = row[3], row[8], row[9], row[10], row[11]
-        user_max_hr = max_hr or athlete_max_hr.get(athlete_id) or DEFAULT_MAX_HR
+        computed, used_max, used_rest, resynced = row[8], row[9], row[10], row[11]
         if computed and not resynced and used_max == user_max_hr and used_rest == rest_hr:
             continue
         acts.append(row[:8] + (user_max_hr,))
 
     processed = 0
     total = len(acts)
-    for i, (act_id, name, date, athlete_id, avg_speed, sex, avg_hr_summary, moving_time, user_max_hr) in enumerate(acts):
+    for i, (act_id, name, date, _, avg_speed, sex, avg_hr_summary, moving_time, user_max_hr) in enumerate(acts):
         progress('metrics', done=i, total=total)
         if i % 10 == 0:
             print(f"  Processing {i}/{total}: {name}...")
@@ -723,23 +784,29 @@ def run_analyze_effectiveness(db, progress=None, resting_hr=None, max_hr=None):
             continue
     return processed
 
-def run_best_efforts(db, progress=None):
-    """Stores each run's fastest mile, 5K, 10K and half marathon from its
-    velocity stream (see src.metrics.best_effort_seconds). Only runs without
-    a row yet are processed; a re-synced run gets fresh rows."""
+def run_best_efforts(db, athlete_id, progress=None):
+    """Stores the fastest mile, 5K, 10K and half marathon of each of one
+    athlete's runs from its velocity stream (see src.metrics.best_effort_seconds).
+    Only runs without a row yet are processed; a re-synced run gets fresh rows."""
     if progress is None:
         progress = _no_progress
     con = db.con
+    # A run edited into another sport on Strava keeps no best efforts.
+    con.execute("""
+        DELETE FROM best_efforts WHERE activity_id IN (
+            SELECT activity_id FROM dim_activity WHERE athlete_id = ? AND type <> 'Run'
+        )
+    """, [athlete_id])
     pending = [row[0] for row in con.execute("""
         SELECT da.activity_id FROM dim_activity da
-        WHERE da.type = 'Run'
+        WHERE da.athlete_id = ? AND da.type = 'Run'
           AND EXISTS (SELECT 1 FROM stream_velocity sv WHERE sv.activity_id = da.activity_id)
           AND NOT EXISTS (
               SELECT 1 FROM best_efforts be
               WHERE be.activity_id = da.activity_id AND be.computed_at >= da.updated_at
           )
         ORDER BY da.start_date_local
-    """).fetchall()]
+    """, [athlete_id]).fetchall()]
     for position, act_id in enumerate(pending):
         progress('metrics', done=position, total=len(pending), name='best efforts')
         rows = con.execute(
@@ -775,8 +842,9 @@ def run_analyze_training_load(db):
     return {"CTL": today['CTL'], "ATL": today['ATL'], "TSB": today['TSB']}
 
 
-def run_fetch_missing_laps(manager, db, access_token, progress=None, limit=60):
-    """Fetches laps for runs synced before laps were stored, a batch per sync
+def run_fetch_missing_laps(manager, db, access_token, athlete_id, progress=None, limit=60):
+    """Fetches laps for one athlete's runs synced before laps were stored, with
+    that athlete's token, a batch per sync
     so a big backlog stays inside Strava's rate limit (100 requests per 15
     minutes). An activity is marked fetched even when it has no laps."""
     if progress is None:
@@ -784,11 +852,11 @@ def run_fetch_missing_laps(manager, db, access_token, progress=None, limit=60):
     con = db.con
     pending = [row[0] for row in con.execute("""
         SELECT da.activity_id FROM dim_activity da
-        WHERE da.type = 'Run' AND da.laps_fetched_at IS NULL
+        WHERE da.athlete_id = ? AND da.type = 'Run' AND da.laps_fetched_at IS NULL
           AND EXISTS (SELECT 1 FROM stream_velocity sv WHERE sv.activity_id = da.activity_id)
         ORDER BY da.start_date_local DESC
         LIMIT ?
-    """, [limit]).fetchall()]
+    """, [athlete_id, limit]).fetchall()]
     for position, act_id in enumerate(pending, start=1):
         progress('laps', done=position, total=len(pending))
         times = [row[0] for row in con.execute(
@@ -805,17 +873,17 @@ def run_fetch_missing_laps(manager, db, access_token, progress=None, limit=60):
     return len(pending)
 
 
-def recompute_metrics(db_path=None, progress=None, resting_hr=None, max_hr=None):
-    """Re-runs the effectiveness and training-load passes without talking to
-    Strava, for when the athlete changes their heart rate profile. Returns
-    (None, 0) so it runs under the same job runner as sync_athlete."""
+def recompute_metrics(athlete_id, db_path=None, progress=None, resting_hr=None, max_hr=None):
+    """Re-runs one athlete's effectiveness and training-load passes without
+    talking to Strava, for when the athlete changes their heart rate profile.
+    Returns (None, 0) so it runs under the same job runner as sync_athlete."""
     if progress is None:
         progress = _no_progress
     db = StravaDB(db_path=db_path or DB_PATH)
     try:
         progress('metrics')
-        run_analyze_effectiveness(db, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
-        run_best_efforts(db, progress=progress)
+        run_analyze_effectiveness(db, athlete_id, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+        run_best_efforts(db, athlete_id, progress=progress)
         progress('load')
         run_analyze_training_load(db)
     finally:
@@ -823,7 +891,7 @@ def recompute_metrics(db_path=None, progress=None, resting_hr=None, max_hr=None)
     return None, 0
 
 
-def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None, resting_hr=None, max_hr=None):
+def sync_athlete(refresh_token, athlete_id, lookback_days=180, db_path=None, progress=None, resting_hr=None, max_hr=None):
     """Runs one full ingest + effectiveness + training-load cycle for a
     single athlete, using their own stored refresh_token — this is what
     backs the web app's on-demand "Sync Strava Now" action
@@ -837,7 +905,7 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None, 
     response rather than opening a browser.
 
     progress(phase, **info) receives the phases 'auth', 'listing', 'streams',
-    'metrics' and 'load' in that order; see src.api.services.sync for the
+    'laps', 'structure', 'metrics' and 'load' in that order; see src.api.services.sync for the
     consumer.
 
     NOTE: DuckDB allows only one read-write connection to a file at a time.
@@ -864,10 +932,11 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None, 
     db = StravaDB(db_path=db_path or DB_PATH)
     try:
         count = ingest_data(manager, db, access_token, lookback_days=lookback_days, reauth_fn=_reauth_unavailable, progress=progress)
-        run_fetch_missing_laps(manager, db, access_token, progress=progress)
+        run_fetch_missing_laps(manager, db, access_token, athlete_id, progress=progress)
+        run_detect_structure(db, athlete_id, progress=progress)
         progress('metrics')
-        run_analyze_effectiveness(db, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
-        run_best_efforts(db, progress=progress)
+        run_analyze_effectiveness(db, athlete_id, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+        run_best_efforts(db, athlete_id, progress=progress)
         progress('load')
         run_analyze_training_load(db)
     finally:
@@ -895,8 +964,11 @@ def main():
     count = ingest_data(manager, db, access_token, lookback_days=lookback_days)
     print(f"Ingestion complete ({count} new activities).")
     
+    athlete_id = requests.get(
+        f"{STRAVA_API_BASE}/api/v3/athlete", headers={'Authorization': f'Bearer {access_token}'}, timeout=STRAVA_TIMEOUT_S
+    ).json()['id']
     print("Analyzing effectiveness...", end='', flush=True)
-    eff_count = run_analyze_effectiveness(db)
+    eff_count = run_analyze_effectiveness(db, athlete_id)
     print(f" Done ({eff_count} activities processed).")
     
     print("Calculating training load...", end='', flush=True)

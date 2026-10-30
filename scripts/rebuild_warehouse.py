@@ -58,6 +58,9 @@ def main(source):
         count = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
         old_count = con.execute(f"SELECT count(*) FROM old.{table}").fetchone()[0]
         print(f"{table}: {count} rows" + ("" if count == old_count else f" (source had {old_count})"))
+    left_behind = sorted(existing - set(tables) - {"schema_migrations"})
+    if left_behind:
+        print(f"not in the current schema, not copied: {', '.join(left_behind)}")
     con.execute("INSERT OR IGNORE INTO schema_migrations (name) SELECT name FROM old.schema_migrations")
     con.execute("DETACH old")
     con.close()

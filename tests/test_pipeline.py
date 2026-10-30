@@ -109,7 +109,7 @@ def test_run_analyze_effectiveness_skips_null_hr_samples_without_crashing():
     # A NULL sample (sensor dropout) mixed in with real ones used to raise
     # TypeError from an unfiltered sum(), aborting the whole batch.
     db.con.execute("INSERT INTO stream_heartrate VALUES (100, 0, 120), (100, 1, NULL), (100, 2, 130)")
-    processed = run_analyze_effectiveness(db)
+    processed = run_analyze_effectiveness(db, 1)
     assert processed == 1
     row = db.con.execute("SELECT trimp_banister FROM activity_effectiveness WHERE activity_id = 100").fetchone()
     assert row is not None and row[0] >= 0
@@ -122,7 +122,7 @@ def test_run_analyze_effectiveness_falls_back_to_average_hr_when_no_stream():
     # the candidate-activity query required a stream via INNER JOIN.
     db = _make_db()
     db.con.execute("UPDATE dim_activity SET average_heartrate = 135 WHERE activity_id = 100")
-    processed = run_analyze_effectiveness(db)
+    processed = run_analyze_effectiveness(db, 1)
     assert processed == 1
     row = db.con.execute("SELECT trimp_banister FROM activity_effectiveness WHERE activity_id = 100").fetchone()
     assert row is not None and row[0] > 0
@@ -131,7 +131,7 @@ def test_run_analyze_effectiveness_falls_back_to_average_hr_when_no_stream():
 def test_run_analyze_effectiveness_excludes_activity_with_no_hr_data_at_all():
     db = _make_db()
     # No stream, no average_heartrate — genuinely nothing to compute from.
-    processed = run_analyze_effectiveness(db)
+    processed = run_analyze_effectiveness(db, 1)
     assert processed == 0
 
 
@@ -198,6 +198,34 @@ def test_ingest_only_fetches_streams_for_new_activities_and_reports_progress(mon
     assert db.activity_exists(101) and db.activity_has_streams(101)
 
 
+def test_ingest_refreshes_an_activity_edited_on_strava(monkeypatch):
+    db = _make_db()
+    db.insert_streams(100, {'time': {'data': [0, 1]}, 'heartrate': {'data': [120, 121]}})
+    listing = {'id': 100, 'name': 'Morning Ride', 'type': 'Ride', 'start_date_local': '2026-01-01T08:00:00Z', 'distance': 8000.0, 'moving_time': 1800}
+    _ingest(monkeypatch, _FakeStrava([listing]), db)
+    stored_at = db.con.execute("SELECT updated_at FROM dim_activity WHERE activity_id = 100").fetchone()[0]
+
+    # Unchanged on Strava: the row is left alone, so the metric passes skip it.
+    _ingest(monkeypatch, _FakeStrava([listing]), db)
+    assert db.con.execute("SELECT updated_at FROM dim_activity WHERE activity_id = 100").fetchone()[0] == stored_at
+
+    # Corrected to a run on Strava: the summary follows without refetching streams.
+    strava = _FakeStrava([{**listing, 'name': 'Morning Run', 'type': 'Run'}])
+    assert _ingest(monkeypatch, strava, db) == 0
+    assert strava.stream_calls == []
+    name, kind, updated_at = db.con.execute("SELECT name, type, updated_at FROM dim_activity WHERE activity_id = 100").fetchone()
+    assert (name, kind) == ('Morning Run', 'Run') and updated_at > stored_at
+
+
+def test_best_efforts_go_when_a_run_becomes_another_sport():
+    import src.pipeline as pipeline
+    db = _make_db()
+    db.con.execute("INSERT INTO best_efforts (activity_id, distance_m, seconds) VALUES (100, 5000, 1500)")
+    db.con.execute("UPDATE dim_activity SET type = 'Walk' WHERE activity_id = 100")
+    pipeline.run_best_efforts(db, 1)
+    assert db.con.execute("SELECT COUNT(*) FROM best_efforts").fetchone()[0] == 0
+
+
 def test_ingest_retries_the_activity_list_after_reauth(monkeypatch):
     db = _make_db()
     strava = _FakeStrava(
@@ -229,7 +257,7 @@ def test_effectiveness_zones_use_the_athletes_max_not_the_activitys():
     """)
     db.insert_streams(100, {'time': {'data': list(range(10))}, 'heartrate': {'data': [150] * 10}})
 
-    run_analyze_effectiveness(db)
+    run_analyze_effectiveness(db, 1)
 
     zones = db.con.execute(
         "SELECT zone_1_sec, zone_2_sec, zone_3_sec, zone_4_sec, zone_5_sec FROM activity_effectiveness WHERE activity_id = 100"
@@ -246,21 +274,40 @@ def test_effectiveness_only_recomputes_when_something_changed():
     db.con.execute("UPDATE dim_activity SET max_heartrate = 196 WHERE activity_id = 100")
     db.insert_streams(100, {'time': {'data': list(range(10))}, 'heartrate': {'data': [150] * 10}})
 
-    assert run_analyze_effectiveness(db) == 1
-    assert run_analyze_effectiveness(db) == 0          # nothing new
+    assert run_analyze_effectiveness(db, 1) == 1
+    assert run_analyze_effectiveness(db, 1) == 0          # nothing new
 
     # A different heart rate profile invalidates every row.
-    assert run_analyze_effectiveness(db, max_hr=190, resting_hr=50) == 1
+    assert run_analyze_effectiveness(db, 1, max_hr=190, resting_hr=50) == 1
     row = db.con.execute("SELECT hr_max_used, hr_rest_used FROM activity_effectiveness WHERE activity_id = 100").fetchone()
     assert row == (190, 50)
-    assert run_analyze_effectiveness(db, max_hr=190, resting_hr=50) == 0
+    assert run_analyze_effectiveness(db, 1, max_hr=190, resting_hr=50) == 0
 
     # A re-synced activity (newer updated_at) is recomputed.
     db.con.execute("UPDATE dim_activity SET updated_at = now() + INTERVAL 1 MINUTE WHERE activity_id = 100")
-    assert run_analyze_effectiveness(db, max_hr=190, resting_hr=50) == 1
+    assert run_analyze_effectiveness(db, 1, max_hr=190, resting_hr=50) == 1
 
 
 # ---- best efforts pass ----
+
+def test_passes_only_touch_the_given_athlete():
+    from src.pipeline import run_fetch_missing_laps
+    db = _make_db()
+    db.con.execute("UPDATE dim_activity SET average_heartrate = 140 WHERE activity_id = 100")
+    db.con.execute("INSERT INTO dim_athlete (athlete_id, sex) VALUES (2, 'F')")
+    db.con.execute("""
+        INSERT INTO dim_activity (activity_id, athlete_id, type, start_date_local, moving_time, average_speed, average_heartrate)
+        VALUES (200, 2, 'Run', '2026-01-03 08:00:00', 1800, 3.0, 150)
+    """)
+    db.insert_streams(200, {'time': {'data': [0, 1]}, 'velocity_smooth': {'data': [3.0, 3.1]}})
+
+    assert run_analyze_effectiveness(db, 1, resting_hr=45, max_hr=190) == 1
+    assert db.con.execute("SELECT activity_id, hr_rest_used FROM activity_effectiveness").fetchall() == [(100, 45)]
+
+    # Athlete 1's token is never spent on athlete 2's runs.
+    assert run_fetch_missing_laps(_FakeStrava([]), db, "token", 1) == 0
+    assert db.con.execute("SELECT laps_fetched_at FROM dim_activity WHERE activity_id = 200").fetchone()[0] is None
+
 
 def test_best_efforts_pass_is_incremental():
     from src.pipeline import run_best_efforts
@@ -270,12 +317,12 @@ def test_best_efforts_pass_is_incremental():
     speeds[600:1000] = [4.0] * 400
     db.insert_streams(100, {'time': {'data': times}, 'velocity_smooth': {'data': speeds}})
 
-    assert run_best_efforts(db) == 1
+    assert run_best_efforts(db, 1) == 1
     mile = db.con.execute("SELECT seconds FROM best_efforts WHERE activity_id = 100 AND distance_m = 1609.344").fetchone()[0]
     assert mile == pytest.approx(1609.344 / 4.0, abs=2)
     # 5.4 km run: no 10K or half rows.
     assert db.con.execute("SELECT count(*) FROM best_efforts WHERE activity_id = 100").fetchone()[0] == 2
-    assert run_best_efforts(db) == 0
+    assert run_best_efforts(db, 1) == 0
 
 
 # ---- laps ----
@@ -294,6 +341,6 @@ def test_missing_laps_are_backfilled_once():
     db = _make_db()
     db.insert_streams(100, {'time': {'data': [0, 1, 2]}, 'velocity_smooth': {'data': [3.0, 3.0, 3.0]}})
     strava = _FakeStrava([])
-    assert run_fetch_missing_laps(strava, db, "token") == 1
+    assert run_fetch_missing_laps(strava, db, "token", 1) == 1
     assert db.con.execute("SELECT count(*) FROM activity_laps WHERE activity_id = 100").fetchone()[0] == 2
-    assert run_fetch_missing_laps(strava, db, "token") == 0   # marked fetched
+    assert run_fetch_missing_laps(strava, db, "token", 1) == 0   # marked fetched

@@ -8,9 +8,10 @@ from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User, TrainingPlan, TrainingPlanEntry
 from src.api.deps import get_db_connection, DEFAULT_MAX_HR
 from src.api.schemas import CorosLink
-from src.api.services.coros_sync import sync_coros, unlink_coros, client_for, recompute_trigger
-from src.api.services.metrics import coros_resting_hr, detected_max_hr, resolve_resting_hr, calculate_training_status_logic
+from src.api.services.coros_sync import sync_coros, unlink_coros, client_for
+from src.api.services.metrics import detected_max_hr, resolve_resting_hr, calculate_training_status_logic
 from src.api.services.readiness import readiness_for
+from src.api.services.sync import queue_recompute
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
@@ -25,22 +26,23 @@ def own_user(db, user_id, current_user):
 def status_of(user, con):
     linked = bool(user.coros_access_token)
     nights = 0
-    if linked and user.strava_athlete_id:
-        nights = con.execute("SELECT COUNT(*) FROM coros_daily WHERE athlete_id = ?", [user.strava_athlete_id]).fetchone()[0]
+    if linked:
+        nights = con.execute("SELECT COUNT(*) FROM coros_daily WHERE athlete_id = ?", [user.athlete_id]).fetchone()[0]
     return {
         "linked": linked,
         "region": user.coros_region,
-        "linked_at": user.coros_linked_at.isoformat() if user.coros_linked_at else None,
-        "synced_at": user.coros_synced_at.isoformat() if user.coros_synced_at else None,
+        # Stored in server time without a zone; astimezone() adds the offset.
+        "linked_at": user.coros_linked_at.astimezone().isoformat() if user.coros_linked_at else None,
+        "synced_at": user.coros_synced_at.astimezone().isoformat() if user.coros_synced_at else None,
         "error": user.coros_error,
         "nights": nights,
-        "resting_hr": coros_resting_hr(con, user.strava_athlete_id) if linked and user.strava_athlete_id else None,
+        "resting_hr": user.coros_resting_hr if linked else None,
     }
 
 
 def run_sync(db, user, con):
     try:
-        return sync_coros(db, user, client_for(user), con, on_resting_hr_change=recompute_trigger(user))
+        return sync_coros(db, user, client_for(user), con, recompute=lambda: queue_recompute(user.id))
     except CorosAuthError as error:
         raise HTTPException(status_code=401, detail=str(error))
     except CorosError as error:
@@ -64,8 +66,6 @@ def link_coros(user_id: int, body: CorosLink, current_user: User = Depends(get_c
     db, con = SessionLocal(), get_db_connection()
     try:
         user = own_user(db, user_id, current_user)
-        if not user.strava_athlete_id:
-            raise HTTPException(status_code=400, detail="Connect Strava first; COROS readings are stored with your Strava athlete.")
         try:
             session = login(body.email, body.password, body.region)
         except CorosAuthError as error:
@@ -105,7 +105,7 @@ def unlink(user_id: int, current_user: User = Depends(get_current_user)):
     db, con = SessionLocal(), get_db_connection()
     try:
         user = own_user(db, user_id, current_user)
-        unlink_coros(db, user, con, on_resting_hr_change=recompute_trigger(user))
+        unlink_coros(db, user, con, recompute=lambda: queue_recompute(user.id))
         return status_of(user, con)
     finally:
         con.close()
@@ -118,8 +118,8 @@ def recovery(user_id: int, days: int = 42, current_user: User = Depends(get_curr
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     empty = {"days": [], "latest": None, "resting_hr_7d": None, "hrv_7d": None, "sleep_7d_min": None}
-    athlete_id = current_user.strava_athlete_id
-    if not athlete_id or not current_user.coros_access_token:
+    athlete_id = current_user.athlete_id
+    if not current_user.coros_access_token:
         return empty
     days = max(7, min(days, 365))
     con = get_db_connection()
@@ -166,17 +166,16 @@ def readiness_today(user_id: int, current_user: User = Depends(get_current_user)
     reading and today's form, with a hint when a hard session is planned."""
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    athlete_id = current_user.strava_athlete_id
-    if not athlete_id or not current_user.coros_access_token:
+    athlete_id = current_user.athlete_id
+    if not current_user.coros_access_token:
         return {"available": False}
     today = date.today()
     con = get_db_connection()
     try:
         hr_max = current_user.max_hr or detected_max_hr(con, athlete_id) or DEFAULT_MAX_HR
-        hr_rest = resolve_resting_hr(con, current_user)
     finally:
         con.close()
-    status = calculate_training_status_logic(athlete_id, hr_max, hr_rest)
+    status = calculate_training_status_logic(athlete_id, hr_max, resolve_resting_hr(current_user))
     db = SessionLocal()
     try:
         planned = planned_workout_today(db, user_id, today)

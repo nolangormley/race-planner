@@ -4,8 +4,8 @@ from datetime import date
 
 import duckdb
 
-from src.pipeline import StravaDB
-from src.api.routers.activities import ACTIVITY_TABLES_TO_DELETE, delete_activity_rows
+from src.pipeline import ACTIVITY_CHILD_TABLES, StravaDB
+from src.api.routers.activities import delete_activity_rows
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 ATHLETE_ID = 424242
@@ -30,13 +30,14 @@ def add_activity_with_children(con):
     con.execute("INSERT INTO activity_laps (activity_id, lap_index, distance, moving_time) VALUES (?, 1, 1609.344, 420)", [ACTIVITY_ID])
 
 
-def test_every_activity_keyed_table_is_cleaned_on_delete():
+def test_every_activity_keyed_table_is_a_listed_child_table():
+    # The list drives deleting an activity and moving a file-only user's
+    # activities to their Strava id; a table missing from it breaks both.
     warehouse = StravaDB(":memory:")
     keyed = {row[0] for row in warehouse.con.execute(
         "SELECT DISTINCT table_name FROM duckdb_columns() WHERE column_name = 'activity_id' AND database_name = current_database()"
     ).fetchall()}
-    assert keyed - set(ACTIVITY_TABLES_TO_DELETE) == set()
-    assert ACTIVITY_TABLES_TO_DELETE[-1] == "dim_activity"
+    assert keyed - set(ACTIVITY_CHILD_TABLES) == {"dim_activity"}
 
 
 def test_an_activity_with_laps_and_best_efforts_can_be_deleted():
@@ -44,7 +45,7 @@ def test_an_activity_with_laps_and_best_efforts_can_be_deleted():
     add_activity_with_children(warehouse.con)
 
     assert delete_activity_rows(warehouse.con, ACTIVITY_ID) == []
-    for table in ACTIVITY_TABLES_TO_DELETE:
+    for table in ACTIVITY_CHILD_TABLES + ("dim_activity",):
         assert warehouse.con.execute(f"SELECT COUNT(*) FROM {table} WHERE activity_id = ?", [ACTIVITY_ID]).fetchone()[0] == 0
 
 
@@ -53,9 +54,10 @@ def test_rebuild_copies_every_table(tmp_path):
     warehouse = StravaDB(str(source))
     add_activity_with_children(warehouse.con)
     warehouse.con.execute("INSERT INTO coros_daily (athlete_id, day, rhr, hrv) VALUES (?, ?, 48, 61)", [ATHLETE_ID, date(2026, 10, 29)])
+    warehouse.con.execute("INSERT INTO dim_workouts (workout_id, name) VALUES ('https://example.test/w/1', '6 x 800 m')")
     expected = {
         table: warehouse.con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        for table in ("dim_activity", "stream_heartrate", "best_efforts", "activity_laps", "coros_daily", "schema_migrations")
+        for table in ("dim_activity", "stream_heartrate", "best_efforts", "activity_laps", "coros_daily", "dim_workouts", "schema_migrations")
     }
     warehouse.con.close()
 

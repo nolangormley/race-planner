@@ -15,14 +15,13 @@ from src.api.deps import get_db_connection, DEFAULT_MAX_HR
 from src.api.services.email import send_email
 from src.api.services.metrics import calculate_training_status_logic, detected_max_hr, resolve_resting_hr
 from src.api.services.readiness import readiness_for
-from src.metrics import planned_distance_km
+from src.metrics import planned_distance_km, BEST_EFFORT_DISTANCES_M
 
 logger = logging.getLogger("race_planner.digest")
 
 METERS_PER_MILE = 1609.344
 FEET_PER_METER = 3.28084
 SEND_HOUR = 6               # server local time, on Mondays
-DISTANCE_LABELS = {1609: "1 mile", 3219: "2 miles", 5000: "5K", 8047: "5 miles", 10000: "10K", 16093: "10 miles", 21097: "Half marathon", 42195: "Marathon"}
 
 
 def week_start(day):
@@ -62,7 +61,10 @@ def day_label(day):
 
 
 def distance_label(meters):
-    return DISTANCE_LABELS.get(int(round(meters)), f"{meters / 1000:g} km")
+    for label, distance in BEST_EFFORT_DISTANCES_M.items():
+        if abs(distance - meters) < 1:
+            return label
+    return f"{meters / 1000:g} km"
 
 
 def form_label(tsb):
@@ -212,7 +214,7 @@ def build_digest(db, user, today=None):
     today = today or date.today()
     this_week = week_start(today)
     last_week = this_week - timedelta(days=7)
-    athlete_id = user.strava_athlete_id
+    athlete_id = user.athlete_id
 
     week = previous = {"runs": 0, "distance_m": 0.0, "moving_s": 0.0, "climb_m": 0.0}
     records, status, recovery, today_call = [], None, None, None
@@ -224,7 +226,7 @@ def build_digest(db, user, today=None):
             records = new_records(con, athlete_id, last_week)
             recovery = recovery_week(con, athlete_id, last_week)
             hr_max = user.max_hr or detected_max_hr(con, athlete_id) or DEFAULT_MAX_HR
-            hr_rest = resolve_resting_hr(con, user)
+            hr_rest = resolve_resting_hr(user)
         finally:
             con.close()
         status = calculate_training_status_logic(athlete_id, hr_max, hr_rest)

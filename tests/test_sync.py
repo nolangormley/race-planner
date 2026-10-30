@@ -130,3 +130,65 @@ def test_registry_queues_one_more_run_when_a_job_is_already_running():
         threading.Event().wait(0.01)
     assert len(runs) == 2                       # the queued run happened after the first finished
     assert registry.get(7) is not first
+
+
+def test_a_queued_sync_covers_a_later_recompute_but_not_the_other_way_round():
+    registry = SyncRegistry()
+    release = threading.Event()
+    kinds = []
+
+    def blocking(progress):
+        release.wait(timeout=5)
+        return None, 0
+
+    def recorder(kind):
+        def run(progress):
+            kinds.append(kind)
+            return None, 0
+        return run
+
+    registry.start(7, blocking, lambda token: None)
+    registry.start_or_queue(7, recorder("recompute"), lambda token: None, kind="recompute")
+    registry.start_or_queue(7, recorder("sync"), lambda token: None, kind="sync")         # replaces the recompute
+    registry.start_or_queue(7, recorder("recompute"), lambda token: None, kind="recompute")   # the sync covers it
+    assert registry.queued[7][2] == "sync"
+    release.set()
+    for _ in range(200):
+        if kinds:
+            break
+        threading.Event().wait(0.01)
+    assert kinds == ["sync"]
+
+
+
+def test_a_poll_never_sees_the_first_job_done_while_a_queued_one_waits():
+    registry = SyncRegistry()
+    release_first, release_second, second_started = threading.Event(), threading.Event(), threading.Event()
+
+    def first(progress):
+        release_first.wait(timeout=5)
+        return None, 0
+
+    def second(progress):
+        second_started.set()
+        release_second.wait(timeout=5)
+        return None, 0
+
+    registry.start(7, first, lambda token: None)
+    registry.start_or_queue(7, second, lambda token: None, kind="recompute")
+    seen, stop = set(), threading.Event()
+
+    def poll():
+        while not stop.is_set():
+            snapshot = registry.snapshot(7)
+            seen.add((snapshot["kind"], snapshot["status"]))
+
+    poller = threading.Thread(target=poll)
+    poller.start()
+    release_first.set()
+    assert second_started.wait(timeout=5)
+    stop.set()
+    poller.join()
+    release_second.set()
+    assert ("sync", "done") not in seen          # the page keeps polling into the recompute
+    assert ("recompute", "running") in seen

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 import hashlib
 import hmac
 import html
+import logging
 import os
 import requests
 from dotenv import load_dotenv
@@ -19,6 +20,7 @@ from .services.email import send_email
 
 load_dotenv()
 
+logger = logging.getLogger("race_planner.api")
 router = APIRouter()
 from .web import templates
 
@@ -360,8 +362,20 @@ def strava_callback(request: Request, code: str = None, error: str = None, db: S
 
         user.strava_access_token = data.get("access_token")
         user.strava_refresh_token = data.get("refresh_token")
-        if "athlete" in data:
-            user.strava_athlete_id = data["athlete"].get("id")
+        athlete = data.get("athlete") or {}
+        if athlete.get("id"):
+            if user.strava_athlete_id != athlete["id"]:
+                # Activities imported from files before connecting live under
+                # a synthetic athlete key; they follow the user to the real id.
+                # Imported here: deps reads DB_PATH on import, which must
+                # happen after main.py has loaded the .env files.
+                from .deps import DB_PATH
+                from .services.imports import move_to_strava_athlete
+                try:
+                    move_to_strava_athlete(user.id, athlete, DB_PATH)
+                except Exception:
+                    logger.exception("Could not move imported activities to Strava athlete %s", athlete["id"])
+            user.strava_athlete_id = athlete["id"]
 
         db.commit()
     except Exception as e:

@@ -21,14 +21,14 @@
 </div>
 
 {% if not user.strava_athlete_id %}
-<div class="card">
+<div class="card mb-3" id="connect-prompt">
     <div class="empty">
-        <strong>Connect Strava to see your training</strong>
-        Fitness, fatigue, zones and weekly volume are all built from your synced activities.
-        <div><a href="/strava-auth" class="btn btn-strava">Connect Strava</a></div>
+        <strong>Connect Strava, or import your files</strong>
+        Fitness, fatigue, zones and weekly volume are all built from your activities. Sync them from Strava, or import FIT and GPX files from your watch.
+        <div class="row wrap" style="justify-content: center"><a href="/strava-auth" class="btn btn-strava">Connect Strava</a><a href="/warehouse" class="btn">Import files</a></div>
     </div>
 </div>
-{% else %}
+{% endif %}
 
 <section class="grid grid-4" id="stats" aria-label="Training status">
     {% set tiles = [
@@ -95,7 +95,7 @@
         <div class="card-head">
             <div>
                 <h2 class="card-title">Race predictions</h2>
-                <div class="card-sub" id="pred-sub">From your VO2 max estimate, via Daniels' VDOT tables. A ceiling for a well-executed race, not a promise.</div>
+                <div class="card-sub" id="pred-sub">From your fastest efforts in the last six months, scaled with Riegel's formula.</div>
             </div>
         </div>
         <div id="predictions" class="table-wrap"></div>
@@ -121,6 +121,7 @@
         <div id="efficiency-chart" class="chart-slot"></div>
     </div>
 
+    {% if coros_enabled %}
     <div class="card" id="recovery-card">
         <div class="card-head">
             <div>
@@ -132,6 +133,7 @@
         <div class="recovery-tiles" id="recovery-tiles"></div>
         <div id="recovery-chart" class="chart-slot"></div>
     </div>
+    {% endif %}
 
     <div class="card">
         <div class="card-head">
@@ -185,11 +187,8 @@
         <div id="ai-note" class="ai-note"></div>
     </div>
 </section>
-{% endif %}
 {% endblock %}
 
 {% block scripts %}
-{% if user.strava_athlete_id %}
 <script type="module" src="/static/js/pages/dashboard.js"></script>
-{% endif %}
 {% endblock %}

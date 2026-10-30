@@ -2,7 +2,7 @@
 // zones, this week's plan, recent activities, pace zones, time by type.
 import {
   config, fetchJson, units, fmtDate, fmtDuration, fmtClock, fmtMinutes, parseDate, isoDate, daysUntil,
-  escapeHtml, renderEmpty, qs, qsa,
+  escapeHtml, renderEmpty, qs, qsa, RUN_TYPES,
 } from '../app.js';
 import { panelChart } from '../charts/panels.js';
 import { barList, stackedBar, columnChart, sparkline } from '../charts/bars.js';
@@ -27,8 +27,6 @@ const state = {
   pmcDays: Number(localStorage.getItem('pmcWindow') || 42),
 };
 const charts = {};
-
-const RUN_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
 
 // Shares of heart rate reserve (resting to max), matching the TRIMP model.
 const ZONES = [
@@ -176,10 +174,10 @@ function pmcSpec() {
   const series = [
     { key: 'fitness', label: 'Fitness (CTL)', color: 'series-1', values: pad(history.map((row) => row.fitness)), area: true, endLabel: true },
     { key: 'fatigue', label: 'Fatigue (ATL)', color: 'series-2', values: pad(history.map((row) => row.fatigue)), endLabel: true },
-    { key: 'projected', label: planned ? 'Planned fitness' : 'Projected fitness', color: 'series-1', values: lead(last.fitness).concat(future.map((day) => day.ctl)), dash: true },
+    { key: 'projected', label: planned ? 'Planned fitness' : 'Projected fitness', color: 'series-1', values: lead(last.fitness).concat(future.map((day) => day.ctl)), dash: true, endLabel: future.length > 0 },
   ];
   if (planned) {
-    series.push({ key: 'projectedAtl', label: 'Planned fatigue', color: 'series-2', values: lead(last.fatigue).concat(future.map((day) => day.atl)), dash: true });
+    series.push({ key: 'projectedAtl', label: 'Planned fatigue', color: 'series-2', values: lead(last.fatigue).concat(future.map((day) => day.atl)), dash: true, endLabel: future.length > 0 });
   }
   return {
     x,
@@ -217,17 +215,28 @@ function pmcSpec() {
   };
 }
 
+// The empty state replaces the chart, so a later render starts a new one.
+function renderPmcEmpty(message) {
+  charts.pmc?.destroy();
+  charts.pmc = null;
+  renderEmpty(qs('#pmc-chart'), 'No training history yet', message);
+}
+
 function renderPmc() {
   const container = qs('#pmc-chart');
   if (!state.status?.history?.length) {
-    renderEmpty(container, 'No training history yet', 'Sync Strava to build your fitness curve.');
+    renderPmcEmpty('Sync Strava to build your fitness curve.');
     return;
   }
   qs('#pmc-sub').textContent = state.projection?.has_plan
     ? 'Daily training load rolled up as fitness (42-day) and fatigue (7-day); form is the gap. The dashed lines follow your planned workouts forward (days with nothing planned count as rest), and race days are marked.'
     : 'Daily training load rolled up as fitness (42-day) and fatigue (7-day). Form is the gap between them. The dashed line projects fitness two weeks ahead.';
-  if (charts.pmc) charts.pmc.update(pmcSpec());
-  else charts.pmc = panelChart(container, pmcSpec());
+  if (charts.pmc) {
+    charts.pmc.update(pmcSpec());
+  } else {
+    container.replaceChildren();
+    charts.pmc = panelChart(container, pmcSpec());
+  }
   qsa('#pmc-range button').forEach((button) => {
     button.setAttribute('aria-pressed', String(Number(button.dataset.days) === state.pmcDays));
   });
@@ -427,6 +436,16 @@ function activitiesOn(dateString) {
   return state.activities.filter((activity) => RUN_TYPES.has(activity.type) && activity.start_date_local?.slice(0, 10) === dateString);
 }
 
+// A planned intervals or tempo session with runs that day, all of them
+// analysed (structure_checked), and none with that structure.
+function ranOffSession(entry, runs) {
+  const wanted = (entry.workout_type || '').toLowerCase();
+  if (wanted !== 'intervals' && wanted !== 'tempo') return false;
+  const analysed = runs.filter((activity) => activity.structure_checked);
+  const pending = runs.some((activity) => activity.type === 'Run' && !activity.structure_checked);
+  return analysed.length > 0 && !pending && !analysed.some((activity) => activity.structure_kind === wanted);
+}
+
 function renderWeek() {
   const container = qs('#week-plan');
   const today = new Date();
@@ -449,7 +468,9 @@ function renderWeek() {
     if (entry && !isRest) planned += 1;
     let status = '';
     if (entry && !isRest) {
-      if (entry.is_completed || runs.length) {
+      if (!entry.is_completed && ranOffSession(entry, runs)) {
+        status = '<span class="badge badge-warning">Ran, not the session</span>';
+      } else if (entry.is_completed || runs.length) {
         status = '<span class="badge badge-good">Done</span>';
         done += 1;
       } else if (past) status = '<span class="badge">Missed</span>';
@@ -537,7 +558,7 @@ async function loadStatus() {
   } catch (error) {
     state.status = { history: [], forecast: [] };
     qsa('#stats .stat-value').forEach((node) => { node.textContent = '–'; });
-    renderEmpty(qs('#pmc-chart'), 'No training history yet', error.status === 404 ? 'Sync Strava to build your fitness curve.' : error.message);
+    renderPmcEmpty(error.status === 404 ? 'Sync Strava to build your fitness curve.' : error.message);
     return;
   }
   renderTiles();
@@ -615,7 +636,7 @@ function renderRecovery(data) {
   container.replaceChildren();
   tiles.replaceChildren();
   if (!data || !data.days.length) {
-    renderEmpty(container, 'No COROS data yet', 'Connect COROS on your profile to see overnight HRV, resting heart rate and time in bed here.');
+    renderEmpty(container, 'No COROS data yet', 'Connect COROS on your profile to see overnight HRV and resting heart rate here.');
     return;
   }
   const latest = data.latest;
@@ -669,12 +690,24 @@ function renderReadiness() {
 }
 
 async function loadReadiness() {
+  if (!qs('#readiness')) return;
   state.readiness = await fetchJson(`/api/readiness/${userId}`).catch(() => null);
   renderReadiness();
 }
 
 async function loadRecovery() {
-  state.recovery = await fetchJson(`/api/recovery/${userId}?days=42`).catch(() => null);
+  // The card is left out when COROS is switched off (COROS_ENABLED=false).
+  const card = qs('#recovery-card');
+  if (!card) return;
+  try {
+    state.recovery = await fetchJson(`/api/recovery/${userId}?days=42`);
+  } catch (error) {
+    state.recovery = null;
+    if (error.status === 404) {
+      card.classList.add('hidden');
+      return;
+    }
+  }
   renderRecovery(state.recovery);
 }
 

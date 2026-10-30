@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Date, Float, ForeignKey, Text, DateTime, Boolean
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Date, Float, ForeignKey, Text, DateTime, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 
@@ -8,6 +8,16 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# Warehouse rows are keyed by Strava athlete id. A user who only imports
+# files gets a key above every real Strava id; the Strava callback moves
+# their rows to the real id when they connect later.
+SYNTHETIC_ATHLETE_BASE = 1_000_000_000_000
+
+
+def synthetic_athlete_id(user_id):
+    return SYNTHETIC_ATHLETE_BASE + user_id
+
 
 class User(Base):
     __tablename__ = "users"
@@ -32,6 +42,11 @@ class User(Base):
     strava_athlete_id = Column(Integer, nullable=True)
     strava_last_synced_at = Column(DateTime, nullable=True)
 
+    @property
+    def athlete_id(self):
+        """The warehouse key: the Strava athlete id, or the synthetic id."""
+        return self.strava_athlete_id or synthetic_athlete_id(self.id)
+
     # Heart rate profile. Null means "use the default resting rate" and "use
     # the highest heart rate seen in the warehouse".
     resting_hr = Column(Integer, nullable=True)
@@ -49,6 +64,9 @@ class User(Base):
     coros_linked_at = Column(DateTime, nullable=True)
     coros_synced_at = Column(DateTime, nullable=True)
     coros_error = Column(String, nullable=True)
+    # The 14-night COROS median the metrics use, moved only in steps of
+    # coros_sync.RESTING_HR_STEP so a 1 bpm wobble does not recompute everything.
+    coros_resting_hr = Column(Integer, nullable=True)
 
     races = relationship("Race", back_populates="user", cascade="all, delete-orphan")
 
@@ -93,7 +111,7 @@ class TrainingPlanEntry(Base):
     approximate_distance = Column(String, nullable=True)  # e.g. "5 miles"
     description = Column(Text, nullable=True)
     is_completed = Column(Boolean, default=False)
-    strava_activity_id = Column(Integer, nullable=True)  # linked if completed
+    strava_activity_id = Column(BigInteger, nullable=True)  # linked if completed
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

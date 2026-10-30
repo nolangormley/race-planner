@@ -17,7 +17,7 @@
                 <h2 class="card-title">Athlete</h2>
                 <div class="card-sub">Used for heart-rate zones, VO2 max and training load.</div>
             </div>
-            <div class="card-actions"><button type="button" class="btn btn-sm" id="edit-athlete">Edit</button></div>
+            <div class="card-actions"><button type="button" class="btn btn-sm" id="edit-athlete" disabled>Edit</button></div>
         </div>
         <dl class="kv" id="athlete-view">
             <dt>Name</dt><dd id="view-name">{{ user.name }}</dd>
@@ -205,6 +205,7 @@
         {% endif %}
     </section>
 
+    {% if coros_enabled %}
     <section class="card" id="coros-card">
         <div class="card-head">
             <div>
@@ -212,7 +213,6 @@
                 <div class="card-sub">Overnight resting heart rate, HRV and training load from your watch, read from the Training Hub. Your password is used once to log in and is not stored.</div>
             </div>
         </div>
-        {% if user.strava_athlete_id %}
         <div id="coros-linked" class="hidden">
             <dl class="kv">
                 <dt>Status</dt><dd id="coros-status"></dd>
@@ -252,10 +252,8 @@
                 <button type="submit" class="btn btn-primary" id="coros-link">Connect COROS</button>
             </div>
         </form>
-        {% else %}
-        <p class="muted small">Connect Strava first; COROS readings are stored with your Strava athlete.</p>
-        {% endif %}
     </section>
+    {% endif %}
 
     <section class="card span-2">
         <div class="card-head">

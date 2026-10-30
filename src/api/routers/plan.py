@@ -7,7 +7,7 @@ from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry
 from src.api.deps import get_db_connection
 from src.api.schemas import PlanEntryCreate, PlanEntryUpdate, BulkEntriesCreate, PlanBuildRequest
-from src.api.services.metrics import calculate_training_status_logic
+from src.api.services.metrics import calculate_training_status_logic, resolve_resting_hr
 from src.metrics import planned_distance_km, estimate_entry_load, project_training_load
 from src.plan_builder import build_plan, summarize, RACE_PROFILES
 
@@ -205,9 +205,7 @@ def get_projection(user_id: int, current_user: User = Depends(get_current_user))
     """
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this projection")
-    athlete_id = current_user.strava_athlete_id
-    if not athlete_id:
-        return {"has_plan": False, "days": [], "races": []}
+    athlete_id = current_user.athlete_id
 
     db = SessionLocal()
     try:
@@ -223,7 +221,7 @@ def get_projection(user_id: int, current_user: User = Depends(get_current_user))
     if not future:
         return {"has_plan": False, "days": [], "races": race_rows}
 
-    status = calculate_training_status_logic(athlete_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
+    status = calculate_training_status_logic(athlete_id, hr_max=current_user.max_hr, hr_rest=resolve_resting_hr(current_user))
     if not status:
         return {"has_plan": False, "days": [], "races": race_rows}
 
@@ -306,8 +304,8 @@ def build_training_plan(user_id: int, body: PlanBuildRequest, current_user: User
             raise HTTPException(status_code=400, detail="Plans cover 5K, 5 mile, 10K, 10 mile, half marathon and marathon.")
 
         weekly = body.weekly_distance_m
-        if not weekly and current_user.strava_athlete_id:
-            weekly = current_weekly_run_meters(current_user.strava_athlete_id)
+        if not weekly:
+            weekly = current_weekly_run_meters(current_user.athlete_id)
         weekly = weekly or 20000.0
 
         entries = build_plan(

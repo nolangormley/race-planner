@@ -96,7 +96,7 @@ async function poll() {
   apply(state);
 }
 
-function apply(state) {
+function apply(state, started = false) {
   const job = state.job;
   setStatusText(state.last_synced_at, job);
   if (!job) {
@@ -109,8 +109,9 @@ function apply(state) {
     if (!pollTimer) pollTimer = setInterval(poll, POLL_MS);
     return;
   }
-  // Finished: show the result once, only if this page saw it running.
-  if (pollTimer) {
+  // Finished: show the result once, only if this page saw it running or
+  // started it (a short recompute can finish before the first read).
+  if (pollTimer || started) {
     stopPolling();
     renderJob(job);
     if (job.status === 'done') {
@@ -119,7 +120,7 @@ function apply(state) {
       document.dispatchEvent(new CustomEvent('strava:synced', { detail: job }));
       hideTimer = setTimeout(hidePanel, 6000);
     } else {
-      showToast('Strava sync failed', 'error');
+      showToast(job.kind === 'recompute' ? 'Recomputing your metrics failed' : 'Strava sync failed', 'error');
     }
   }
   setButtonState(false);
@@ -142,12 +143,13 @@ async function start() {
   }
 }
 
-// Re-reads the job state; a page that starts a job another way (a profile
-// change that triggers a recompute) calls this so the panel appears.
-export function refreshSync() {
+// Re-reads the job state. A page that started a job another way (a profile
+// change that triggers a recompute) passes started=true, so the panel shows
+// the result even when the job is already done.
+export function refreshSync(started = false) {
   if (!config.userId) return;
   hidePanel();
-  fetchJson(url()).then(apply).catch(() => setStatusText(null, null));
+  fetchJson(url()).then((state) => apply(state, started)).catch(() => setStatusText(null, null));
 }
 
 export function initSync() {

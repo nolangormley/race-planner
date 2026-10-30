@@ -6,6 +6,7 @@ import logging
 from src.api.auth_routes import get_current_user_from_session
 from src.api.database import SessionLocal, Race
 from src.api.web import templates
+from src.importers import IMPORT_ID_BASE
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
@@ -34,7 +35,9 @@ def view_workout_streams(request: Request, activity_id: int):
     db.close()
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return templates.TemplateResponse("streams.html", {"request": request, "activity_id": activity_id, "user": user})
+    return templates.TemplateResponse("streams.html", {
+        "request": request, "activity_id": activity_id, "user": user, "imported": activity_id >= IMPORT_ID_BASE,
+    })
 
 @router.get("/warehouse")
 def view_warehouse(request: Request):

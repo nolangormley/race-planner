@@ -13,7 +13,7 @@ export function qsa(selector, root = document) {
 
 export async function fetchJson(url, options = {}) {
   const init = { ...options };
-  if (init.body !== undefined && typeof init.body !== 'string') {
+  if (init.body !== undefined && typeof init.body !== 'string' && !(init.body instanceof FormData)) {
     init.body = JSON.stringify(init.body);
     init.headers = { 'Content-Type': 'application/json', ...(init.headers || {}) };
   }
@@ -53,6 +53,9 @@ export function showToast(message, kind = 'success') {
 
 // ---- Units ----
 const METERS_PER_MILE = 1609.344;
+
+// Activities on foot: they show a pace, and Strava counts their cadence for one leg.
+export const RUN_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
 
 export const units = {
   isMetric() {
@@ -171,6 +174,8 @@ export function applyTheme(theme) {
   if (theme === 'light') document.documentElement.dataset.theme = 'light';
   else delete document.documentElement.dataset.theme;
   localStorage.setItem('theme', theme);
+  // The browser bar takes the color of the top bar.
+  qs('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--surface').trim());
   qsa('[data-theme-toggle]').forEach((button) => {
     button.setAttribute('aria-label', theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme');
   });

@@ -1,13 +1,16 @@
 """Manage the Strava push subscription for this app.
 
     python scripts/strava_webhook.py view
-    python scripts/strava_webhook.py create https://yasmodeus.andrew.cmu.edu/api/strava/webhook
+    python scripts/strava_webhook.py create https://yasmodeus.andrew.cmu.edu
     python scripts/strava_webhook.py delete <subscription id>
 
 Reads STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET and STRAVA_WEBHOOK_VERIFY_TOKEN
-from the environment (or .env). Strava validates the callback URL during
-`create`, so the app must already be running there with the same verify
-token. One subscription per Strava application.
+from the environment (or .env). `create` takes the site's base URL and
+registers <site>/api/strava/webhook/<verify token> as the callback: the
+token in the path is how the app tells Strava's events from forged ones.
+Strava validates the callback URL during `create`, so the app must already
+be running there with the same verify token. One subscription per Strava
+application.
 """
 import os
 import sys
@@ -31,7 +34,8 @@ def main(argv):
         verify_token = os.environ.get("STRAVA_WEBHOOK_VERIFY_TOKEN")
         if not verify_token:
             sys.exit("Set STRAVA_WEBHOOK_VERIFY_TOKEN first (the app must run with the same value).")
-        response = requests.post(API, data={**auth, "callback_url": argv[2], "verify_token": verify_token}, timeout=30)
+        callback_url = f"{argv[2].rstrip('/')}/api/strava/webhook/{verify_token}"
+        response = requests.post(API, data={**auth, "callback_url": callback_url, "verify_token": verify_token}, timeout=30)
     elif command == "delete":
         response = requests.delete(f"{API}/{argv[2]}", params=auth, timeout=30)
     else:
