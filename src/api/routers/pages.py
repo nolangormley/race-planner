@@ -4,7 +4,7 @@ from fastapi.responses import RedirectResponse
 import logging
 
 from src.api.auth_routes import get_current_user_from_session
-from src.api.database import SessionLocal
+from src.api.database import SessionLocal, Race
 from src.api.web import templates
 
 logger = logging.getLogger("race_planner.api")
@@ -62,3 +62,16 @@ def training_calendar_page(request: Request):
     if not user:
         return RedirectResponse(url="/login", status_code=302)
     return templates.TemplateResponse("training_calendar.html", {"request": request, "user": user})
+
+
+@router.get("/races/{race_id}/pacing")
+def pacing_page(request: Request, race_id: int):
+    db = SessionLocal()
+    user = get_current_user_from_session(request, db)
+    race = db.query(Race).filter(Race.id == race_id, Race.user_id == user.id).first() if user else None
+    db.close()
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    if not race:
+        return RedirectResponse(url="/profile", status_code=302)
+    return templates.TemplateResponse("pacing.html", {"request": request, "user": user, "race": race})

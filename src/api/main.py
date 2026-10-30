@@ -114,6 +114,7 @@ from src.api.routers import plan  # noqa: E402
 from src.api.routers import strava_webhook  # noqa: E402
 from src.api.routers import digest  # noqa: E402
 from src.api.routers import coros  # noqa: E402
+from src.api.routers import pacing  # noqa: E402
 
 app.include_router(pages.router)
 app.include_router(activities.router)
@@ -126,6 +127,7 @@ app.include_router(plan.router)
 app.include_router(strava_webhook.router)
 app.include_router(digest.router)
 app.include_router(coros.router)
+app.include_router(pacing.router)
 
 # A new install has no warehouse until the first sync. Creating the schema
 # here means every page works from the first login instead of failing on

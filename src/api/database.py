@@ -61,6 +61,7 @@ class Race(Base):
     race_length = Column(String)
     race_date = Column(Date)
     goal_time = Column(String, nullable=True)
+    course_gpx = Column(Text, nullable=True)  # the course file behind the pacing plan
 
     user = relationship("User", back_populates="races")
 

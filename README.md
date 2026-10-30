@@ -80,6 +80,11 @@ Each week has a long run on the day you choose, up to two quality sessions (temp
 Every entry is an ordinary calendar entry afterwards, so edit or delete whatever does not fit.
 Building again replaces planned days after today unless you untick that option, in which case only empty days are filled.
 
+### Race-day pacing
+Each race on the profile page has a **Pacing** page: split targets for your goal time (the race's goal, or your predicted time from recent best efforts when there is none), as even effort or a negative split (second half about 2% faster), in miles or kilometres.
+Upload the course GPX and the splits follow the hills at one effort: each split's pace carries the grade cost of its ground (Minetti et al. 2002, the relation grade-adjusted pace is built on), with downhills giving back half the saving, and the whole plan still adds up to the goal to the second.
+**Print pace band** prints only a narrow strip of split clock times to wear on race day.
+
 
 ## Strava webhooks (automatic sync)
 
