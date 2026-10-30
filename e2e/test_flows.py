@@ -156,3 +156,21 @@ def test_build_plan_fills_the_calendar_to_race_day(app_server, registered_user, 
     assert "Race" in race_chip.text_content()
     page.click("#cal-prev")
     page.locator(".cal-cell:not(.other) .chip").nth(27).wait_for()   # the month before the race is planned day by day
+
+
+def test_weekly_digest_can_be_previewed_and_switched_on(app_server, registered_user, page):
+    login(page, app_server)
+    page.goto(f"{app_server}/profile")
+    page.wait_for_load_state("networkidle")
+    assert not page.is_checked("#digest-enabled")
+    page.click("#digest-preview")
+    page.wait_for_function("document.querySelector('#digest-body').textContent.startsWith('Subject:')")
+    preview = page.text_content("#digest-body")
+    assert "Your week in running" in preview and "Last week" in preview
+
+    page.check("#digest-enabled")
+    page.wait_for_selector("#toast.show")
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    assert page.is_checked("#digest-enabled")
+

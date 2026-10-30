@@ -85,3 +85,7 @@ class PlanBuildRequest(BaseModel):
     weekly_distance_m: Optional[float] = Field(default=None, ge=0)
     metric: bool = False
     replace_future: bool = True
+
+
+class DigestSettings(BaseModel):
+    enabled: bool

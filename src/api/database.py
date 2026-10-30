@@ -37,6 +37,10 @@ class User(Base):
     resting_hr = Column(Integer, nullable=True)
     max_hr = Column(Integer, nullable=True)
 
+    # Monday morning summary email (see services/digest.py).
+    weekly_digest = Column(Boolean, nullable=False, default=False, server_default="false")
+    digest_sent_at = Column(DateTime, nullable=True)
+
     races = relationship("Race", back_populates="user", cascade="all, delete-orphan")
 
 class Race(Base):
