@@ -21,14 +21,14 @@
 </div>
 
 {% if not user.strava_athlete_id %}
-<div class="card">
+<div class="card mb-3" id="connect-prompt">
     <div class="empty">
-        <strong>Connect Strava to see your training</strong>
-        Fitness, fatigue, zones and weekly volume are all built from your synced activities.
-        <div><a href="/strava-auth" class="btn btn-strava">Connect Strava</a></div>
+        <strong>Connect Strava, or import your files</strong>
+        Fitness, fatigue, zones and weekly volume are all built from your activities. Sync them from Strava, or import FIT and GPX files from your watch.
+        <div class="row wrap" style="justify-content: center"><a href="/strava-auth" class="btn btn-strava">Connect Strava</a><a href="/warehouse" class="btn">Import files</a></div>
     </div>
 </div>
-{% else %}
+{% endif %}
 
 <section class="grid grid-4" id="stats" aria-label="Training status">
     {% set tiles = [
@@ -185,11 +185,8 @@
         <div id="ai-note" class="ai-note"></div>
     </div>
 </section>
-{% endif %}
 {% endblock %}
 
 {% block scripts %}
-{% if user.strava_athlete_id %}
 <script type="module" src="/static/js/pages/dashboard.js"></script>
-{% endif %}
 {% endblock %}

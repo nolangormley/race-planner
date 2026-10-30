@@ -63,7 +63,7 @@ def get_activities(limit: Optional[int] = 50, current_user: User = Depends(get_c
         ORDER BY da.start_date DESC
         LIMIT ?
         """
-        activities = con.execute(query, [current_user.strava_athlete_id, limit]).fetchall()
+        activities = con.execute(query, [current_user.athlete_id, limit]).fetchall()
         columns = [desc[0] for desc in con.description]
         return [dict(zip(columns, row)) for row in activities]
     except Exception as e:
@@ -76,14 +76,12 @@ def get_activities(limit: Optional[int] = 50, current_user: User = Depends(get_c
 @router.get("/api/user-activities/{user_id}")
 def get_user_activities(user_id: int, limit: Optional[int] = 100, current_user: User = Depends(get_current_user)):
     """Return recent activities for the given user (athlete).
-    user_id here is the local User.id - we look up the strava_athlete_id.
+    user_id here is the local User.id - we look up the warehouse athlete id.
     """
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this user's activities")
 
-    athlete_id = current_user.strava_athlete_id
-    if not athlete_id:
-        return []
+    athlete_id = current_user.athlete_id
 
     con = get_db_connection()
     try:
@@ -113,7 +111,7 @@ def get_activity(activity_id: int, current_user: User = Depends(get_current_user
         # so this doesn't reveal whether the id belongs to someone else.
         activity = con.execute(
             "SELECT * FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
-            [activity_id, current_user.strava_athlete_id]
+            [activity_id, current_user.athlete_id]
         ).fetchone()
         if not activity:
             raise HTTPException(status_code=404, detail="Activity not found")
@@ -135,7 +133,7 @@ def get_activity_streams(activity_id: int, current_user: User = Depends(get_curr
         # ownership has to be checked against dim_activity separately.
         owner_row = con.execute(
             "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
-            [activity_id, current_user.strava_athlete_id]
+            [activity_id, current_user.athlete_id]
         ).fetchone()
         if not owner_row:
             raise HTTPException(status_code=404, detail="Activity not found")
@@ -202,7 +200,7 @@ def get_activity_effectiveness(activity_id: int, current_user: User = Depends(ge
         LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
         WHERE da.activity_id = ? AND da.athlete_id = ?
         """
-        row = con.execute(query, [activity_id, current_user.strava_athlete_id]).fetchone()
+        row = con.execute(query, [activity_id, current_user.athlete_id]).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Activity not found")
 
@@ -238,7 +236,7 @@ def get_activity_ai_summary(activity_id: int, current_user: User = Depends(get_c
         LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
         WHERE da.activity_id = ? AND da.athlete_id = ?
         """
-        row = con.execute(query, [activity_id, current_user.strava_athlete_id]).fetchone()
+        row = con.execute(query, [activity_id, current_user.athlete_id]).fetchone()
         if not row: raise HTTPException(status_code=404, detail="Activity not found")
         cols = [desc[0] for desc in con.description]
         stats = dict(zip(cols, row))
@@ -271,7 +269,7 @@ def delete_activity(activity_id: int, current_user: User = Depends(get_current_u
     try:
         owner_row = con.execute(
             "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
-            [activity_id, current_user.strava_athlete_id]
+            [activity_id, current_user.athlete_id]
         ).fetchone()
         if not owner_row:
             raise HTTPException(status_code=404, detail="Activity not found")
@@ -311,7 +309,7 @@ def get_activity_laps(activity_id: int, current_user: User = Depends(get_current
     try:
         owner_row = con.execute(
             "SELECT 1 FROM dim_activity WHERE activity_id = ? AND athlete_id = ?",
-            [activity_id, current_user.strava_athlete_id]
+            [activity_id, current_user.athlete_id]
         ).fetchone()
         if not owner_row:
             raise HTTPException(status_code=404, detail="Activity not found")

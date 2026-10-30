@@ -5,7 +5,7 @@ The FastAPI app. Postgres (SQLAlchemy, `database.py`) holds users, races and tra
 - `main.py`: environment, app, session and CORS middleware, static files, router mounting. No routes of its own.
 - `web.py`: the shared Jinja2 template environment.
 - `auth_routes.py`: sign-up, login, first race, Strava OAuth, and the `get_current_user*` dependencies every router uses.
-- `database.py`, `schemas.py`: ORM models and request bodies.
+- `database.py`, `schemas.py`: ORM models and request bodies. `User.athlete_id` is the warehouse key: the Strava athlete id, or `1_000_000_000_000 + user id` for a user who only imports files. Read the warehouse with it, never with `strava_athlete_id`; the Strava callback moves the placeholder's rows when the account is linked.
 - `routers/`: the endpoints, one file per concern.
 - `services/`: logic the routers call (metrics, LLM, coach's note, background sync).
 - `static/`, `templates/`: the front end.

@@ -2,8 +2,9 @@
 
 One `APIRouter` per concern, all mounted by `../main.py`. Each router does the session check through `get_current_user` (API) or `get_current_user_from_session` (pages) from `../auth_routes.py`, talks to Postgres through `SessionLocal` and to the DuckDB warehouse through `get_db_connection` in `../deps.py`.
 
-- `pages.py`: the server-rendered pages (`/dashboard`, `/training-calendar`, `/warehouse`, `/workout_streams/{id}`, `/profile`, `/races/{id}/pacing`). Markup only; data comes from the API routers below.
-- `activities.py`: synced Strava activities: list, per-user list, detail, streams, laps (the watch's splits), effectiveness, AI note, delete (with the fixed table allowlist).
+- `pages.py`: the server-rendered pages (`/dashboard`, `/training-calendar`, `/warehouse`, `/workout_streams/{id}`, `/profile`, `/races/{id}/pacing`). Markup only; data comes from the API routers below. The activity page hides the Strava link for imported activities.
+- `activities.py`: synced and imported activities: list, per-user list, detail, streams, laps (the watch's splits), effectiveness, AI note, delete (with the fixed table allowlist).
+- `imports.py`: `POST /api/activities/import`, multipart FIT/GPX upload (up to 20 files, 25 MB each); returns one result per file (`imported`, `skipped` with the reason, or `error`). The work is in `../services/imports.py`.
 - `sync.py`: start a background Strava sync and read its progress (`src.api.services.sync`). `start_sync_for(user)` is the one place that builds a user's sync job; the webhook uses it too.
 - `strava_webhook.py`: Strava's push subscription. `GET` answers the subscription handshake with `STRAVA_WEBHOOK_VERIFY_TOKEN`; `POST` takes activity create/update (queue a sync), delete (remove from the warehouse) and athlete deauthorization events. `scripts/strava_webhook.py` registers the subscription.
 - `workouts.py`: the workout library CRUD.

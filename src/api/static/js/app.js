@@ -13,7 +13,7 @@ export function qsa(selector, root = document) {
 
 export async function fetchJson(url, options = {}) {
   const init = { ...options };
-  if (init.body !== undefined && typeof init.body !== 'string') {
+  if (init.body !== undefined && typeof init.body !== 'string' && !(init.body instanceof FormData)) {
     init.body = JSON.stringify(init.body);
     init.headers = { 'Content-Type': 'application/json', ...(init.headers || {}) };
   }

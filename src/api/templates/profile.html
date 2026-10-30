@@ -212,7 +212,6 @@
                 <div class="card-sub">Overnight resting heart rate, HRV and training load from your watch, read from the Training Hub. Your password is used once to log in and is not stored.</div>
             </div>
         </div>
-        {% if user.strava_athlete_id %}
         <div id="coros-linked" class="hidden">
             <dl class="kv">
                 <dt>Status</dt><dd id="coros-status"></dd>
@@ -252,9 +251,6 @@
                 <button type="submit" class="btn btn-primary" id="coros-link">Connect COROS</button>
             </div>
         </form>
-        {% else %}
-        <p class="muted small">Connect Strava first; COROS readings are stored with your Strava athlete.</p>
-        {% endif %}
     </section>
 
     <section class="card span-2">

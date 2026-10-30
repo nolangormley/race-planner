@@ -2,7 +2,7 @@
 real app, fake Strava and a fresh database. Tests run in file order: the
 sync test fills the warehouse that the page tests then look at."""
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 
@@ -222,4 +222,45 @@ def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered
     )
     assert "1:45:00" in rows.nth(13).text_content()             # the finish time does not move
     assert page.locator("#pace-band tr").count() == 14
+
+
+def gpx_track(start, name, points=400, spacing_s=3):
+    """A straight 3.2 m/s run north with heart rate, as a GPX document."""
+    rows = []
+    for index in range(points):
+        moment = start + timedelta(seconds=index * spacing_s)
+        rows.append(
+            f'<trkpt lat="{40.44 + index * 0.0000863:.7f}" lon="-79.9959"><time>{moment.strftime("%Y-%m-%dT%H:%M:%SZ")}</time>'
+            f'<extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>{148 + index % 6}</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions></trkpt>'
+        )
+    return ('<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="e2e" xmlns="http://www.topografix.com/GPX/1/1" '
+            'xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">'
+            f'<trk><name>{name}</name><type>running</type><trkseg>{"".join(rows)}</trkseg></trk></gpx>')
+
+
+def test_a_runner_without_strava_imports_a_gpx_file(app_server, page, tmp_path):
+    user = {"email": f"files{int(time.time())}@example.com", "password": "file-runner-123", "name": "File Runner"}
+    response = requests.post(f"{app_server}/register", data={
+        **user, "date_of_birth": "1991-03-04", "gender": "Female", "height": "1.65", "weight": "58",
+    }, allow_redirects=False)
+    assert response.status_code == 302, response.text
+    login(page, app_server, user)
+    page.wait_for_selector("#connect-prompt")
+
+    start = (datetime.now(timezone.utc) - timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0)
+    track = tmp_path / "riverfront.gpx"
+    track.write_text(gpx_track(start, "Riverfront loop"))
+    page.goto(f"{app_server}/warehouse")
+    page.wait_for_load_state("networkidle")
+    page.set_input_files("#import-input", str(track))
+    page.wait_for_selector("#toast.show")
+    assert "1 imported" in page.text_content("#toast")
+    page.wait_for_selector("#activities-body tr:has-text('Riverfront loop')")
+
+    page.set_input_files("#import-input", str(track))
+    page.wait_for_function("document.querySelector('#toast').textContent.includes('Already imported')")
+
+    page.goto(f"{app_server}/dashboard")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_selector("#recent tr:has-text('Riverfront loop')")
 

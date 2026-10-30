@@ -51,11 +51,9 @@ def course_summary(course):
 
 def predicted_goal(user, distance_m):
     """Riegel prediction from recent best efforts, or None without runs."""
-    if not user.strava_athlete_id:
-        return None
     con = get_db_connection()
     try:
-        efforts = recent_best_efforts(con, user.strava_athlete_id)
+        efforts = recent_best_efforts(con, user.athlete_id)
     finally:
         con.close()
     if not efforts:

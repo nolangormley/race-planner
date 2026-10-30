@@ -72,6 +72,12 @@ python src/pipeline.py
 ```
 The running app holds the warehouse file open, so stop it first (`sudo systemctl stop race-planner` on the server); DuckDB allows one writing process at a time.
 
+### Importing FIT and GPX files
+**Import files** on the Activities page reads `.fit` files (from Garmin, COROS, Wahoo and most other watches) and `.gpx` tracks, up to 20 files of 25 MB each at a time, without Strava.
+`src/importers.py` turns each file into the same activity, streams (heart rate, pace, cadence, elevation, power) and laps a Strava sync stores, and the import then runs the same analysis passes, so load, zones, best efforts and the dashboard include the new runs straight away.
+A file is skipped when it was imported before (the activity id is a hash of the file) or when it starts within a minute of an activity you already have, so a run that also came in through Strava is not counted twice.
+You can use the app with imports only, without connecting Strava: your activities are stored under a placeholder athlete id, and they move to your Strava athlete id when you connect Strava later.
+
 ### Building a training plan
 On the training plan page, **Build plan** fills the calendar from tomorrow to one of your upcoming races.
 The generator (`src/plan_builder.py`) is deterministic: weekly distance starts from your last four weeks of running,
@@ -136,6 +142,7 @@ The rebuild copies every table into a fresh schema (about 4 s for 400 activities
 *   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB — including `run_analyze_effectiveness()`, which computes per-activity physiological metrics from activity streams.
 *   **/src/metrics.py**: Pure math shared by the pipeline and the API: load model, VO2 max estimator, Daniels VDOT, best efforts, planned-load projection.
 *   **/src/plan_builder.py**: The deterministic training plan generator behind **Build plan**.
+*   **/src/importers.py**: FIT and GPX parsing for **Import files**.
 *   **/alembic**: Postgres schema migrations (`alembic upgrade head` to apply). The DuckDB warehouse's own schema is managed separately, inside `src/pipeline.py`'s `StravaDB.init_schema()`.
 *   **/data**: Contains the `strava_warehouse.duckdb` file.
 

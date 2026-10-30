@@ -205,9 +205,7 @@ def get_projection(user_id: int, current_user: User = Depends(get_current_user))
     """
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this projection")
-    athlete_id = current_user.strava_athlete_id
-    if not athlete_id:
-        return {"has_plan": False, "days": [], "races": []}
+    athlete_id = current_user.athlete_id
 
     db = SessionLocal()
     try:
@@ -306,8 +304,8 @@ def build_training_plan(user_id: int, body: PlanBuildRequest, current_user: User
             raise HTTPException(status_code=400, detail="Plans cover 5K, 5 mile, 10K, 10 mile, half marathon and marathon.")
 
         weekly = body.weekly_distance_m
-        if not weekly and current_user.strava_athlete_id:
-            weekly = current_weekly_run_meters(current_user.strava_athlete_id)
+        if not weekly:
+            weekly = current_weekly_run_meters(current_user.athlete_id)
         weekly = weekly or 20000.0
 
         entries = build_plan(

@@ -419,8 +419,4 @@ def resolve_resting_hr(con, user):
     value, else the COROS median, else the default."""
     if user.resting_hr:
         return user.resting_hr
-    if user.strava_athlete_id:
-        from_coros = coros_resting_hr(con, user.strava_athlete_id)
-        if from_coros:
-            return from_coros
-    return DEFAULT_REST_HR
+    return coros_resting_hr(con, user.athlete_id) or DEFAULT_REST_HR

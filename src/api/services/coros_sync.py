@@ -82,7 +82,7 @@ def sync_coros(db, user, client, con, now=None, on_resting_hr_change=None):
         user.coros_error = f"{EXPIRED_PREFIX} {error}" if isinstance(error, CorosAuthError) else str(error)
         db.commit()
         raise
-    upsert_daily(con, user.strava_athlete_id, rows)
+    upsert_daily(con, user.athlete_id, rows)
     user.coros_synced_at = now
     user.coros_error = None
     db.commit()
@@ -98,7 +98,7 @@ def unlink_coros(db, user, con, on_resting_hr_change=None):
     """Forgets the session and the stored nights. Recomputes when the resting
     heart rate default falls back to the plain default."""
     before = resolve_resting_hr(con, user)
-    con.execute("DELETE FROM coros_daily WHERE athlete_id = ?", [user.strava_athlete_id])
+    con.execute("DELETE FROM coros_daily WHERE athlete_id = ?", [user.athlete_id])
     user.coros_access_token = None
     user.coros_user_id = None
     user.coros_region = None
@@ -113,7 +113,7 @@ def unlink_coros(db, user, con, on_resting_hr_change=None):
 
 def coros_sync_due(user, now):
     """Once a day after SYNC_HOUR, for linked users whose session still works."""
-    if not user.coros_access_token or not user.strava_athlete_id or now.hour < SYNC_HOUR:
+    if not user.coros_access_token or now.hour < SYNC_HOUR:
         return False
     if user.coros_error and user.coros_error.startswith(EXPIRED_PREFIX):
         return False
