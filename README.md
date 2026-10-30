@@ -70,6 +70,21 @@ To sync your latest Strava activities and recalculate effectiveness metrics:
 python src/pipeline.py
 ```
 
+
+## Strava webhooks (automatic sync)
+
+With a push subscription, Strava calls `/api/strava/webhook` whenever an activity is created, updated or deleted and the warehouse syncs itself; the Sync button becomes a fallback.
+
+1. Set `STRAVA_WEBHOOK_VERIFY_TOKEN` to any secret string in the app's `.env` and restart the app.
+2. With the same variables in your shell or `.env`, register the callback once per Strava application:
+
+    ```bash
+    python scripts/strava_webhook.py create https://your-host/api/strava/webhook
+    python scripts/strava_webhook.py view
+    ```
+
+Strava validates the URL during `create`, so the app must already be reachable there. Events are not signed; an event can only start a sync for a known athlete or remove one activity, which the next sync restores if it still exists on Strava.
+
 ## 🏗 Project Structure
 
 *   **/src/api**: FastAPI backend and Jinja2 templates (Dashboard, Warehouse, Activity Analysis).

@@ -124,10 +124,23 @@ class SyncRegistry:
 
     def __init__(self):
         self.jobs = {}
+        self.queued = {}
         self.lock = threading.Lock()
 
     def get(self, user_id):
         return self.jobs.get(user_id)
+
+    def start_or_queue(self, user_id, run_sync, on_success, kind="sync"):
+        """Like start, but a job already running queues one more run for when
+        it finishes instead of raising. A Strava webhook arriving mid-sync
+        must not be lost: the running sync may have listed activities before
+        the new one existed."""
+        try:
+            return self.start(user_id, run_sync, on_success, kind)
+        except SyncAlreadyRunning:
+            with self.lock:
+                self.queued[user_id] = (run_sync, on_success, kind)
+            return self.jobs[user_id]
 
     def start(self, user_id, run_sync, on_success, kind="sync"):
         """run_sync(progress) does the sync and returns (new_refresh_token, count).
@@ -156,6 +169,10 @@ class SyncRegistry:
         except Exception as exc:
             logger.exception("Strava sync failed for user %s", job.user_id)
             job.fail(str(exc))
+        with self.lock:
+            queued = self.queued.pop(job.user_id, None)
+        if queued:
+            self.start(job.user_id, *queued)
 
 
 registry = SyncRegistry()

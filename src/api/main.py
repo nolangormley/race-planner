@@ -99,6 +99,7 @@ from src.api.routers import analytics  # noqa: E402
 from src.api.routers import races  # noqa: E402
 from src.api.routers import profile  # noqa: E402
 from src.api.routers import plan  # noqa: E402
+from src.api.routers import strava_webhook  # noqa: E402
 
 app.include_router(pages.router)
 app.include_router(activities.router)
@@ -108,3 +109,4 @@ app.include_router(analytics.router)
 app.include_router(races.router)
 app.include_router(profile.router)
 app.include_router(plan.router)
+app.include_router(strava_webhook.router)
