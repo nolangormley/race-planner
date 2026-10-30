@@ -138,13 +138,17 @@ class SyncRegistry:
         """Like start, but a job already running queues one more run for when
         it finishes instead of raising. A Strava webhook arriving mid-sync
         must not be lost: the running sync may have listed activities before
-        the new one existed."""
-        try:
-            return self.start(user_id, run_sync, on_success, kind)
-        except SyncAlreadyRunning:
-            with self.lock:
+        the new one existed. The check and the queueing share one critical
+        section with the end of a job (see run), so a run is never queued
+        behind a job that has already finished."""
+        with self.lock:
+            current = self.jobs.get(user_id)
+            if current and current.status == "running":
                 self.queued[user_id] = (run_sync, on_success, kind)
-            return self.jobs[user_id]
+                return current
+            job = self.register(user_id, kind)
+        self.launch(job, run_sync, on_success)
+        return job
 
     def start(self, user_id, run_sync, on_success, kind="sync"):
         """run_sync(progress) does the sync and returns (new_refresh_token, count).
@@ -155,28 +159,41 @@ class SyncRegistry:
             current = self.jobs.get(user_id)
             if current and current.status == "running":
                 raise SyncAlreadyRunning()
-            job = SyncJob(user_id, kind=kind)
-            self.jobs[user_id] = job
-        worker = threading.Thread(
-            target=self.run, args=(job, run_sync, on_success), daemon=True, name=f"strava-sync-{user_id}"
-        )
-        worker.start()
+            job = self.register(user_id, kind)
+        self.launch(job, run_sync, on_success)
         return job
 
+    def register(self, user_id, kind):
+        """A new job as the user's current one. The caller holds self.lock."""
+        job = SyncJob(user_id, kind=kind)
+        self.jobs[user_id] = job
+        return job
+
+    def launch(self, job, run_sync, on_success):
+        worker = threading.Thread(
+            target=self.run, args=(job, run_sync, on_success), daemon=True, name=f"strava-sync-{job.user_id}"
+        )
+        worker.start()
+
     def run(self, job, run_sync, on_success):
+        count, error, error_kind = 0, None, "error"
         try:
             new_refresh_token, count = run_sync(job.update)
             on_success(new_refresh_token)
-            job.finish(count)
         except StravaAuthError as exc:
-            job.fail(str(exc), kind="auth")
+            error, error_kind = str(exc), "auth"
         except Exception as exc:
             logger.exception("Strava sync failed for user %s", job.user_id)
-            job.fail(str(exc))
+            error = str(exc)
         with self.lock:
+            if error is None:
+                job.finish(count)
+            else:
+                job.fail(error, kind=error_kind)
             queued = self.queued.pop(job.user_id, None)
-        if queued:
-            self.start(job.user_id, *queued)
+            next_job = self.register(job.user_id, queued[2]) if queued else None
+        if next_job:
+            self.launch(next_job, queued[0], queued[1])
 
 
 registry = SyncRegistry()

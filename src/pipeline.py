@@ -22,6 +22,7 @@ load_dotenv(env_path)
 
 # Overridable so tests can point the pipeline at a fake Strava.
 STRAVA_API_BASE = os.getenv("STRAVA_API_BASE", "https://www.strava.com")
+STRAVA_TIMEOUT_S = 30
 CLIENT_ID = os.getenv('STRAVA_CLIENT_ID')
 CLIENT_SECRET = os.getenv('STRAVA_CLIENT_SECRET')
 
@@ -59,6 +60,7 @@ def _request_with_retry(method, url, max_retries=3, **kwargs):
     ingestion partway through.
     """
     resp = None
+    kwargs.setdefault("timeout", STRAVA_TIMEOUT_S)
     for attempt in range(max_retries + 1):
         resp = method(url, **kwargs)
         if resp.status_code == 429 and attempt < max_retries:
@@ -112,7 +114,7 @@ class StravaManager:
     def exchange_code_for_token(self, code):
         data = requests.post(f"{STRAVA_API_BASE}/oauth/token", data={
             'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 'code': code, 'grant_type': 'authorization_code'
-        }).json()
+        }, timeout=STRAVA_TIMEOUT_S).json()
         self.save_refresh_token(data['refresh_token'])
         return data['access_token']
 
@@ -125,7 +127,7 @@ class StravaManager:
             print("Refreshing access token...")
             resp = requests.post(f"{STRAVA_API_BASE}/oauth/token", data={
                 'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 'refresh_token': refresh_token, 'grant_type': 'refresh_token'
-            })
+            }, timeout=STRAVA_TIMEOUT_S)
             if resp.status_code in [400, 401]:
                 print(f"Refresh token invalid (status {resp.status_code}). Starting OAuth flow...")
                 return self.run_oauth_flow()
@@ -158,7 +160,7 @@ class StravaManager:
         resp = requests.post(f"{STRAVA_API_BASE}/oauth/token", data={
             'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
             'refresh_token': refresh_token, 'grant_type': 'refresh_token'
-        })
+        }, timeout=STRAVA_TIMEOUT_S)
         if resp.status_code in (400, 401):
             raise StravaAuthError(
                 "Strava refresh token is invalid or has been revoked. Reconnect Strava to sync again."
@@ -338,6 +340,14 @@ class StravaDB:
                 FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
             );
         """)
+        # The workout library. src/scrape_coros_workouts.py fills it and
+        # creates the same table when it runs on its own.
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS dim_workouts (
+                workout_id VARCHAR PRIMARY KEY, name VARCHAR, description VARCHAR,
+                category VARCHAR, tags VARCHAR, url VARCHAR, source VARCHAR DEFAULT 'COROS'
+            );
+        """)
         # Nightly wellness readings from a linked COROS account (src/coros.py).
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS coros_daily (
@@ -506,7 +516,7 @@ def ingest_data(manager, db, access_token, lookback_days=42, reauth_fn=None, pro
 
     try:
         print("Fetching athlete profile...")
-        athlete = requests.get(f"{STRAVA_API_BASE}/api/v3/athlete", headers={'Authorization': f'Bearer {access_token}'}).json()
+        athlete = requests.get(f"{STRAVA_API_BASE}/api/v3/athlete", headers={'Authorization': f'Bearer {access_token}'}, timeout=STRAVA_TIMEOUT_S).json()
         db.upsert_athlete(athlete)
         print(f"Athlete: {athlete.get('firstname')} {athlete.get('lastname')}")
     except Exception as e:
