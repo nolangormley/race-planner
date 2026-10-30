@@ -7,6 +7,7 @@ import {
 import { panelChart } from '../charts/panels.js';
 import { barList, stackedBar, columnChart, sparkline } from '../charts/bars.js';
 import { dateTicks, fmtDateTick, fmtTick } from '../charts/core.js';
+import { renderEnergy } from './energy.js';
 
 const athleteId = config.athleteId;
 const userId = config.userId;
@@ -636,7 +637,7 @@ function renderRecovery(data) {
   container.replaceChildren();
   tiles.replaceChildren();
   if (!data || !data.days.length) {
-    renderEmpty(container, 'No COROS data yet', 'Connect COROS on your profile to see overnight HRV and resting heart rate here.');
+    renderEmpty(container, 'No COROS data yet', 'Connect COROS on your profile to see your energy, overnight HRV and resting heart rate here.');
     return;
   }
   const latest = data.latest;
@@ -647,7 +648,7 @@ function renderRecovery(data) {
   if (latest.time_in_bed_min || data.sleep_7d_min) {
     tiles.append(recoveryTile('Time in bed', hoursMinutes(latest.time_in_bed_min), '', data.sleep_7d_min ? `7-night average ${hoursMinutes(data.sleep_7d_min)}` : ''));
   }
-  qs('#recovery-sub').textContent = `The last ${data.days.length} nights from COROS. HRV at or above its baseline with a steady resting heart rate means you are absorbing the training.`;
+  qs('#recovery-sub').textContent = `Energy over the last week, then ${data.days.length} nights of HRV and resting heart rate from COROS. HRV at or above its baseline with a steady resting heart rate means you are absorbing the training.`;
   charts.recovery = panelChart(container, {
     x: data.days.map((night) => parseDate(night.day).getTime()),
     xTicks: (min, max) => dateTicks(min, max, 6),
@@ -681,11 +682,10 @@ function renderReadiness() {
   const badgeNode = document.createElement('span');
   badgeNode.className = `badge badge-${call.badge}`;
   badgeNode.textContent = `Today: ${call.label}`;
-  badgeNode.title = call.advice;
-  const reasons = document.createElement('div');
-  reasons.className = 'small faint';
-  reasons.textContent = call.reasons.length ? call.reasons.join(' · ') : call.advice;
-  container.append(badgeNode, reasons);
+  const advice = document.createElement('div');
+  advice.className = 'small faint';
+  advice.textContent = call.advice;
+  container.append(badgeNode, advice);
   if (state.plan.length) renderWeek();
 }
 
@@ -693,6 +693,11 @@ async function loadReadiness() {
   if (!qs('#readiness')) return;
   state.readiness = await fetchJson(`/api/readiness/${userId}`).catch(() => null);
   renderReadiness();
+}
+
+async function loadEnergy() {
+  if (!qs('#energy')) return;
+  renderEnergy(await fetchJson(`/api/energy/${userId}?days=7`).catch(() => null));
 }
 
 async function loadRecovery() {
@@ -725,6 +730,7 @@ function loadAll() {
   loadEfficiency();
   loadRecords();
   loadRecovery();
+  loadEnergy();
   loadReadiness();
   fetchJson(`/api/races/${userId}`).then(renderHeader).catch(() => renderHeader([]));
 }
