@@ -25,6 +25,20 @@ def record_sync_result(user_id, new_refresh_token):
         db.close()
 
 
+def start_sync_for(user, queue_if_running=False):
+    """Starts a background Strava sync for a user. Values are copied off the
+    ORM object first because the job runs in another thread after the
+    request's session is gone. With queue_if_running, a sync already in
+    progress gets one more run queued instead of raising."""
+    user_id, refresh_token = user.id, user.strava_refresh_token
+    resting_hr, max_hr = user.resting_hr, user.max_hr
+    run_sync = lambda progress: sync_athlete(refresh_token, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+    on_success = lambda new_token: record_sync_result(user_id, new_token)
+    if queue_if_running:
+        return sync_registry.start_or_queue(user_id, run_sync, on_success)
+    return sync_registry.start(user_id, run_sync, on_success)
+
+
 def sync_state(user_id, last_synced_at):
     job = sync_registry.get(user_id)
     return {
@@ -48,14 +62,8 @@ def start_strava_sync(user_id: int, current_user: User = Depends(get_current_use
     if not current_user.strava_refresh_token:
         raise HTTPException(status_code=400, detail="Strava isn't connected for this account yet — visit /strava-auth first.")
 
-    refresh_token = current_user.strava_refresh_token
-    resting_hr, max_hr = current_user.resting_hr, current_user.max_hr
     try:
-        sync_registry.start(
-            user_id,
-            run_sync=lambda progress: sync_athlete(refresh_token, progress=progress, resting_hr=resting_hr, max_hr=max_hr),
-            on_success=lambda new_token: record_sync_result(user_id, new_token),
-        )
+        start_sync_for(current_user)
     except SyncAlreadyRunning:
         raise HTTPException(status_code=409, detail="A sync is already running for this account.")
     return sync_state(user_id, current_user.strava_last_synced_at)

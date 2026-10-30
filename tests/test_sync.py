@@ -108,3 +108,25 @@ def test_registry_marks_auth_failures_so_the_ui_can_offer_reconnect():
     assert snap["status"] == "error"
     assert snap["error_kind"] == "auth"
     assert "revoked" in snap["error"]
+
+
+def test_registry_queues_one_more_run_when_a_job_is_already_running():
+    registry = SyncRegistry()
+    release = threading.Event()
+    runs = []
+
+    def run_sync(progress):
+        runs.append(1)
+        release.wait(timeout=5)
+        return None, 0
+
+    first = registry.start_or_queue(7, run_sync, lambda token: None)
+    queued = registry.start_or_queue(7, run_sync, lambda token: None)
+    assert queued is first                      # no second job yet
+    release.set()
+    for _ in range(200):
+        if len(runs) == 2 and registry.get(7).status in ("done", "error") and registry.get(7) is not first:
+            break
+        threading.Event().wait(0.01)
+    assert len(runs) == 2                       # the queued run happened after the first finished
+    assert registry.get(7) is not first

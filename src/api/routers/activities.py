@@ -27,6 +27,23 @@ ACTIVITY_TABLES_TO_DELETE = (
     "dim_activity"
 )
 
+def delete_activity_rows(con, activity_id):
+    """Removes an activity from every warehouse table. Returns the tables
+    that failed, so the caller can decide how bad that is."""
+    failed_tables = []
+    for table in ACTIVITY_TABLES_TO_DELETE:
+        # table is never user input, but an f-string table name is exactly
+        # the shape a SQL injection would take, so the allowlist is enforced
+        # in code rather than by convention.
+        assert table in ACTIVITY_TABLES_TO_DELETE
+        try:
+            con.execute(f"DELETE FROM {table} WHERE activity_id = ?", [activity_id])
+        except Exception as e:
+            print(f"Failed deleting from {table}: {e}")
+            failed_tables.append(table)
+    return failed_tables
+
+
 @router.get("/api/activities")
 def get_activities(limit: Optional[int] = 50, current_user: User = Depends(get_current_user)):
     # Scoped to the logged-in user's own athlete_id — this used to return
@@ -256,21 +273,7 @@ def delete_activity(activity_id: int, current_user: User = Depends(get_current_u
         if not owner_row:
             raise HTTPException(status_code=404, detail="Activity not found")
 
-        # Delete from all tables sequentially, tracking failures instead of
-        # unconditionally reporting success regardless of what happened.
-        failed_tables = []
-        for table in ACTIVITY_TABLES_TO_DELETE:
-            # table is never user input today, but an f-string table name is
-            # exactly the shape a real SQL injection would take if that ever
-            # changed — assert against a fixed allowlist so the safety is
-            # enforced in code, not just by "table always comes from this
-            # literal list" convention.
-            assert table in ACTIVITY_TABLES_TO_DELETE
-            try:
-                con.execute(f"DELETE FROM {table} WHERE activity_id = ?", [activity_id])
-            except Exception as e:
-                print(f"Failed deleting from {table}: {e}")
-                failed_tables.append(table)
+        failed_tables = delete_activity_rows(con, activity_id)
 
         if "dim_activity" in failed_tables:
             # The activity record itself wasn't removed — this is the one
