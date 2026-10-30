@@ -1,6 +1,8 @@
 """The flows a user actually goes through, in a real browser against the
 real app, fake Strava and a fresh database. Tests run in file order: the
 sync test fills the warehouse that the page tests then look at."""
+import math
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 
@@ -56,6 +58,7 @@ def test_sync_button_runs_a_sync_with_progress_and_fills_the_dashboard(app_serve
     assert "Synced" in page.text_content("#sync-status")
     # Each card reloads from its own request, so wait for each one instead of counting once.
     page.locator("#pmc-chart svg path").first.wait_for()
+    expect(page.locator("#pmc-chart .empty")).to_have_count(0)            # the empty state from before the sync is gone
     expect(page.locator("#hr-chart svg .cat-label")).to_have_count(5)     # five zone rows, bars only where time was spent
     page.locator("#hr-chart svg .bar").nth(1).wait_for()
     expect(page.locator("#recent tbody tr")).to_have_count(3)
@@ -127,6 +130,78 @@ def test_changing_heart_rate_profile_recomputes_metrics(app_server, registered_u
     assert page.text_content("#view-max-hr").strip() == "190 bpm"
 
 
+def test_saving_other_athlete_details_leaves_heart_rate_alone(app_server, registered_user, page):
+    login(page, app_server)
+    page.goto(f"{app_server}/profile")
+    page.click("#edit-athlete")                                       # enabled once the heart rate profile is in
+    with page.expect_request(lambda request: request.method == "POST" and "/profile/" in request.url) as saved:
+        page.click("#athlete-form button[type=submit]")
+    body = saved.value.post_data_json
+    assert "resting_hr" not in body and "max_hr" not in body          # a null here would reset them and recompute
+    expect(page.locator("#toast")).to_have_text("Profile saved")
+    assert page.text_content("#view-rest-hr").strip() == "55 bpm"
+
+
+def test_athlete_form_waits_for_the_heart_rate_profile(app_server, registered_user, page):
+    login(page, app_server)
+    held = []
+    page.route("**/api/hr-profile/*", lambda route: held.append(route))
+    page.goto(f"{app_server}/profile")
+    expect(page.locator("#edit-athlete")).to_be_disabled()
+    assert held, "the page did not ask for the heart rate profile"
+    held[0].continue_()
+    expect(page.locator("#edit-athlete")).to_be_enabled()
+
+    # Without the profile the rest of the form opens, but the heart rates stay locked.
+    page.unroute("**/api/hr-profile/*")
+    page.route("**/api/hr-profile/*", lambda route: route.fulfill(status=404, json={"detail": "Not found"}))
+    page.reload()
+    page.click("#edit-athlete")
+    expect(page.locator("#f-rest-hr")).to_be_disabled()
+    expect(page.locator("#f-max-hr")).to_be_disabled()
+    expect(page.locator("#max-hr-hint")).to_contain_text("did not load")
+
+
+def test_max_heart_rate_with_none_recorded_reads_as_the_default(app_server, registered_user, page):
+    login(page, app_server)
+    page.route("**/api/hr-profile/*", lambda route: route.fulfill(json={
+        "resting_hr": None, "max_hr": None, "default_resting_hr": 60,
+        "coros_resting_hr": None, "detected_max_hr": None, "default_max_hr": 190,
+    }))
+    page.goto(f"{app_server}/profile")
+    expect(page.locator("#view-max-hr")).to_have_text("190 bpm (default)")
+
+
+FINISHED_RECOMPUTE = {
+    "status": "done", "kind": "recompute", "phase": "done", "label": "Metrics updated", "detail": "",
+    "done": 0, "total": 0, "percent": 100, "new_activities": None, "error": None, "error_kind": None,
+}
+
+
+def test_a_recompute_already_done_at_the_first_read_is_still_announced(app_server, registered_user, page):
+    login(page, app_server)
+    page.goto(f"{app_server}/profile")
+    saved = []
+
+    def save(route):
+        if route.request.method != "POST":
+            return route.continue_()
+        saved.append(route.request.post_data_json)
+        route.fulfill(json={"message": "Profile updated", "recompute_started": True})
+
+    def job_state(route):
+        if not saved:
+            return route.continue_()
+        route.fulfill(json={"job": FINISHED_RECOMPUTE, "last_synced_at": None})
+
+    page.route(re.compile(r".*/profile/\d+$"), save)
+    page.route(re.compile(r".*/api/sync-strava/\d+$"), job_state)
+    page.click("#edit-athlete")
+    page.click("#athlete-form button[type=submit]")
+    page.wait_for_selector(".sync-panel .progress.is-done")
+    assert "Metrics updated" in page.text_content(".sync-panel .label")
+
+
 def test_build_plan_fills_the_calendar_to_race_day(app_server, registered_user, page):
     login(page, app_server)
     user_id = page.evaluate("document.body.dataset.userId")
@@ -160,6 +235,22 @@ def test_build_plan_fills_the_calendar_to_race_day(app_server, registered_user, 
     page.locator(".cal-cell:not(.other) .chip").nth(27).wait_for()   # the month before the race is planned day by day
 
 
+def test_planned_race_sits_inside_the_fitness_chart(app_server, registered_user, page):
+    login(page, app_server)
+    user_id = page.evaluate("document.body.dataset.userId")
+    label = page.locator("#pmc-chart .marker-label", has_text="Spring Half")
+    label.wait_for()
+    chart, box = page.locator("#pmc-chart svg").bounding_box(), label.bounding_box()
+    assert chart["x"] <= box["x"] and box["x"] + box["width"] <= chart["x"] + chart["width"], (chart, box)
+    assert box["y"] >= chart["y"], (chart, box)
+
+    # The solid lines stop today, so the right edge carries the planned values on race day.
+    race_day = page.request.get(f"{app_server}/api/projection/{user_id}").json()["days"][-1]
+    expected = sorted(str(math.floor(race_day[key] + 0.5)) for key in ("ctl", "atl"))
+    expect(page.locator("#pmc-chart .end-label")).to_have_count(2)
+    assert sorted(page.locator("#pmc-chart .end-label").all_text_contents()) == expected
+
+
 def test_weekly_digest_can_be_previewed_and_switched_on(app_server, registered_user, page):
     login(page, app_server)
     page.goto(f"{app_server}/profile")
@@ -175,6 +266,14 @@ def test_weekly_digest_can_be_previewed_and_switched_on(app_server, registered_u
     page.reload()
     page.wait_for_load_state("networkidle")
     assert page.is_checked("#digest-enabled")
+
+
+def test_profile_survives_digest_settings_that_do_not_load(app_server, registered_user, page):
+    login(page, app_server)
+    page.route(re.compile(r".*/api/digest/\d+$"), lambda route: route.fulfill(status=404, json={"detail": "Not found"})
+               if route.request.method == "GET" else route.continue_())
+    page.goto(f"{app_server}/profile")
+    expect(page.locator("#digest-hint")).to_contain_text("did not load")
 
 
 def test_coros_link_pulls_nights_and_fills_the_recovery_card(app_server, registered_user, page):
@@ -251,6 +350,24 @@ def test_activity_page_shows_what_the_structure_pass_found(app_server, registere
     page.wait_for_load_state("networkidle")
     assert "hidden" in page.get_attribute("#structure-card", "class")
     assert page.locator("#streams-chart .x-band").count() == 0
+
+
+def test_a_ride_shows_speed_splits_and_pedal_cadence(app_server, registered_user, page):
+    login(page, app_server)
+    run = page.request.get(f"{app_server}/api/activities").json()[0]
+
+    def as_ride(route):
+        response = route.fetch()
+        route.fulfill(response=response, json={**response.json(), "type": "Ride"})
+
+    page.route(f"**/api/activities/{run['activity_id']}/effectiveness", as_ride)
+    page.goto(f"{app_server}/workout_streams/{run['activity_id']}")
+    page.wait_for_selector("#splits-card:not(.hidden)")
+    assert "Speed" in page.text_content("#splits thead")
+    expect(page.locator("#splits tbody td", has_text="mph vs avg").first).to_be_visible()   # the delta in the column's unit
+    assert page.locator("#splits tbody tr").first.locator("td").nth(6).text_content().strip() == "85"
+    expect(page.locator("#stat-cadence")).to_have_text("85rpm")
+    expect(page.locator("#streams-chart .panel-title", has_text="Cadence (rpm)")).to_have_count(1)
 
 
 def test_a_sync_marks_the_planned_run_it_matches_done(app_server, registered_user, page):

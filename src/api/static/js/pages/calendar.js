@@ -2,11 +2,10 @@
 // Strava activities, with add/edit/delete and attach-to-activity.
 import {
   config, fetchJson, units, fmtDate, parseDate, isoDate, escapeHtml, showToast,
-  qs, qsa, openModal, closeModal, renderEmpty,
+  qs, qsa, openModal, closeModal, renderEmpty, RUN_TYPES,
 } from '../app.js';
 
 const userId = config.userId;
-const RUN_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
 const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
 const BOLT = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>';
 

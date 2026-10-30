@@ -1,7 +1,7 @@
 // Activity detail: summary strip, linked stream panels with pace-zone
 // shading, detected intervals or tempo, laps, effort metrics, time in zones
 // and the optional coach's note.
-import { config, fetchJson, units, fmtDuration, fmtClock, fmtMinutes, escapeHtml, renderEmpty, qs } from '../app.js';
+import { config, fetchJson, units, fmtDuration, fmtClock, fmtMinutes, escapeHtml, renderEmpty, qs, RUN_TYPES } from '../app.js';
 import { panelChart } from '../charts/panels.js';
 import { barList } from '../charts/bars.js';
 import { secondsTicks, fmtSecondsTick } from '../charts/core.js';
@@ -13,6 +13,12 @@ const ZONE_RANGES = ['< 60%', '60–70%', '70–80%', '80–90%', '> 90%'];
 
 function setText(id, text) {
   qs(`#${id}`).textContent = text;
+}
+
+// Strava counts a run's cadence for one leg, so steps per minute are double;
+// on a bike it is pedal revolutions as they are.
+function cadenceScale(activity) {
+  return RUN_TYPES.has(activity.type) ? { factor: 2, unit: 'spm' } : { factor: 1, unit: 'rpm' };
 }
 
 function withUnit(value, unit) {
@@ -32,13 +38,14 @@ function renderSummary(activity) {
   qs('#act-sub').innerHTML = `<span class="badge badge-accent">${escapeHtml(activity.type || 'Activity')}</span><span class="sep">·</span>${escapeHtml(when)}${activity.device_name ? `<span class="sep">·</span>${escapeHtml(activity.device_name)}` : ''}`;
   document.title = `${activity.name || 'Activity'} · Race Planner`;
 
-  const isRun = ['Run', 'Walk', 'Hike', 'TrailRun'].includes(activity.type);
+  const isRun = RUN_TYPES.has(activity.type);
+  const cadenceSpec = cadenceScale(activity);
   qs('#stat-distance').replaceChildren(withUnit(units.distanceValue(activity.distance || 0).toFixed(2), units.distanceLabel()));
   setText('stat-time', fmtDuration(activity.moving_time));
   qs('#stat-pace').replaceChildren(isRun ? withUnit(units.pace(activity.average_speed, false), units.paceLabel()) : withUnit(((activity.average_speed || 0) * (units.isMetric() ? 3.6 : 2.23694)).toFixed(1), units.isMetric() ? 'km/h' : 'mph'));
   qs('#stat-hr').replaceChildren(activity.average_heartrate ? withUnit(String(Math.round(activity.average_heartrate)), 'bpm') : '–');
   qs('#stat-hrmax').replaceChildren(activity.max_heartrate ? withUnit(String(Math.round(activity.max_heartrate)), 'bpm') : '–');
-  qs('#stat-cadence').replaceChildren(activity.average_cadence ? withUnit(String(Math.round(activity.average_cadence * 2)), 'spm') : '–');
+  qs('#stat-cadence').replaceChildren(activity.average_cadence ? withUnit(String(Math.round(activity.average_cadence * cadenceSpec.factor)), cadenceSpec.unit) : '–');
   qs('#stat-elevation').replaceChildren(withUnit(String(Math.round(units.isMetric() ? activity.total_elevation_gain || 0 : (activity.total_elevation_gain || 0) * 3.28084)), units.elevationLabel()));
   qs('#stat-calories').replaceChildren(activity.calories ? withUnit(String(Math.round(activity.calories)), 'kcal') : '–');
 }
@@ -129,20 +136,33 @@ function paceBands(paceZones, paceValues) {
 function renderSplits(laps, activity) {
   if (!laps.length) return;
   const card = qs('#splits-card');
-  const isRun = ['Run', 'Walk', 'Hike', 'TrailRun'].includes(activity.type);
+  const isRun = RUN_TYPES.has(activity.type);
+  const cadenceSpec = cadenceScale(activity);
+  const speedFactor = units.isMetric() ? 3.6 : 2.23694;
+  const speedUnit = units.isMetric() ? 'km/h' : 'mph';
   const fastest = laps.reduce((best, lap) => ((lap.average_speed || 0) > (best.average_speed || 0) ? lap : best), laps[0]);
   const average = activity.average_speed || 0;
   const rows = laps.map((lap) => {
-    const delta = average && lap.average_speed ? units.paceMinutes(lap.average_speed) - units.paceMinutes(average) : null;
-    const deltaText = delta == null || Math.abs(delta) < 0.01 ? '' : `<span class="cell-sub ${delta < 0 ? 'faint' : 'faint'}">${delta < 0 ? '−' : '+'}${fmtMinutes(Math.abs(delta))} vs avg</span>`;
+    // The difference from the average in the unit of the column: pace for a
+    // run (minus is faster), speed for anything else (plus is faster).
+    let deltaText = '';
+    if (average && lap.average_speed) {
+      const delta = isRun
+        ? units.paceMinutes(lap.average_speed) - units.paceMinutes(average)
+        : (lap.average_speed - average) * speedFactor;
+      if (Math.abs(delta) >= (isRun ? 0.01 : 0.05)) {
+        const amount = isRun ? fmtMinutes(Math.abs(delta)) : `${Math.abs(delta).toFixed(1)} ${speedUnit}`;
+        deltaText = `<span class="cell-sub faint">${delta < 0 ? '−' : '+'}${amount} vs avg</span>`;
+      }
+    }
     return `<tr>
       <td class="num">${lap.lap_index}${lap === fastest && laps.length > 1 ? ' <span class="badge badge-good">fastest</span>' : ''}</td>
       <td class="num">${units.distance(lap.distance, 2)}</td>
       <td class="num">${fmtClock(lap.moving_time ?? lap.elapsed_time ?? 0)}</td>
-      <td class="num">${isRun ? units.pace(lap.average_speed) : `${((lap.average_speed || 0) * (units.isMetric() ? 3.6 : 2.23694)).toFixed(1)} ${units.isMetric() ? 'km/h' : 'mph'}`}${deltaText}</td>
+      <td class="num">${isRun ? units.pace(lap.average_speed) : `${((lap.average_speed || 0) * speedFactor).toFixed(1)} ${speedUnit}`}${deltaText}</td>
       <td class="num">${lap.average_heartrate ? Math.round(lap.average_heartrate) : '–'}</td>
       <td class="num">${lap.max_heartrate ? Math.round(lap.max_heartrate) : '–'}</td>
-      <td class="num">${lap.average_cadence ? Math.round(lap.average_cadence * 2) : '–'}</td>
+      <td class="num">${lap.average_cadence ? Math.round(lap.average_cadence * cadenceSpec.factor) : '–'}</td>
       <td class="num">${lap.total_elevation_gain != null ? units.elevation(lap.total_elevation_gain) : '–'}</td>
     </tr>`;
   }).join('');
@@ -166,9 +186,10 @@ function renderStreams(streams, activity, paceZones, laps = [], structure = null
   const sortedPace = rawPace.filter((value) => value != null).sort((left, right) => left - right);
   const medianPace = sortedPace[Math.floor(sortedPace.length / 2)] || 0;
   const pace = smooth(rawPace.map((value) => (value != null && value <= medianPace * 2 ? value : null)), 15);
-  const cadence = streams.map((row, index) => (row.cadence != null && moving[index] ? row.cadence * 2 : null));
+  const cadenceSpec = cadenceScale(activity);
+  const cadence = streams.map((row, index) => (row.cadence != null && moving[index] ? row.cadence * cadenceSpec.factor : null));
   const altitude = streams.map((row) => (row.altitude != null ? (units.isMetric() ? row.altitude : row.altitude * 3.28084) : null));
-  const isRun = ['Run', 'Walk', 'Hike', 'TrailRun'].includes(activity.type);
+  const isRun = RUN_TYPES.has(activity.type);
   const panels = [];
   if (heartrate.some((value) => value != null)) {
     panels.push({ kind: 'line', height: 150, title: 'Heart rate (bpm)', yTicks: 4, yFormat: (value) => String(Math.round(value)),
@@ -186,7 +207,7 @@ function renderStreams(streams, activity, paceZones, laps = [], structure = null
       series: [{ key: 'pace', label: 'Pace', color: 'series-1', values: pace }] });
   }
   if (cadence.some((value) => value != null)) {
-    panels.push({ kind: 'line', height: 110, title: 'Cadence (spm)', yTicks: 3, yFormat: (value) => String(Math.round(value)),
+    panels.push({ kind: 'line', height: 110, title: `Cadence (${cadenceSpec.unit})`, yTicks: 3, yFormat: (value) => String(Math.round(value)),
       series: [{ key: 'cadence', label: 'Cadence', color: 'series-3', values: cadence }] });
   }
   if (altitude.some((value) => value != null)) {

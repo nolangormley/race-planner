@@ -10,6 +10,8 @@
 //              reverse, includeZero, min, max, bands: [{from, to, color, label}],
 //              series: [{ key, label, color, values, dash, area, endLabel,
 //                         negativeColor }] }],
+//                                      endLabel shows the last value at the right
+//                                      edge, only when the series reaches that edge
 //   markers: [{x, label}],             vertical lines across every panel
 //   xBands: [{from, to, label}],       x ranges shaded across every panel
 //   legend: boolean, table: boolean, note(index) -> string
@@ -22,6 +24,7 @@ import {
 const MARGIN = { top: 10, right: 16, bottom: 26, left: 46 };
 const END_LABEL_WIDTH = 44;
 const PANEL_GAP = 22;
+const MARKER_LABEL_ROOM = 14;
 let instanceCount = 0;
 
 export function panelChart(container, initialSpec) {
@@ -103,6 +106,8 @@ export function panelChart(container, initialSpec) {
     const xDomain = [spec.x[0], spec.x[spec.x.length - 1]];
     const xScale = scaleLinear(xDomain, [MARGIN.left, MARGIN.left + plotWidth]);
     let top = MARGIN.top;
+    // Marker labels sit above the first panel: in its title row, or in a row of their own.
+    if (!spec.panels[0].title && spec.markers?.some((marker) => marker.label)) top += MARKER_LABEL_ROOM;
     const panels = spec.panels.map((panel) => {
       if (panel.title) top += 16;
       const values = visibleSeries(panel).flatMap((series) => series.values.filter((value) => value != null));
@@ -267,7 +272,12 @@ export function panelChart(container, initialSpec) {
       const x = layout.xScale(marker.x);
       svgEl('line', { class: 'marker-line', x1: x, x2: x, y1: first.top - (first.panel.title ? 14 : 4), y2: last.bottom }, group);
       if (marker.label) {
-        const text = svgEl('text', { class: 'marker-label', x: x + 5, y: first.top - (first.panel.title ? 18 : 8) }, group);
+        // A label in the right half reads leftward from its line, so it stays inside the chart.
+        const leftward = x > (layout.xScale.range[0] + layout.xScale.range[1]) / 2;
+        const text = svgEl('text', {
+          class: 'marker-label', x: leftward ? x - 5 : x + 5, y: first.top - (first.panel.title ? 18 : 8),
+          'text-anchor': leftward ? 'end' : 'start',
+        }, group);
         text.textContent = marker.label;
       }
     }
@@ -278,10 +288,10 @@ export function panelChart(container, initialSpec) {
     for (const entry of layout.panels) {
       for (const series of visibleSeries(entry.panel)) {
         if (!series.endLabel || entry.panel.kind !== 'line') continue;
-        let last = series.values.length - 1;
-        while (last >= 0 && series.values[last] == null) last -= 1;
-        if (last < 0) continue;
-        labels.push({ y: entry.yScale(series.values[last]), text: entry.panel.yFormat(series.values[last]), x: layout.xScale(spec.x[last]) });
+        // A series that stops before the right edge (history before a projection) has no label there.
+        const value = series.values[series.values.length - 1];
+        if (value == null) continue;
+        labels.push({ y: entry.yScale(value), text: entry.panel.yFormat(value) });
       }
     }
     spreadLabels(labels, 13);
