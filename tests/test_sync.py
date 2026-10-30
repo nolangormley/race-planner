@@ -159,3 +159,36 @@ def test_a_queued_sync_covers_a_later_recompute_but_not_the_other_way_round():
         threading.Event().wait(0.01)
     assert kinds == ["sync"]
 
+
+
+def test_a_poll_never_sees_the_first_job_done_while_a_queued_one_waits():
+    registry = SyncRegistry()
+    release_first, release_second, second_started = threading.Event(), threading.Event(), threading.Event()
+
+    def first(progress):
+        release_first.wait(timeout=5)
+        return None, 0
+
+    def second(progress):
+        second_started.set()
+        release_second.wait(timeout=5)
+        return None, 0
+
+    registry.start(7, first, lambda token: None)
+    registry.start_or_queue(7, second, lambda token: None, kind="recompute")
+    seen, stop = set(), threading.Event()
+
+    def poll():
+        while not stop.is_set():
+            snapshot = registry.snapshot(7)
+            seen.add((snapshot["kind"], snapshot["status"]))
+
+    poller = threading.Thread(target=poll)
+    poller.start()
+    release_first.set()
+    assert second_started.wait(timeout=5)
+    stop.set()
+    poller.join()
+    release_second.set()
+    assert ("sync", "done") not in seen          # the page keeps polling into the recompute
+    assert ("recompute", "running") in seen

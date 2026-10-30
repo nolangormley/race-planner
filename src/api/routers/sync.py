@@ -46,9 +46,8 @@ def start_sync_for(user, queue_if_running=False):
 
 
 def sync_state(user_id, last_synced_at):
-    job = sync_registry.get(user_id)
     return {
-        "job": job.snapshot() if job else None,
+        "job": sync_registry.snapshot(user_id),
         "last_synced_at": last_synced_at.isoformat() + "Z" if last_synced_at else None,
     }
 
