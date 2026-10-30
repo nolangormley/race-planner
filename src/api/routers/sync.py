@@ -49,10 +49,11 @@ def start_strava_sync(user_id: int, current_user: User = Depends(get_current_use
         raise HTTPException(status_code=400, detail="Strava isn't connected for this account yet — visit /strava-auth first.")
 
     refresh_token = current_user.strava_refresh_token
+    resting_hr, max_hr = current_user.resting_hr, current_user.max_hr
     try:
         sync_registry.start(
             user_id,
-            run_sync=lambda progress: sync_athlete(refresh_token, progress=progress),
+            run_sync=lambda progress: sync_athlete(refresh_token, progress=progress, resting_hr=resting_hr, max_hr=max_hr),
             on_success=lambda new_token: record_sync_result(user_id, new_token),
         )
     except SyncAlreadyRunning:

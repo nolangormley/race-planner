@@ -319,7 +319,7 @@ class StravaDB:
         if not streams or 'time' not in streams: return
         time_data = streams['time']['data']
 
-        def proc(key, tbl):
+        def proc(key, tbl, val_type):
             if key not in streams: return
             values = streams[key]['data']
             if len(values) != len(time_data):
@@ -330,23 +330,25 @@ class StravaDB:
                 # instead of inserting misaligned data.
                 print(f"    WARNING: stream '{key}' for activity {activity_id} has {len(values)} samples but 'time' has {len(time_data)}; skipping this stream for this activity.")
                 return
-            rows = list(zip([activity_id] * len(time_data), time_data, values))
-            # ON CONFLICT DO UPDATE (upsert) instead of a separate DELETE+INSERT
-            # — the PRIMARY KEY(activity_id, time_offset) on this table makes
-            # re-running ingestion for the same activity idempotent rather
-            # than depending on the DELETE having actually run first.
-            self.con.executemany(
-                f"INSERT INTO stream_{tbl} VALUES (?, ?, ?) ON CONFLICT (activity_id, time_offset) DO UPDATE SET value = EXCLUDED.value",
-                rows
+            # One bulk upsert per stream instead of one statement per sample:
+            # a long run is thousands of samples across seven tables. The
+            # PRIMARY KEY(activity_id, time_offset) keeps a re-run idempotent.
+            rows = pd.DataFrame({'activity_id': activity_id, 'time_offset': time_data, 'value': values})
+            self.con.register('stream_rows', rows)
+            self.con.execute(
+                f"INSERT INTO stream_{tbl} (activity_id, time_offset, value) "
+                f"SELECT activity_id, time_offset, CAST(value AS {val_type}) FROM stream_rows "
+                f"ON CONFLICT (activity_id, time_offset) DO UPDATE SET value = EXCLUDED.value"
             )
+            self.con.unregister('stream_rows')
 
-        proc('heartrate', 'heartrate')
-        proc('velocity_smooth', 'velocity')
-        proc('cadence', 'cadence')
-        proc('watts', 'watts')
-        proc('temp', 'temperature')
-        proc('altitude', 'altitude')
-        proc('moving', 'moving')
+        proc('heartrate', 'heartrate', 'INTEGER')
+        proc('velocity_smooth', 'velocity', 'DOUBLE')
+        proc('cadence', 'cadence', 'INTEGER')
+        proc('watts', 'watts', 'INTEGER')
+        proc('temp', 'temperature', 'INTEGER')
+        proc('altitude', 'altitude', 'DOUBLE')
+        proc('moving', 'moving', 'BOOLEAN')
 
     def activity_exists(self, act_id): return self.con.execute("SELECT 1 FROM dim_activity WHERE activity_id = ?", [act_id]).fetchone() is not None
 
@@ -487,14 +489,21 @@ def calculate_aerobic_decoupling(hr_times, hr_values, vel_times, vel_values):
     if ef1 == 0: return 0
     return ((ef1 - ef2) / ef1) * 100
 
-def run_analyze_effectiveness(db, progress=None):
+def run_analyze_effectiveness(db, progress=None, resting_hr=None, max_hr=None):
     """Computes per-activity TRIMP/EF/zones/decoupling into
     activity_effectiveness. This is the sole implementation of that math in
     the codebase (see calculate_training_status_logic in src/api/main.py,
     which now just aggregates this table's output) — unify any future change
     here rather than adding a second copy elsewhere.
 
-    progress('metrics', done=, total=) is called once per activity.
+    Only activities that are new, re-synced since their last computation, or
+    computed against a different heart rate profile are processed. Each row
+    records the max and resting heart rate it used, so changing either
+    recomputes every activity on the next run.
+
+    resting_hr and max_hr override the defaults (DEFAULT_REST_HR and the
+    athlete's highest recorded heart rate). progress('metrics', done=, total=)
+    is called once per processed activity.
     """
     if progress is None:
         progress = _no_progress
@@ -508,9 +517,18 @@ def run_analyze_effectiveness(db, progress=None):
             efficiency_factor DOUBLE, intensity_factor DOUBLE, aerobic_decoupling DOUBLE,
             zone_1_sec INTEGER, zone_2_sec INTEGER, zone_3_sec INTEGER, zone_4_sec INTEGER, zone_5_sec INTEGER,
             effectiveness_score DOUBLE, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            hr_max_used DOUBLE, hr_rest_used DOUBLE,
             FOREIGN KEY (activity_id) REFERENCES dim_activity(activity_id)
         );
     """)
+    if not db._migration_applied("activity_effectiveness_add_hr_profile_columns"):
+        for column in ("hr_max_used", "hr_rest_used"):
+            try:
+                con.execute(f"ALTER TABLE activity_effectiveness ADD COLUMN {column} DOUBLE")
+            except (duckdb.CatalogException, duckdb.BinderException):
+                pass
+        db._mark_migration_applied("activity_effectiveness_add_hr_profile_columns")
+    rest_hr = resting_hr or DEFAULT_REST_HR
 
     # Activities with a heartrate stream get a real per-sample TRIMP.
     # Activities with only a Strava-reported average_heartrate (no stream —
@@ -518,25 +536,34 @@ def run_analyze_effectiveness(db, progress=None):
     # single-point TRIMP from that average, instead of being silently
     # excluded from training load entirely (previously indistinguishable
     # from a rest day).
-    acts = con.execute("""
-        SELECT da.activity_id, da.name, da.start_date_local, da.athlete_id, da.average_speed, ath.sex,
-               da.average_heartrate, da.moving_time
-        FROM dim_activity da
-        JOIN dim_athlete ath ON da.athlete_id = ath.athlete_id
-        WHERE EXISTS (SELECT 1 FROM stream_heartrate sh WHERE sh.activity_id = da.activity_id)
-           OR (da.average_heartrate IS NOT NULL AND da.average_heartrate > 0)
-    """).fetchall()
-
-    # Zones and intensity are relative to the athlete's max heart rate on
-    # record, the same figure the API uses. Each activity's own peak used to
-    # stand in for it, which made every easy run look like a threshold session.
+    # Zones and intensity are relative to the athlete's max heart rate (set
+    # on the profile, or the highest on record), the same figure the API uses.
     athlete_max_hr = dict(con.execute(
         "SELECT athlete_id, MAX(max_heartrate) FROM dim_activity WHERE max_heartrate > 100 GROUP BY athlete_id"
     ).fetchall())
 
+    candidates = con.execute("""
+        SELECT da.activity_id, da.name, da.start_date_local, da.athlete_id, da.average_speed, ath.sex,
+               da.average_heartrate, da.moving_time,
+               ae.activity_id IS NOT NULL AS computed, ae.hr_max_used, ae.hr_rest_used,
+               ae.updated_at < da.updated_at AS resynced
+        FROM dim_activity da
+        JOIN dim_athlete ath ON da.athlete_id = ath.athlete_id
+        LEFT JOIN activity_effectiveness ae ON ae.activity_id = da.activity_id
+        WHERE EXISTS (SELECT 1 FROM stream_heartrate sh WHERE sh.activity_id = da.activity_id)
+           OR (da.average_heartrate IS NOT NULL AND da.average_heartrate > 0)
+    """).fetchall()
+    acts = []
+    for row in candidates:
+        athlete_id, computed, used_max, used_rest, resynced = row[3], row[8], row[9], row[10], row[11]
+        user_max_hr = max_hr or athlete_max_hr.get(athlete_id) or DEFAULT_MAX_HR
+        if computed and not resynced and used_max == user_max_hr and used_rest == rest_hr:
+            continue
+        acts.append(row[:8] + (user_max_hr,))
+
     processed = 0
     total = len(acts)
-    for i, (act_id, name, date, athlete_id, avg_speed, sex, avg_hr_summary, moving_time) in enumerate(acts):
+    for i, (act_id, name, date, athlete_id, avg_speed, sex, avg_hr_summary, moving_time, user_max_hr) in enumerate(acts):
         progress('metrics', done=i, total=total)
         if i % 10 == 0:
             print(f"  Processing {i}/{total}: {name}...")
@@ -551,7 +578,6 @@ def run_analyze_effectiveness(db, progress=None):
             # and used to abort this entire function partway through.
             hr_data = [(v, t) for (v, t) in hr_data if v is not None]
 
-            user_max_hr = athlete_max_hr.get(athlete_id) or DEFAULT_MAX_HR
             # Sex-coefficient default: unknown/missing sex assumes male
             # (1.92). This used to default to female (1.67) here but male
             # elsewhere in the codebase for the same missing-data case —
@@ -567,11 +593,11 @@ def run_analyze_effectiveness(db, progress=None):
                 for idx in range(1, len(hr_vals)):
                     dt = (times[idx] - prev_t) / 60.0
                     if dt > 5: dt = 0
-                    trimp_b += calculate_trimp_banister(dt * 60, hr_vals[idx], user_max_hr, DEFAULT_REST_HR, is_male)
+                    trimp_b += calculate_trimp_banister(dt * 60, hr_vals[idx], user_max_hr, rest_hr, is_male)
                     prev_t = times[idx]
 
                 trimp_e = calculate_trimp_edwards(hr_vals, user_max_hr)
-                zones = calculate_time_in_zones(hr_vals, user_max_hr)
+                zones = calculate_time_in_zones(hr_vals, user_max_hr, rest_hr)
                 ef = ((avg_speed or 0) * 60) / avg_hr if avg_hr > 0 else 0
                 intensity = avg_hr / user_max_hr if user_max_hr else 0
 
@@ -583,7 +609,7 @@ def run_analyze_effectiveness(db, progress=None):
             elif avg_hr_summary and moving_time:
                 # No stream — single-point TRIMP from the Strava summary.
                 avg_hr = avg_hr_summary
-                trimp_b = calculate_trimp_banister(moving_time, avg_hr, user_max_hr, DEFAULT_REST_HR, is_male)
+                trimp_b = calculate_trimp_banister(moving_time, avg_hr, user_max_hr, rest_hr, is_male)
                 trimp_e = 0
                 zones = [0, 0, 0, 0, 0]
                 ef = ((avg_speed or 0) * 60) / avg_hr if avg_hr > 0 else 0
@@ -593,15 +619,16 @@ def run_analyze_effectiveness(db, progress=None):
                 continue
 
             con.execute("""
-                INSERT INTO activity_effectiveness (activity_id, trimp_banister, trimp_edwards, efficiency_factor, intensity_factor, aerobic_decoupling, zone_1_sec, zone_2_sec, zone_3_sec, zone_4_sec, zone_5_sec, effectiveness_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO activity_effectiveness (activity_id, trimp_banister, trimp_edwards, efficiency_factor, intensity_factor, aerobic_decoupling, zone_1_sec, zone_2_sec, zone_3_sec, zone_4_sec, zone_5_sec, effectiveness_score, hr_max_used, hr_rest_used)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (activity_id) DO UPDATE SET
                     trimp_banister = EXCLUDED.trimp_banister, trimp_edwards = EXCLUDED.trimp_edwards,
                     efficiency_factor = EXCLUDED.efficiency_factor, intensity_factor = EXCLUDED.intensity_factor,
                     aerobic_decoupling = EXCLUDED.aerobic_decoupling, zone_1_sec = EXCLUDED.zone_1_sec,
                     zone_2_sec = EXCLUDED.zone_2_sec, zone_3_sec = EXCLUDED.zone_3_sec, zone_4_sec = EXCLUDED.zone_4_sec,
-                    zone_5_sec = EXCLUDED.zone_5_sec, effectiveness_score = EXCLUDED.effectiveness_score, updated_at = now()
-            """, [act_id, trimp_b, trimp_e, ef, intensity, decoupling, zones[0], zones[1], zones[2], zones[3], zones[4], trimp_b])
+                    zone_5_sec = EXCLUDED.zone_5_sec, effectiveness_score = EXCLUDED.effectiveness_score,
+                    hr_max_used = EXCLUDED.hr_max_used, hr_rest_used = EXCLUDED.hr_rest_used, updated_at = now()
+            """, [act_id, trimp_b, trimp_e, ef, intensity, decoupling, zones[0], zones[1], zones[2], zones[3], zones[4], trimp_b, user_max_hr, rest_hr])
             processed += 1
         except Exception as e:
             # One bad activity no longer aborts the whole batch — and
@@ -632,7 +659,24 @@ def run_analyze_training_load(db):
     return {"CTL": today['CTL'], "ATL": today['ATL'], "TSB": today['TSB']}
 
 
-def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None):
+def recompute_metrics(db_path=None, progress=None, resting_hr=None, max_hr=None):
+    """Re-runs the effectiveness and training-load passes without talking to
+    Strava, for when the athlete changes their heart rate profile. Returns
+    (None, 0) so it runs under the same job runner as sync_athlete."""
+    if progress is None:
+        progress = _no_progress
+    db = StravaDB(db_path=db_path or DB_PATH)
+    try:
+        progress('metrics')
+        run_analyze_effectiveness(db, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
+        progress('load')
+        run_analyze_training_load(db)
+    finally:
+        db.con.close()
+    return None, 0
+
+
+def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None, resting_hr=None, max_hr=None):
     """Runs one full ingest + effectiveness + training-load cycle for a
     single athlete, using their own stored refresh_token — this is what
     backs the web app's on-demand "Sync Strava Now" action
@@ -674,7 +718,7 @@ def sync_athlete(refresh_token, lookback_days=180, db_path=None, progress=None):
     try:
         count = ingest_data(manager, db, access_token, lookback_days=lookback_days, reauth_fn=_reauth_unavailable, progress=progress)
         progress('metrics')
-        run_analyze_effectiveness(db, progress=progress)
+        run_analyze_effectiveness(db, progress=progress, resting_hr=resting_hr, max_hr=max_hr)
         progress('load')
         run_analyze_training_load(db)
     finally:

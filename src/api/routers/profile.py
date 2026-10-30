@@ -1,14 +1,38 @@
-"""Profile updates."""
+"""Profile updates and the heart rate profile."""
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime
 import logging
 
+from src.pipeline import recompute_metrics
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User
+from src.api.deps import get_db_connection, DEFAULT_REST_HR
 from src.api.schemas import ProfileUpdate
+from src.api.services.metrics import detected_max_hr
+from src.api.services.sync import registry as sync_registry, SyncAlreadyRunning
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
+
+
+@router.get("/api/hr-profile/{user_id}")
+def hr_profile(user_id: int, current_user: User = Depends(get_current_user)):
+    """The resting and max heart rate in use, and where each comes from."""
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this profile")
+    detected = None
+    if current_user.strava_athlete_id:
+        con = get_db_connection()
+        try:
+            detected = detected_max_hr(con, current_user.strava_athlete_id)
+        finally:
+            con.close()
+    return {
+        "resting_hr": current_user.resting_hr,
+        "max_hr": current_user.max_hr,
+        "default_resting_hr": DEFAULT_REST_HR,
+        "detected_max_hr": detected,
+    }
 
 
 @router.post("/profile/{user_id}")
@@ -36,8 +60,15 @@ def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = De
             user.height = profile.height
         if profile.weight is not None:
             user.weight = profile.weight
+
+        # Null is a real value here: it means "back to the detected/default".
+        hr_changed = False
+        for field in ("resting_hr", "max_hr"):
+            if field in profile.model_fields_set and getattr(profile, field) != getattr(user, field):
+                setattr(user, field, getattr(profile, field))
+                hr_changed = True
         db.commit()
-        return {"message": "Profile updated"}
+        resting_hr, max_hr, athlete_id = user.resting_hr, user.max_hr, user.strava_athlete_id
     except HTTPException:
         raise
     except Exception as e:
@@ -45,3 +76,20 @@ def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = De
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         db.close()
+
+    # Every stored zone, TRIMP and VO2 estimate depends on these two numbers,
+    # so a change recomputes the warehouse in the background. The UI shows it
+    # with the same progress panel as a sync.
+    recompute_started = False
+    if hr_changed and athlete_id:
+        try:
+            sync_registry.start(
+                user_id,
+                run_sync=lambda progress: recompute_metrics(progress=progress, resting_hr=resting_hr, max_hr=max_hr),
+                on_success=lambda new_token: None,
+                kind="recompute",
+            )
+            recompute_started = True
+        except SyncAlreadyRunning:
+            pass
+    return {"message": "Profile updated", "recompute_started": recompute_started}

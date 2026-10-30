@@ -8,7 +8,7 @@ One `APIRouter` per concern, all mounted by `../main.py`. Each router does the s
 - `workouts.py`: the workout library CRUD.
 - `analytics.py`: training status (with the coach's note), VO2 max, pace zones, dashboard analytics (HR zones, time by type, weekly volume).
 - `races.py`: races CRUD.
-- `profile.py`: profile updates.
+- `profile.py`: profile updates and `GET /api/hr-profile/{user_id}` (resting and max heart rate in use, and where they come from). A changed heart rate profile starts a metrics recompute job.
 - `plan.py`: training plan entries CRUD.
 
 A new endpoint goes in the router that owns its data; a new concern gets a new file here and one `include_router` line in `main.py`.

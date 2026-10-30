@@ -7,11 +7,12 @@ from src.api.auth_routes import get_current_user
 from src.api.database import User
 from src.api.services.coach import get_ai_insight
 from src.api.services.llm import cached_call
-from src.api.deps import get_db_connection, DEFAULT_MAX_HR, DEFAULT_REST_HR
+from src.api.deps import get_db_connection, DEFAULT_REST_HR
 from src.api.services.metrics import (
     calculate_training_status_logic,
     calculate_vo2max,
     calculate_pace_zones,
+    detected_max_hr,
 )
 
 logger = logging.getLogger("race_planner.api")
@@ -26,7 +27,7 @@ def get_status(user_id: int, current_user: User = Depends(get_current_user)):
     if user_id != current_user.strava_athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's status")
 
-    status = calculate_training_status_logic(user_id)
+    status = calculate_training_status_logic(user_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
     if not status:
         raise HTTPException(status_code=404, detail="No training data found for user")
 
@@ -51,7 +52,7 @@ def get_vo2max(user_id: int, current_user: User = Depends(get_current_user)):
     # user_id here is the Strava athlete_id (see /status/{user_id} above).
     if user_id != current_user.strava_athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's VO2max")
-    vo2max_data = calculate_vo2max(user_id)
+    vo2max_data = calculate_vo2max(user_id, hr_max=current_user.max_hr, hr_rest=current_user.resting_hr)
     if not vo2max_data:
         raise HTTPException(status_code=404, detail="No stream data found to calculate VO2 Max for this user.")
     return vo2max_data
@@ -61,7 +62,7 @@ def get_pace_zones(user_id: int, current_user: User = Depends(get_current_user))
     # user_id here is the Strava athlete_id (see /status/{user_id} above).
     if user_id != current_user.strava_athlete_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's pace zones")
-    zones = calculate_pace_zones(user_id)
+    zones = calculate_pace_zones(user_id, hr_max=current_user.max_hr)
     if not zones:
         raise HTTPException(status_code=404, detail="No stream data found to calculate Pace Zones for this user.")
     return zones
@@ -73,16 +74,8 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Not authorized to view this athlete's analytics")
     con = get_db_connection()
     try:
-        # Derive HR max from athlete's recorded data (fallback DEFAULT_MAX_HR)
-        try:
-            hr_max_row = con.execute(
-                "SELECT MAX(max_heartrate) FROM dim_activity WHERE athlete_id = ? AND max_heartrate > 100",
-                [user_id]
-            ).fetchone()
-            hr_max = float(hr_max_row[0]) if hr_max_row and hr_max_row[0] else float(DEFAULT_MAX_HR)
-        except Exception:
-            logger.exception(f"Failed to look up max_heartrate for athlete {user_id}; falling back to default.")
-            hr_max = float(DEFAULT_MAX_HR)
+        hr_max = float(current_user.max_hr or detected_max_hr(con, user_id))
+        hr_rest = current_user.resting_hr or DEFAULT_REST_HR
 
         # Bounded to the same 30-day window as load_dist below, and
         # percentages are computed here rather than left for the frontend to
@@ -96,8 +89,8 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
         # agent_prompting/improvement_plan.md Section 3.
         # Zones are shares of heart rate reserve (Karvonen), the same reserve
         # the TRIMP in src/pipeline.py is built on.
-        reserve = hr_max - DEFAULT_REST_HR
-        zone_edges = [DEFAULT_REST_HR + share * reserve for share in (0.60, 0.70, 0.80, 0.90)]
+        reserve = hr_max - hr_rest
+        zone_edges = [hr_rest + share * reserve for share in (0.60, 0.70, 0.80, 0.90)]
         hr_query = """
         SELECT
             CASE
@@ -163,7 +156,7 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
             ],
             "weekly_volume": weekly_volume,
             "hr_max": hr_max,
-            "hr_rest": DEFAULT_REST_HR,
+            "hr_rest": hr_rest,
         }
     except Exception as e:
         return {"error": str(e)}

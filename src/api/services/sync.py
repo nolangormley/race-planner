@@ -23,6 +23,11 @@ PHASE_SPAN = {
     "metrics": (70, 95),
     "load": (95, 100),
 }
+# A recompute (heart rate profile changed) never talks to Strava.
+RECOMPUTE_SPAN = {
+    "metrics": (0, 95),
+    "load": (95, 100),
+}
 
 PHASE_LABEL = {
     "auth": "Refreshing Strava access",
@@ -40,10 +45,11 @@ class SyncAlreadyRunning(Exception):
 
 
 class SyncJob:
-    def __init__(self, user_id):
+    def __init__(self, user_id, kind="sync"):
         self.user_id = user_id
+        self.kind = kind
         self.status = "running"
-        self.phase = "auth"
+        self.phase = "auth" if kind == "sync" else "metrics"
         self.done = 0
         self.total = 0
         self.detail = ""
@@ -84,17 +90,22 @@ class SyncJob:
     def percent(self):
         if self.status == "done":
             return 100
-        start, end = PHASE_SPAN.get(self.phase, (0, 0))
+        spans = RECOMPUTE_SPAN if self.kind == "recompute" else PHASE_SPAN
+        start, end = spans.get(self.phase, (0, 0))
         if self.total:
             return round(start + (end - start) * min(self.done, self.total) / self.total)
         return start
 
     def snapshot(self):
         with self.lock:
+            label = PHASE_LABEL[self.phase]
+            if self.phase == "done" and self.kind == "recompute":
+                label = "Metrics updated"
             return {
                 "status": self.status,
+                "kind": self.kind,
                 "phase": self.phase,
-                "label": PHASE_LABEL[self.phase],
+                "label": label,
                 "detail": self.detail,
                 "done": self.done,
                 "total": self.total,
@@ -118,15 +129,16 @@ class SyncRegistry:
     def get(self, user_id):
         return self.jobs.get(user_id)
 
-    def start(self, user_id, run_sync, on_success):
+    def start(self, user_id, run_sync, on_success, kind="sync"):
         """run_sync(progress) does the sync and returns (new_refresh_token, count).
         on_success(new_refresh_token) runs in the worker thread when run_sync
-        returns, before the job is marked done."""
+        returns, before the job is marked done. kind is 'sync' (Strava) or
+        'recompute' (metrics only)."""
         with self.lock:
             current = self.jobs.get(user_id)
             if current and current.status == "running":
                 raise SyncAlreadyRunning()
-            job = SyncJob(user_id)
+            job = SyncJob(user_id, kind=kind)
             self.jobs[user_id] = job
         worker = threading.Thread(
             target=self.run, args=(job, run_sync, on_success), daemon=True, name=f"strava-sync-{user_id}"

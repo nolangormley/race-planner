@@ -42,6 +42,9 @@ class ProfileUpdate(BaseModel):
     gender: Optional[str] = None
     height: Optional[float] = None  # stored in meters
     weight: Optional[float] = None  # stored in kg
+    # Sent explicitly as null to go back to the detected/default value.
+    resting_hr: Optional[int] = Field(default=None, ge=30, le=120)
+    max_hr: Optional[int] = Field(default=None, ge=120, le=230)
 
 
 class PasswordChange(BaseModel):

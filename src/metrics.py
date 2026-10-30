@@ -51,13 +51,57 @@ def get_target_category(tsb):
     else:
         return "Recovery"
 
+def steady_state_mask(df, warmup_seconds=300, window=60):
+    """Which samples of a per-second running frame are steady enough to
+    estimate VO2 max from. df has activity_id, time_offset, speed and hr.
+
+    Heart rate lags pace by a minute or two, so the start of a run, every
+    surge and every downhill read as "fast pace at a low heart rate" and
+    inflate the estimate. A sample counts as steady when it is past the
+    warm-up and within 5% of its one-minute mean pace and 3 bpm of its
+    one-minute mean heart rate.
+    """
+    grouped = df.groupby('activity_id')
+    speed_mean = grouped['speed'].transform(lambda s: s.rolling(window, center=True, min_periods=window // 2).mean())
+    hr_mean = grouped['hr'].transform(lambda s: s.rolling(window, center=True, min_periods=window // 2).mean())
+    steady = (
+        (df['time_offset'] >= warmup_seconds)
+        & ((df['speed'] - speed_mean).abs() <= 0.05 * speed_mean)
+        & ((df['hr'] - hr_mean).abs() <= 3)
+    )
+    return steady.fillna(False)
+
+
+def add_grade(df, window=30):
+    """Adds a 'grade' column (rise over run across the last `window` samples)
+    from the altitude stream, clipped to a plausible running range. Without
+    an altitude column the grade is zero."""
+    if 'altitude' not in df.columns:
+        df['grade'] = 0.0
+        return df
+    grouped = df.groupby('activity_id')
+    climb = grouped['altitude'].transform(lambda s: s.diff(window))
+    distance = grouped['speed'].transform(lambda s: s.rolling(window).sum())
+    df['grade'] = (climb / distance).clip(-0.08, 0.12).fillna(0.0)
+    return df
+
+
 def calculate_vo2max_from_df(df, hr_max=190, hr_rest=60):
     """
-    Given a DataFrame with 'speed' and 'hr' columns, estimates VO2 max.
-    Returns a DataFrame with 'vo2_max_est' calculated.
+    Given a DataFrame with 'speed' and 'hr' columns (and optionally 'grade',
+    a fraction), estimates VO2 max per sample. Returns a DataFrame with
+    'vo2_max_est' calculated.
+
+    The oxygen cost of running is the ACSM equation: 0.2 x speed (m/min) plus
+    a grade term, plus 3.5 resting. Downhill gives back less than the uphill
+    term costs, so the downhill coefficient is halved.
     """
     df_calc = df.copy()
-    df_calc['vo2_current'] = (0.2 * (df_calc['speed'] * 60)) + 3.5
+    speed_per_min = df_calc['speed'] * 60
+    grade = df_calc['grade'] if 'grade' in df_calc.columns else 0.0
+    uphill = grade.clip(lower=0) if hasattr(grade, 'clip') else max(grade, 0)
+    downhill = grade.clip(upper=0) if hasattr(grade, 'clip') else min(grade, 0)
+    df_calc['vo2_current'] = 0.2 * speed_per_min + 0.9 * speed_per_min * uphill + 0.45 * speed_per_min * downhill + 3.5
     df_calc['pct_hrr'] = (df_calc['hr'] - hr_rest) / (hr_max - hr_rest)
     # avoid division by zero or negative
     df_calc = df_calc[df_calc['pct_hrr'] > 0]

@@ -72,8 +72,10 @@ function fillTile(key, { value, unit, delta, deltaLabel, deltaGood, spark, foot 
   deltaEl.className = 'stat-delta';
   if (delta == null) {
     deltaEl.textContent = deltaLabel || '';
+  } else if (Math.abs(delta) < 0.05) {
+    deltaEl.textContent = `• unchanged ${deltaLabel}`;
   } else {
-    const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '•';
+    const arrow = delta > 0 ? '▲' : '▼';
     const signed = `${delta > 0 ? '+' : ''}${Math.abs(delta) >= 10 ? Math.round(delta) : delta.toFixed(1)}`;
     deltaEl.textContent = `${arrow} ${signed} ${deltaLabel}`;
     if (deltaGood != null && delta !== 0) deltaEl.classList.add(deltaGood === (delta > 0) ? 'good' : 'bad');
