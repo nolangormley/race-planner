@@ -3,3 +3,5 @@
 # requirements.txt) doesn't carry test tooling it never runs.
 -r requirements.txt
 pytest==8.4.2
+# Starlette's TestClient (route tests in tests/test_password_reset.py).
+httpx==0.28.1

@@ -4,5 +4,6 @@ Jinja2 pages rendered by `../routers/pages.py` and `../auth_routes.py`. `base.ht
 
 - `dashboard.html`, `streams.html` (one activity), `index.html` (activities list and workout library), `training_calendar.html`, `profile.html`: logged-in pages. Their markup is placeholders that `../static/js/pages/*.js` fill.
 - `login.html`, `register.html`, `setup.html` (first race), `strava_auth.html`: the sign-up flow. Plain form posts; `register.html` has a small inline module that converts height and weight to meters and kilograms before submit.
+- `forgot_password.html`, `reset_password.html`: the emailed password reset. Plain form posts; the reset token rides in a hidden field.
 
 Keep markup here and behaviour in the page modules; the only inline script is the theme bootstrap in `base.html` and the unit conversion in `register.html`.
