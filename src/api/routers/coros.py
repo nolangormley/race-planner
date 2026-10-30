@@ -5,11 +5,12 @@ import logging
 
 from src.coros import login, CorosAuthError, CorosError
 from src.api.auth_routes import get_current_user
-from src.api.database import SessionLocal, User
-from src.api.deps import get_db_connection
+from src.api.database import SessionLocal, User, TrainingPlan, TrainingPlanEntry
+from src.api.deps import get_db_connection, DEFAULT_MAX_HR
 from src.api.schemas import CorosLink
 from src.api.services.coros_sync import sync_coros, unlink_coros, client_for, recompute_trigger
-from src.api.services.metrics import coros_resting_hr
+from src.api.services.metrics import coros_resting_hr, detected_max_hr, resolve_resting_hr, calculate_training_status_logic
+from src.api.services.readiness import readiness_for
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
@@ -147,3 +148,42 @@ def recovery(user_id: int, days: int = 42, current_user: User = Depends(get_curr
         "hrv_7d": round(week[1]) if week and week[1] else None,
         "sleep_7d_min": round(week[2]) if week and week[2] else None,
     }
+
+
+def planned_workout_today(db, user_id, today):
+    entry = (
+        db.query(TrainingPlanEntry)
+        .join(TrainingPlan, TrainingPlan.id == TrainingPlanEntry.plan_id)
+        .filter(TrainingPlan.user_id == user_id, TrainingPlanEntry.date == today)
+        .first()
+    )
+    return entry.workout_type if entry else None
+
+
+@router.get("/api/readiness/{user_id}")
+def readiness_today(user_id: int, current_user: User = Depends(get_current_user)):
+    """Today's go / normal / easy / rest call from last night's COROS
+    reading and today's form, with a hint when a hard session is planned."""
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    athlete_id = current_user.strava_athlete_id
+    if not athlete_id or not current_user.coros_access_token:
+        return {"available": False}
+    today = date.today()
+    con = get_db_connection()
+    try:
+        hr_max = current_user.max_hr or detected_max_hr(con, athlete_id) or DEFAULT_MAX_HR
+        hr_rest = resolve_resting_hr(con, current_user)
+    finally:
+        con.close()
+    status = calculate_training_status_logic(athlete_id, hr_max, hr_rest)
+    db = SessionLocal()
+    try:
+        planned = planned_workout_today(db, user_id, today)
+    finally:
+        db.close()
+    con = get_db_connection()
+    try:
+        return readiness_for(con, athlete_id, status["form_tsb"] if status else None, today, planned)
+    finally:
+        con.close()

@@ -26,6 +26,7 @@ def test_every_router_is_mounted(app):
         ("GET", "/profile"),
         ("POST", "/profile/{user_id}"),
         ("GET", "/api/hr-profile/{user_id}"),
+        ("GET", "/api/readiness/{user_id}"),
         ("GET", "/api/activities"),
         ("DELETE", "/api/activities/{activity_id}"),
         ("GET", "/api/activities/{activity_id}/streams"),

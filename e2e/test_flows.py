@@ -191,6 +191,8 @@ def test_coros_link_pulls_nights_and_fills_the_recovery_card(app_server, registe
     tiles = page.text_content("#recovery-tiles")
     assert "ms" in tiles and "bpm" in tiles
     page.wait_for_selector("#recovery-chart svg")
+    page.wait_for_selector("#readiness .badge")
+    assert page.text_content("#readiness .badge").startswith("Today:")
 
 
 def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered_user, page):
