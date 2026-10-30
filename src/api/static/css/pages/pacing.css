@@ -6,8 +6,6 @@
 .pacing-summary:empty { display: none; }
 .pacing-summary > div { padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius); min-width: 0; }
 .pacing-summary .stat-value { font-size: 20px; }
-.grade-up { color: var(--series-2); }
-.grade-down { color: var(--series-3); }
 .pace-band { display: none; }
 
 @media (max-width: 800px) {

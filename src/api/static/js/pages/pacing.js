@@ -32,8 +32,7 @@ function paceText(secondsPerKm, secondsPerMile, withUnit = true) {
 function gradeCell(split) {
   // Rounding first keeps a slight downhill from printing as "-0.0%".
   const percent = Math.round(split.grade * 1000) / 10;
-  const tone = percent > 0.5 ? 'grade-up' : percent < -0.5 ? 'grade-down' : '';
-  return `<td class="num col-grade ${tone}">${percent > 0 ? '+' : ''}${(percent || 0).toFixed(1)}%</td>`;
+  return `<td class="num col-grade">${percent > 0 ? '+' : ''}${(percent || 0).toFixed(1)}%</td>`;
 }
 
 // The smallest stride from TICK_STRIDES that keeps count labels at least
