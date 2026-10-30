@@ -5,6 +5,7 @@ import time
 from datetime import date, timedelta
 
 import requests
+from playwright.sync_api import expect
 
 from e2e.conftest import login
 
@@ -52,14 +53,14 @@ def test_sync_button_runs_a_sync_with_progress_and_fills_the_dashboard(app_serve
 
     # The page reloads its own data on the strava:synced event; no reload needed.
     page.wait_for_function("document.querySelector('#stat-fitness .stat-value').textContent.trim() !== '–'", timeout=30000)
-    page.wait_for_selector("#recent tbody tr")
     assert "Synced" in page.text_content("#sync-status")
-    assert page.locator("#pmc-chart svg path").count() > 0
-    assert page.locator("#hr-chart svg .cat-label").count() == 5     # five zone rows, bars only where time was spent
-    assert page.locator("#hr-chart svg .bar").count() >= 2
-    assert page.locator("#recent tbody tr").count() == 3
-    assert page.locator("#predictions tbody tr").count() >= 4
-    assert page.locator("#volume-chart svg .bar").count() >= 3
+    # Each card reloads from its own request, so wait for each one instead of counting once.
+    page.locator("#pmc-chart svg path").first.wait_for()
+    expect(page.locator("#hr-chart svg .cat-label")).to_have_count(5)     # five zone rows, bars only where time was spent
+    page.locator("#hr-chart svg .bar").nth(1).wait_for()
+    expect(page.locator("#recent tbody tr")).to_have_count(3)
+    page.locator("#predictions tbody tr").nth(3).wait_for()
+    page.locator("#volume-chart svg .bar").nth(2).wait_for()
 
 
 def test_every_page_renders_without_errors(app_server, registered_user, page):
@@ -84,7 +85,8 @@ def test_calendar_entry_can_be_added_edited_and_removed(app_server, registered_u
     login(page, app_server)
     page.goto(f"{app_server}/training-calendar")
     page.wait_for_load_state("networkidle")
-    cell = page.locator(".cal-cell:not(.other)").nth(20)
+    # A day without a synced run: clicking a run's chip opens the activity instead.
+    cell = page.locator(".cal-cell:not(.other):not(:has(.chip.activity))").nth(20)
     date_key = cell.get_attribute("data-date")
     cell.click()
     page.wait_for_selector("#entry-modal.open")
@@ -92,7 +94,7 @@ def test_calendar_entry_can_be_added_edited_and_removed(app_server, registered_u
     page.fill("#entry-distance", "7 miles")
     page.click("#entry-save")
     page.locator("#entry-modal.open").wait_for(state="hidden")
-    chip = page.locator(f'.cal-cell[data-date="{date_key}"] .chip')
+    chip = page.locator(f'.cal-cell[data-date="{date_key}"] .chip:not(.activity)')
     chip.wait_for()
     assert "Tempo" in chip.text_content()
 
@@ -104,11 +106,11 @@ def test_calendar_entry_can_be_added_edited_and_removed(app_server, registered_u
     page.wait_for_selector(f'.cal-cell[data-date="{date_key}"] .chip.done')
 
     page.once("dialog", lambda dialog: dialog.accept())
-    page.locator(f'.cal-cell[data-date="{date_key}"] .chip').click()
+    chip.click()
     page.wait_for_selector("#entry-modal.open")
     page.click("#entry-delete")
     page.locator("#entry-modal.open").wait_for(state="hidden")
-    selector = f'.cal-cell[data-date="{date_key}"] .chip'
+    selector = f'.cal-cell[data-date="{date_key}"] .chip:not(.activity)'
     page.wait_for_function("selector => document.querySelector(selector) === null", arg=selector)
 
 
