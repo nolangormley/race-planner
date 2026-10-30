@@ -254,6 +254,70 @@ async function deleteEntry() {
   }
 }
 
+// ---- Build a plan ----
+const buildModal = qs('#build-modal');
+const PLAN_RACES = new Set(['5k', '5 mile', '10k', '10 mile', 'half marathon', 'marathon']);
+
+async function openBuildModal() {
+  const metric = units.isMetric();
+  qs('#build-weekly-unit').textContent = metric ? '(km)' : '(mi)';
+  qs('#build-form .status').textContent = '';
+  const select = qs('#build-race');
+  select.innerHTML = '<option value="">Loading races…</option>';
+  openModal(buildModal);
+
+  const [races, analytics] = await Promise.all([
+    fetchJson(`/api/races/${userId}`).catch(() => []),
+    config.athleteId ? fetchJson(`/analytics/${config.athleteId}`).catch(() => null) : null,
+  ]);
+  const upcoming = races.filter((race) => race.race_date > todayKey && PLAN_RACES.has((race.race_length || '').toLowerCase()));
+  if (!upcoming.length) {
+    select.innerHTML = '<option value="">No upcoming race yet</option>';
+    qs('#build-race-hint').innerHTML = 'Add a 5K to marathon race on your <a href="/profile">profile</a> first.';
+    qs('#build-save').disabled = true;
+  } else {
+    select.innerHTML = upcoming.map((race) => `<option value="${race.id}">${escapeHtml(race.name || race.race_length)} · ${escapeHtml(race.race_length)} · ${fmtDate(race.race_date, { month: 'short', day: 'numeric' })}</option>`).join('');
+    qs('#build-race-hint').textContent = '';
+    qs('#build-save').disabled = false;
+  }
+  // Prefill from the last four complete weeks of running.
+  const weeks = (analytics?.weekly_volume || []).slice(-5, -1);
+  const average = weeks.length ? weeks.reduce((sum, week) => sum + week.distance, 0) / weeks.length : 0;
+  qs('#build-weekly').value = average ? units.distanceValue(average).toFixed(1) : '';
+  qs('#build-weekly-hint').textContent = average ? `Your last four weeks averaged ${units.distance(average, 1)}.` : 'No recent runs to go on; enter a number.';
+}
+
+async function submitBuild(event) {
+  event.preventDefault();
+  const status = qs('#build-form .status');
+  const save = qs('#build-save');
+  const metric = units.isMetric();
+  const weeklyValue = Number(qs('#build-weekly').value);
+  const payload = {
+    race_id: Number(qs('#build-race').value),
+    days_per_week: Number(qs('#build-days').value),
+    long_run_day: Number(qs('#build-long').value),
+    quality_sessions: Number(qs('#build-quality').value),
+    weekly_distance_m: weeklyValue ? weeklyValue * (metric ? 1000 : 1609.344) : null,
+    metric,
+    replace_future: qs('#build-replace').checked,
+  };
+  save.disabled = true;
+  status.textContent = 'Building…';
+  try {
+    const result = await fetchJson(`/api/training-plan/${userId}/build`, { method: 'POST', body: payload });
+    closeModal(buildModal);
+    const peak = units.distance(result.summary.peak_weekly_m, 0);
+    showToast(`Plan built: ${result.summary.weeks} weeks, peaking at ${peak} a week`);
+    state.entries = (result.entries || []).sort((left, right) => left.date.localeCompare(right.date));
+    renderAll();
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    save.disabled = false;
+  }
+}
+
 // ---- Data ----
 async function loadPlan() {
   const data = await fetchJson(`/api/training-plan/${userId}`).catch(() => ({ entries: [] }));
@@ -281,6 +345,8 @@ qs('#cal-today').addEventListener('click', () => {
   renderAll();
 });
 qs('#cal-add').addEventListener('click', () => openEntryModal(todayKey, entryOn(todayKey)));
+qs('#cal-build').addEventListener('click', openBuildModal);
+qs('#build-form').addEventListener('submit', submitBuild);
 qs('#entry-form').addEventListener('submit', saveEntry);
 qs('#entry-delete').addEventListener('click', deleteEntry);
 document.addEventListener('strava:synced', loadActivities);

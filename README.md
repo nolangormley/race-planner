@@ -70,6 +70,14 @@ To sync your latest Strava activities and recalculate effectiveness metrics:
 python src/pipeline.py
 ```
 
+### Building a training plan
+On the training plan page, **Build plan** fills the calendar from tomorrow to one of your upcoming races.
+The generator (`src/plan_builder.py`) is deterministic: weekly distance starts from your last four weeks of running,
+climbs no more than 10% a week toward a peak that suits the race distance, drops back every fourth week and tapers before the race.
+Each week has a long run on the day you choose, up to two quality sessions (tempo and intervals), easy runs on the other training days and rest otherwise.
+Every entry is an ordinary calendar entry afterwards, so edit or delete whatever does not fit.
+Building again replaces planned days after today unless you untick that option, in which case only empty days are filled.
+
 
 ## Strava webhooks (automatic sync)
 
@@ -105,6 +113,8 @@ The rebuild copies every table into a fresh schema (about 4 s for 400 activities
 
 *   **/src/api**: FastAPI backend and Jinja2 templates (Dashboard, Warehouse, Activity Analysis).
 *   **/src/pipeline.py**: The ingestion and analysis engine that calculates TRIMP, EF, and TSB — including `run_analyze_effectiveness()`, which computes per-activity physiological metrics from activity streams.
+*   **/src/metrics.py**: Pure math shared by the pipeline and the API: load model, VO2 max estimator, Daniels VDOT, best efforts, planned-load projection.
+*   **/src/plan_builder.py**: The deterministic training plan generator behind **Build plan**.
 *   **/alembic**: Postgres schema migrations (`alembic upgrade head` to apply). The DuckDB warehouse's own schema is managed separately, inside `src/pipeline.py`'s `StravaDB.init_schema()`.
 *   **/data**: Contains the `strava_warehouse.duckdb` file.
 

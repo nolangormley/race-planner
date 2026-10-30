@@ -23,6 +23,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
         </div>
+        <button type="button" class="btn btn-sm" id="cal-build">Build plan</button>
         <button type="button" class="btn btn-primary btn-sm" id="cal-add">Add workout</button>
     </div>
 </div>
@@ -61,6 +62,59 @@
             <div id="upcoming"></div>
         </section>
     </aside>
+</div>
+
+<div class="modal" id="build-modal" aria-hidden="true">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="build-modal-title" tabindex="-1">
+        <div class="modal-head">
+            <div>
+                <h2 id="build-modal-title">Build a plan</h2>
+                <div class="card-sub">A week-by-week skeleton to your race: long run, quality sessions, easy days and rest. Every session stays editable.</div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon btn-sm" data-close aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <form id="build-form" class="stack">
+            <div class="field">
+                <label for="build-race">Race</label>
+                <select id="build-race" class="input" required></select>
+                <span class="small faint" id="build-race-hint"></span>
+            </div>
+            <div class="form-grid">
+                <div class="field">
+                    <label for="build-weekly">Current weekly distance <span class="faint" id="build-weekly-unit"></span></label>
+                    <input id="build-weekly" class="input" type="number" min="0" step="0.1" required>
+                    <span class="small faint" id="build-weekly-hint"></span>
+                </div>
+                <div class="field">
+                    <label for="build-days">Running days a week</label>
+                    <select id="build-days" class="input">
+                        <option value="3">3</option><option value="4">4</option><option value="5" selected>5</option><option value="6">6</option><option value="7">7</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="build-long">Long run day</label>
+                    <select id="build-long" class="input">
+                        <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option>
+                        <option value="4">Friday</option><option value="5">Saturday</option><option value="6" selected>Sunday</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="build-quality">Quality sessions a week</label>
+                    <select id="build-quality" class="input">
+                        <option value="0">None, easy only</option><option value="1">1</option><option value="2" selected>2</option>
+                    </select>
+                </div>
+            </div>
+            <label class="check"><input type="checkbox" id="build-replace" checked> Replace planned days after today</label>
+            <div class="form-actions">
+                <span class="status"></span>
+                <button type="button" class="btn" data-close>Cancel</button>
+                <button type="submit" class="btn btn-primary" id="build-save">Build plan</button>
+            </div>
+        </form>
+    </div>
 </div>
 
 <div class="modal" id="entry-modal" aria-hidden="true">
