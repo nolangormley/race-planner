@@ -13,7 +13,7 @@ TRACK_SESSION = [(600, 3.0)] + [(178, 4.5), (160, 2.5)] * 5 + [(178, 4.5), (600,
 
 def runner(**overrides):
     values = {"id": 5, "athlete_id": synthetic_athlete_id(5), "strava_athlete_id": None, "name": "File Runner",
-              "gender": "Female", "weight": 58.0, "resting_hr": None, "max_hr": None}
+              "gender": "Female", "weight": 58.0, "resting_hr": None, "max_hr": None, "coros_resting_hr": None}
     values.update(overrides)
     return SimpleNamespace(**values)
 

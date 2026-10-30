@@ -181,13 +181,18 @@ DEFAULT_WORKOUT_KM = {
 METERS_PER_MILE = 1609.344
 
 
+DURATION_UNIT = re.compile(r"\s*(?:min(?:ute)?s?|h(?:ou)?rs?|h|sec(?:ond)?s?|s)\b", re.IGNORECASE)
+
+
 def planned_distance_km(text):
-    """'6 miles', '8 km', '10K', '5 mi' to kilometres; None when there is no number.
-    A bare number is miles, matching the calendar's convention."""
+    """'6 miles', '8 km', '10K', '5 mi' to kilometres; None when there is no
+    number or the number is a duration ('45 min', '1 hr'). A bare number is
+    miles, matching the calendar's convention."""
     if not text:
         return None
-    match = re.search(r"(\d+(?:\.\d+)?)\s*(k(?:m|ilomet\w*)?|mi(?:les?)?|m\b)?", str(text), re.IGNORECASE)
-    if not match:
+    text = str(text)
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(k(?:m|ilomet\w*)?\b|mi(?:les?)?\b|m\b)?", text, re.IGNORECASE)
+    if not match or (match.group(2) is None and DURATION_UNIT.match(text, match.end(1))):
         return None
     amount = float(match.group(1))
     unit = (match.group(2) or "").lower()
@@ -210,14 +215,13 @@ def estimate_entry_load(workout_type, distance_km, trimp_per_km):
 def project_training_load(ctl, atl, daily_loads, ctl_decay=42, atl_decay=7):
     """Steps fitness and fatigue forward one day per load, starting from the
     current values. Returns a list of (ctl, atl, tsb) per day, where tsb is
-    the form going into that day (yesterday's fitness minus fatigue), the
-    same convention as the history."""
+    that day's fitness minus fatigue after its load, the same convention as
+    the history in services/metrics.py."""
     projected = []
     for load in daily_loads:
-        tsb = ctl - atl
         ctl = ctl + (load - ctl) / ctl_decay
         atl = atl + (load - atl) / atl_decay
-        projected.append((ctl, atl, tsb))
+        projected.append((ctl, atl, ctl - atl))
     return projected
 
 

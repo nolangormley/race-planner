@@ -12,6 +12,7 @@ from src.pipeline import ACTIVITY_CHILD_TABLES
 from src.structure_pass import stored_structure
 from src.api.services.metrics import (
     calculate_training_status_logic,
+    resolve_resting_hr,
 )
 
 logger = logging.getLogger("race_planner.api")
@@ -234,7 +235,7 @@ def get_activity_ai_summary(activity_id: int, current_user: User = Depends(get_c
 
         # Get current training status (CTL/TSB) to give context
         # Reuse logic from calculate_training_status_logic but for specific athlete
-        status = calculate_training_status_logic(stats['athlete_id'])
+        status = calculate_training_status_logic(stats['athlete_id'], hr_max=current_user.max_hr, hr_rest=resolve_resting_hr(current_user))
         if status:
             stats.update(status)
 

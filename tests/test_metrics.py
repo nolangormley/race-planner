@@ -140,6 +140,12 @@ def test_planned_distance_parsing_and_entry_load():
     assert planned_distance_km("8 km") == 8.0
     assert planned_distance_km("10K") == 10.0
     assert planned_distance_km("Rest") is None
+    assert planned_distance_km("400m") == pytest.approx(0.4)
+    # Durations are not distances.
+    assert planned_distance_km("45 min") is None
+    assert planned_distance_km("30 minutes") is None
+    assert planned_distance_km("1 hr") is None
+    assert planned_distance_km("90s strides") is None
     assert estimate_entry_load("Rest", None, 14.0) == 0.0
     assert estimate_entry_load("Easy Run", 8.0, 14.0) == pytest.approx(112.0)
     assert estimate_entry_load("Tempo", 8.0, 14.0) > estimate_entry_load("Easy Run", 8.0, 14.0)
@@ -155,9 +161,9 @@ def test_projection_steps_the_same_ewma_as_the_history():
     projected = project_training_load(0.0, 0.0, loads)
     assert projected[-1][0] == pytest.approx(history_ctl[-1])
     assert projected[-1][1] == pytest.approx(history_atl[-1])
-    # Form going into a day: the rest day after the first hard day raises it,
-    # the hard day after that drops it.
-    assert projected[2][2] > projected[1][2] > projected[3][2]
+    # Form is each day's fitness minus fatigue after its load, as in the history.
+    for day, (ctl, atl, tsb) in enumerate(projected):
+        assert tsb == pytest.approx(history_ctl[day] - history_atl[day])
 
 
 def test_best_effort_finds_the_fastest_stretch():

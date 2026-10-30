@@ -93,3 +93,11 @@ def test_send_due_digests_sends_once_and_stamps_the_user(db_session, monkeypatch
     assert digest.send_due_digests(MONDAY_MORNING) == 0
     stamped = db_session.query(User).filter_by(email="in@example.com").one()
     assert stamped.digest_sent_at == MONDAY_MORNING
+
+
+def test_record_labels_match_the_best_effort_distances():
+    assert digest.distance_label(21097.5) == "Half marathon"
+    assert digest.distance_label(1609.344) == "1 mile"
+    assert digest.distance_label(5000.0) == "5K"
+    assert digest.distance_label(15000.0) == "15 km"
+

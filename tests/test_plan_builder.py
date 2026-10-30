@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import date, timedelta
 
-from src.plan_builder import build_plan, summarize, week_start, METERS_PER_MILE
+from src.plan_builder import build_plan, summarize, week_start, weekly_targets, METERS_PER_MILE, RACE_PROFILES
 
 
 def weekly_distance(entries):
@@ -56,3 +56,13 @@ def test_metric_distances_and_long_run_day():
     long_runs = [item for item in entries if item["workout_type"] == "Long Run"]
     assert long_runs and all(date.fromisoformat(item["date"]).weekday() == 5 for item in long_runs)   # Saturdays
     assert all(item["approximate_distance"].endswith("km") for item in entries if item["approximate_distance"])
+
+
+def test_short_marathon_plan_tapers_from_the_biggest_week_it_reached():
+    # Six weeks out: three build weeks never reach the marathon peak, so the
+    # taper must step down from the third week, not up toward the peak.
+    targets = weekly_targets(40000, 6, RACE_PROFILES["marathon"], taper_weeks=3)
+    build, taper = targets[:3], targets[3:]
+    assert taper[0] < max(build)
+    assert taper[0] > taper[1] > taper[2]
+
