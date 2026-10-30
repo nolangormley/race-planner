@@ -21,9 +21,12 @@ router = APIRouter()
 # statement is exactly the shape a real injection would take if that ever
 # changed — asserting against this constant enforces the safety in code
 # rather than by convention alone.
+# Every table keyed by activity_id, with dim_activity last: the others
+# reference it, so it can only go once they are empty for the activity.
 ACTIVITY_TABLES_TO_DELETE = (
     "stream_altitude", "stream_cadence", "stream_heartrate", "stream_moving",
     "stream_temperature", "stream_velocity", "stream_watts", "activity_effectiveness",
+    "best_efforts", "activity_laps",
     "dim_activity"
 )
 
