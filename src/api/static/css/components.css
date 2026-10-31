@@ -37,7 +37,7 @@
 .btn-strava:hover { background: #e34402; border-color: #e34402; }
 .btn-sm { height: 28px; padding: 0 9px; font-size: 12px; }
 .btn-sm svg { width: 14px; height: 14px; }
-.btn-icon { width: 32px; padding: 0; }
+.btn-icon { width: 32px; padding: 0; flex-shrink: 0; }
 .btn-icon.btn-sm { width: 28px; }
 .btn-block { width: 100%; }
 .btn .spin { animation: spin 0.9s linear infinite; }
@@ -254,6 +254,28 @@ select.input {
 .chart-table { max-height: 260px; overflow: auto; margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
 .chart-table .table { font-size: 12px; }
 .chart-table .table th { position: sticky; top: 0; background: var(--surface); }
+
+/* ---- Phones and touch screens ---- */
+/* Card actions drop below the title when they would squeeze it under 160 px.
+   A segmented control always takes its own line. */
+@media (max-width: 560px) {
+  .card-head { flex-wrap: wrap; }
+  .card-head > :first-child { flex: 1 1 160px; }
+  .card-actions:has(.seg) { flex-basis: 100%; justify-content: flex-start; }
+  .sync-panel { right: 16px; bottom: 16px; }
+  .toast { width: max-content; max-width: calc(100vw - 32px); }
+}
+/* A finger needs a bigger target than a mouse pointer: controls are at least
+   36 px (chart legend toggles 32 px). Mouse layouts do not change. */
+@media (pointer: coarse) {
+  .btn, .btn-sm, .input-sm, .seg button { height: 36px; }
+  .btn-icon, .btn-icon.btn-sm { width: 36px; }
+  .check { min-height: 36px; }
+  .legend button { min-height: 32px; }
+  .info-tip { padding: 11px; margin: -11px; }
+  /* Padding grows the target and the negative margin keeps the text in place. */
+  .table td a:not(.btn), .page-head .sub a { display: inline-block; padding-block: 10px; margin-block: -10px; }
+}
 
 @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 @keyframes slide { 0% { transform: translateX(-120%); } 100% { transform: translateX(430%); } }

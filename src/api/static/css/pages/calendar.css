@@ -64,3 +64,6 @@
   .chip { padding: 2px 4px; font-size: 10px; }
   .chip .dist { display: none; }
 }
+@media (pointer: coarse) {
+  .chip { min-height: 36px; }
+}

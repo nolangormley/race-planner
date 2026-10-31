@@ -25,6 +25,19 @@
 .readiness .small { line-height: 1.35; }
 .week-table .hint { display: block; margin-top: 2px; font-size: 12px; color: var(--warning-ink); }
 
+/* On a phone the readiness call sits on its own line under the card title. */
+@media (max-width: 560px) {
+  .readiness { flex-basis: 100%; align-items: flex-start; max-width: none; text-align: left; }
+}
+/* On a phone the left tile's help tip would open past the screen edge, so
+   the tips anchor to their tile instead of the icon. */
+@media (max-width: 720px) {
+  .stat { position: relative; }
+  .stat .info-tip { position: static; }
+  .stat .info-tip .tip { top: 40px; right: auto; left: 8px; }
+  .grid-4 > :nth-child(even) .info-tip .tip { right: 8px; left: auto; }
+}
+
 /* Energy at the top of the recovery card: the level now, what moved it, the week hour by hour */
 .energy { padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
 .energy-now { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
