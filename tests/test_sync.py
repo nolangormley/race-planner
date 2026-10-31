@@ -187,6 +187,12 @@ def test_a_poll_never_sees_the_first_job_done_while_a_queued_one_waits():
     poller.start()
     release_first.set()
     assert second_started.wait(timeout=5)
+    # The recompute stays running until release_second, so give the poller
+    # time to be scheduled and see it before stopping.
+    for _ in range(500):
+        if ("recompute", "running") in seen:
+            break
+        threading.Event().wait(0.01)
     stop.set()
     poller.join()
     release_second.set()

@@ -58,3 +58,8 @@ def test_logged_in_pages_fit_a_phone_screen(app_server, registered_user, phone):
         assert phone.evaluate("(nav => nav.scrollWidth - nav.clientWidth)(document.querySelector('.nav'))") == 0, url
         sync = phone.locator("#sync-btn").bounding_box()
         assert sync["x"] + sync["width"] <= width, url
+        # The profile stays one tap away, and Log out lives on it.
+        profile = phone.locator(".topbar .user-link").bounding_box()
+        assert profile and profile["x"] + profile["width"] <= width, url
+        if path == "/profile":
+            assert phone.locator("section.card a[href='/logout']").is_visible()
