@@ -75,7 +75,8 @@ dl { margin: 0; }
 .icon-moon { display: none; }
 :root[data-theme="light"] .icon-moon { display: block; }
 :root[data-theme="light"] .icon-sun { display: none; }
-.user-link { color: var(--text-2); font-weight: 500; padding: 0 6px; }
+.user-link { display: inline-flex; align-items: center; color: var(--text-2); font-weight: 500; padding: 0 6px; }
+.user-icon { display: none; width: 18px; height: 18px; }
 .user-link:hover { color: var(--text); text-decoration: none; }
 
 /* ---- Page ---- */
@@ -133,10 +134,15 @@ dl { margin: 0; }
   .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
   .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .span-2 { grid-column: auto; }
-  .topbar-right .user-link, .topbar-right > .btn-ghost:not(.btn-icon) { display: none; }
-  /* The three nav links, an icon-only Sync button and the theme toggle fit
-     in one row down to 360 px. font-size: 0 hides the Sync label but keeps it
-     as the button's accessible name. The brand mark shows only on pages without the nav. */
+  .topbar-right > .btn-ghost:not(.btn-icon) { display: none; }
+  /* The three nav links, an icon-only Sync button and an icon-only profile
+     link fit in one row down to 360 px. font-size: 0 hides their labels but
+     keeps them as accessible names. The theme toggle gives its place to the
+     profile link (theme is also on the profile's Settings, and so is Log out).
+     The brand mark shows only on pages without the nav. */
+  .nav ~ .topbar-right [data-theme-toggle] { display: none; }
+  .topbar-right .user-link { justify-content: center; width: 36px; height: 36px; padding: 0; font-size: 0; }
+  .user-link .user-icon { display: block; }
   .brand:has(~ .nav) { display: none; }
   .nav { gap: 0; }
   .nav a { padding: 0 6px; }
