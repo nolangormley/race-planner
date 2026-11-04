@@ -1,8 +1,8 @@
 // The energy block of the dashboard's recovery card: the level now, what
-// moved it since yesterday, and the last week hour by hour with the nights
-// shaded and each activity marked where it drained. Data from /api/energy
-// (src/energy.py); dashboard.js loads it.
-import { parseDate, qs } from '../app.js';
+// moved it since yesterday, the last week hour by hour with the nights
+// shaded and each activity marked where it drained, and the same week day
+// by day. Data from /api/energy (src/energy.py); dashboard.js loads it.
+import { escapeHtml, isoDate, parseDate, qs } from '../app.js';
 import { panelChart } from '../charts/panels.js';
 import { dateTicks } from '../charts/core.js';
 
@@ -33,6 +33,26 @@ function hourNote(time, drains, nights) {
   return night ? `Asleep. +${night.charge} that night, ${night.summary}` : null;
 }
 
+// Each waking day and the night after it: the level on waking, what the
+// activities and the waking hours took and what the night gave back, which
+// comes to the next row's level. The last row is the level now.
+function renderLedger(rows) {
+  const today = isoDate(new Date());
+  const body = rows.map((row) => {
+    const day = row.day === today ? 'Today' : parseDate(row.day).toLocaleDateString(undefined, { weekday: 'short' });
+    const names = row.names.length ? `<span class="cell-sub">${escapeHtml(row.names.join(', '))}</span>` : '';
+    return `<tr>
+      <td class="primary">${day}</td>
+      <td class="num">${row.morning}</td>
+      <td class="num">${row.activities ? `-${row.activities}` : '–'}${names}</td>
+      <td class="num">-${row.awake}</td>
+      <td class="num">${row.night == null ? '–' : `+${row.night}`}</td>
+    </tr>`;
+  }).join('');
+  const now = rows.length ? `<tr><td class="primary">Now</td><td class="num strong">${rows[rows.length - 1].end}</td><td colspan="3"></td></tr>` : '';
+  qs('#energy-ledger-table').innerHTML = `<table class="table table-compact"><thead><tr><th>Day</th><th class="num">Woke</th><th class="num">Activity</th><th class="num">Awake</th><th class="num">Night</th></tr></thead><tbody>${body}${now}</tbody></table>`;
+}
+
 export function renderEnergy(data) {
   const section = qs('#energy');
   chart?.destroy();
@@ -46,6 +66,7 @@ export function renderEnergy(data) {
   scale.textContent = '/ 100';
   value.append(scale);
   qs('#energy-foot').textContent = `Charged to ${data.morning} by ${clock(data.woke_at)}, usual ${data.usual}`;
+  renderLedger(data.ledger);
   qs('#energy-reasons').replaceChildren(...data.reasons.map((reason) => {
     const item = document.createElement('li');
     item.textContent = reason;

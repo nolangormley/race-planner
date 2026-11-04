@@ -154,6 +154,33 @@ def test_the_night_is_judged_against_a_normal_night_not_by_the_size_of_its_charg
     assert summary(hrv=None, rhr=None) == "no COROS reading, so the usual rate"
 
 
+def test_the_ledger_adds_up_day_by_day_and_ends_at_the_level_now():
+    result = energy(history() + last_night(), easy_days(), NOW, days=7)
+    ledger = result["ledger"]
+    assert [row["day"] for row in ledger] == [TODAY - timedelta(days=offset) for offset in range(6, -1, -1)]
+    for row, following in zip(ledger, ledger[1:]):
+        assert row["morning"] - row["activities"] - row["awake"] + row["night"] == row["end"] == following["morning"]
+    today = ledger[-1]
+    assert today["names"] == ["Easy Run"] and today["activities"] == 13 and today["night"] is None
+    assert today["morning"] - today["activities"] - today["awake"] == today["end"] == result["current"]
+
+
+def test_before_waking_the_ledger_ends_in_the_night_that_is_still_charging():
+    early = datetime.combine(TODAY, time(5, 0))
+    result = energy(history() + last_night(), easy_days()[1:], early, days=7)
+    last = result["ledger"][-1]
+    assert last["day"] == TODAY - timedelta(days=1) and last["night"] > 0
+    assert last["morning"] - last["activities"] - last["awake"] + last["night"] == last["end"] == result["current"]
+
+
+def test_a_drain_past_zero_counts_only_what_was_left():
+    activities = easy_days()[1:] + [run(at(0, 8), 900, minutes=240, name="Ultra")]
+    result = energy(history() + last_night(), activities, NOW)
+    today = result["ledger"][-1]
+    assert result["current"] == 0 and today["names"] == ["Ultra"]
+    assert today["morning"] - today["activities"] - today["awake"] == 0
+
+
 def test_the_trend_compares_this_morning_with_the_usual_one():
     result = energy(history() + last_night(hrv=50, rhr=53), easy_days(), NOW)
     assert result["trend"] == result["morning"] - result["usual"]

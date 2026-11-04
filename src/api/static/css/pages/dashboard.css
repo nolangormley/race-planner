@@ -46,6 +46,11 @@
 .energy-reasons { max-width: 300px; margin: 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.4; color: var(--text-2); text-align: right; }
 .energy-reasons li + li { margin-top: 4px; }
 .energy-note { margin: 10px 0 0; font-size: 12px; line-height: 1.45; color: var(--text-3); }
+.energy-ledger { margin-top: 8px; }
+.energy-ledger summary { width: fit-content; padding: 4px 0; font-size: 13px; font-weight: 500; color: var(--text-2); cursor: pointer; }
+.energy-ledger summary:hover { color: var(--text); }
+.energy-ledger .table { margin-top: 4px; }
+.energy-ledger th, .energy-ledger td { padding-left: 6px; padding-right: 6px; }
 @media (max-width: 560px) {
   .energy-now { flex-direction: column; gap: 10px; }
   .energy-reasons { max-width: none; text-align: left; }

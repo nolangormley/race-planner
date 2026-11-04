@@ -301,6 +301,16 @@ def test_coros_link_pulls_nights_and_fills_the_recovery_card(app_server, registe
     page.wait_for_selector("#energy-chart svg path")
     expect(page.locator("#energy-value")).to_have_text(re.compile(r"^\d{1,3}/ 100$"))
 
+    # Day by day, each row adds up to the next one's level, and the last to the level now.
+    page.click("#energy-ledger summary")
+    rows = page.locator("#energy-ledger tbody tr")
+    expect(rows.last).to_have_text(re.compile(r"^Now"))
+    points = lambda text: 0 if text.strip() == "–" else abs(int(text.split("\n")[0]))
+    cells = [row.locator("td").all_inner_texts() for row in rows.all()]
+    for row, following in zip(cells, cells[1:]):
+        assert points(row[1]) - points(row[2]) - points(row[3]) + points(row[4]) == points(following[1]), cells
+    assert cells[-1][1] == page.text_content("#energy-value").split("/")[0], cells
+
 
 def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered_user, page):
     login(page, app_server)
