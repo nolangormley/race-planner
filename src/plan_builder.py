@@ -4,10 +4,13 @@ Deterministic and inspectable, no language model. Weekly volume ramps from
 the athlete's current weekly distance toward a peak that suits the race
 distance, no faster than 10% a week, with a cutback every fourth week and a
 taper before the race. Each week has a long run, one or two quality
-sessions, easy runs on the other training days and rest otherwise. The
-output is a list of day entries the calendar stores as-is, so every session
-can be edited afterwards.
+sessions, easy runs on the other training days and rest otherwise. A
+quality session's description is built from its planned distance, so the
+warm-up, the work and the cool-down add up to it; a day too short for the
+shortest session grows to fit it. The output is a list of day entries the
+calendar stores as-is, so every session can be edited afterwards.
 """
+import math
 from datetime import date, timedelta
 
 METERS_PER_MILE = 1609.344
@@ -29,15 +32,38 @@ RAMP_PER_WEEK = 1.10
 CUTBACK_EVERY = 4
 CUTBACK_FACTOR = 0.75
 
+# Quality sessions. The warm-up and cool-down are easy running of at least
+# 1500 m and 800 m, rounded up to a quarter unit (1 mile and 0.5 mile, or
+# 1.5 km and 1 km). A tempo block is 45% of the day and at least 2400 m,
+# rounded up to a half unit (1.5 miles or 2.5 km). Intervals are 800 m reps
+# at 5K effort with 400 m jogs between them, over up to 60% of the day, 3 to
+# 8 reps.
+WARM_UP_M = 1500.0
+COOL_DOWN_M = 800.0
+TEMPO_MIN_M = 2400.0
+TEMPO_SHARE = 0.45
+INTERVAL_SHARE = 0.6
+REP_M = 800
+JOG_M = 400
+MIN_REPS = 3
+MAX_REPS = 8
+
 
 def week_start(day):
     return day - timedelta(days=day.weekday())
 
 
-def round_distance(meters, metric):
-    """Rounds to a half unit in the athlete's unit and formats it for the calendar."""
-    unit_m = 1000.0 if metric else METERS_PER_MILE
-    value = round(meters / unit_m * 2) / 2
+def unit_meters(metric):
+    return 1000.0 if metric else METERS_PER_MILE
+
+
+def to_step(value, step=0.5, rounding=round):
+    """Rounds value to a multiple of step."""
+    return rounding(value / step) * step
+
+
+def distance_text(value, metric):
+    """A distance in the athlete's unit as the calendar shows it: '1 mile', '2.5 miles', '8 km'."""
     text = f"{value:g}"
     return f"{text} km" if metric else f"{text} {'mile' if value == 1 else 'miles'}"
 
@@ -67,21 +93,61 @@ def weekly_targets(current_weekly_m, weeks, profile, taper_weeks):
     return targets
 
 
-def session_description(kind, meters, metric, race_label):
-    unit = "km" if metric else "mi"
+def session_description(kind, race_label):
     if kind == "Easy Run":
         return "Conversational pace, heart rate in zone 2. Finish feeling like you could do it again."
     if kind == "Long Run":
         return "Steady and relaxed; practice fuelling. Last 15 minutes at a comfortably firm effort."
-    if kind == "Tempo":
-        tempo_m = meters * 0.45
-        return f"Warm up 15 min easy, then {round_distance(tempo_m, metric)} at threshold (comfortably hard, 25-30 min race effort), cool down 10 min."
-    if kind == "Intervals":
-        reps = max(4, min(8, int(meters / 1600)))
-        return f"Warm up 15 min, then {reps} x 800 m at 5K effort with 400 m jog recovery, cool down 10 min."
     if kind == "Race":
         return f"Race day: {race_label}. Start controlled, even effort, empty the tank in the last third."
     return ""
+
+
+def shortest_ends(metric):
+    """The shortest warm-up and cool-down in the athlete's unit."""
+    unit_m = unit_meters(metric)
+    return to_step(WARM_UP_M / unit_m, 0.25, math.ceil), to_step(COOL_DOWN_M / unit_m, 0.25, math.ceil)
+
+
+def easy_ends(easy, metric):
+    """Splits the easy running around a quality block into a warm-up and a
+    cool-down in quarter units: the cool-down is half of it, rounded down to
+    a half unit and not shorter than the shortest cool-down; the warm-up is
+    the rest."""
+    cool_down = max(shortest_ends(metric)[1], to_step(easy / 2, 0.5, math.floor))
+    return to_step(easy - cool_down, 0.25), cool_down
+
+
+def interval_session(distance, metric):
+    """The distance and description of an intervals day planned at distance
+    (in the athlete's unit, to the half unit). The distance comes back
+    longer when three reps do not fit."""
+    unit_m = unit_meters(metric)
+    shortest = sum(shortest_ends(metric))
+    room_m = min(INTERVAL_SHARE * distance, distance - shortest) * unit_m
+    reps = max(MIN_REPS, min(MAX_REPS, int((room_m + JOG_M) // (REP_M + JOG_M))))
+    block = (reps * REP_M + (reps - 1) * JOG_M) / unit_m
+    distance = max(distance, to_step(block + shortest, 0.5, math.ceil))
+    warm_up, cool_down = easy_ends(distance - block, metric)
+    return distance, (
+        f"Warm up {distance_text(warm_up, metric)} easy, then {reps} x {REP_M} m at 5K effort "
+        f"with {JOG_M} m jog recoveries, cool down {distance_text(cool_down, metric)} easy."
+    )
+
+
+def tempo_session(distance, metric):
+    """The distance and description of a tempo day planned at distance (in
+    the athlete's unit, to the half unit). The distance comes back longer
+    when the shortest tempo block does not fit."""
+    shortest = sum(shortest_ends(metric))
+    tempo_min = to_step(TEMPO_MIN_M / unit_meters(metric), 0.5, math.ceil)
+    tempo = max(tempo_min, min(to_step(TEMPO_SHARE * distance), to_step(distance - shortest, 0.5, math.floor)))
+    distance = max(distance, to_step(tempo + shortest, 0.5, math.ceil))
+    warm_up, cool_down = easy_ends(distance - tempo, metric)
+    return distance, (
+        f"Warm up {distance_text(warm_up, metric)} easy, then {distance_text(tempo, metric)} at threshold "
+        f"(comfortably hard, about one-hour race effort), cool down {distance_text(cool_down, metric)} easy."
+    )
 
 
 def build_plan(start, race_date, race_length, current_weekly_m, metric=False, days_per_week=5, long_run_day=6, quality_sessions=2, race_label=None):
@@ -143,12 +209,17 @@ def build_plan(start, race_date, race_length, current_weekly_m, metric=False, da
 
 
 def entry(day, kind, focus, meters, metric, race_label, description=None):
+    distance = to_step(meters / unit_meters(metric)) if meters else None
+    if kind == "Tempo":
+        distance, description = tempo_session(distance, metric)
+    elif kind == "Intervals":
+        distance, description = interval_session(distance, metric)
     return {
         "date": day.isoformat(),
         "workout_type": kind,
         "training_focus": focus,
-        "approximate_distance": round_distance(meters, metric) if meters else None,
-        "description": description if description is not None else session_description(kind, meters or 0, metric, race_label),
+        "approximate_distance": distance_text(distance, metric) if distance else None,
+        "description": description if description is not None else session_description(kind, race_label),
     }
 
 
