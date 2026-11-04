@@ -34,7 +34,7 @@ docker compose -f docker-compose.demo.yml up --build
 Open http://localhost:8000 and log in as `demo@example.com` / `demo1234`.
 Inside the container, `scripts/demo.py` serves a fake Strava and a fake COROS (the same stand-ins the browser tests use), with about six months of made-up runs and two months of nights, and a half marathon ten weeks out with a plan built for it.
 Nothing leaves your machine.
-`DEMO_PORT=8080` picks another port, and `docker compose -f docker-compose.demo.yml down` throws it all away.
+`DEMO_PORT=8080` picks another port, `TZ=America/New_York` puts the demo on your clock (it runs in UTC otherwise), and `docker compose -f docker-compose.demo.yml down` throws it all away.
 
 Without Docker, point the demo at a Postgres database it may migrate; it writes only the demo user's rows and keeps its own warehouse in `data/demo/`:
 
@@ -69,6 +69,7 @@ Copy `.env.example` to `.env` and fill it in:
 | `SECRET_KEY` | Signs session cookies and reset links; `python -c "import secrets; print(secrets.token_hex(32))"`. Without it, everyone is logged out on every restart. |
 | `SECURE_COOKIES` | `true` when the site is served over HTTPS. |
 | `HOST_URL` | The public address of the app, for the Strava redirect and reset links. |
+| `TZ` | Optional. Your time zone, such as `America/New_York`. "Today", the Monday digest, the daily COROS pull and the energy curve run on the server's clock, so set it when the server's zone is not yours. Docker containers run in UTC without it. |
 | `ALLOWED_ORIGINS` | Origins allowed to make credentialed requests (default `http://localhost:8000`). |
 | `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` | From your Strava application. |
 | `STRAVA_WEBHOOK_VERIFY_TOKEN` | Optional, see [Strava webhooks](#strava-webhooks-automatic-sync). |

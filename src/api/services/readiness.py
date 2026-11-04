@@ -15,7 +15,8 @@ def energy_for(con, athlete_id, now=None, days=DEFAULT_DAYS, planned_workout=Non
     is None when the newest reading is too old to speak for today.
 
     now defaults to the server's local time; activity start times are local
-    to the athlete, so the two are taken to match, as the digest's send hour does."""
+    to the athlete, so the two are taken to match, as the digest's send hour
+    does. TZ in the environment sets the server's zone (README)."""
     now = now or datetime.now()
     today = now.date()
     since = first_day(today, days)
