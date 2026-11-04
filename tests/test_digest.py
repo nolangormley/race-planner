@@ -1,15 +1,18 @@
 from datetime import date, datetime
 from types import SimpleNamespace
 
+import duckdb
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.api.database import Base, User
+from src.api.database import Base, User, Race, TrainingPlan, TrainingPlanEntry
 from src.api.services import digest
+from src.pipeline import StravaDB
 
 MONDAY_MORNING = datetime(2026, 11, 2, 7, 30)
+ATHLETE = 424242
 
 
 def user_like(**overrides):
@@ -87,7 +90,7 @@ def test_compose_digest_without_data_still_reads():
 @pytest.fixture
 def db_session(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine, tables=[User.__table__])
+    Base.metadata.create_all(engine, tables=[User.__table__, Race.__table__, TrainingPlan.__table__, TrainingPlanEntry.__table__])
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(digest, "SessionLocal", factory)
     session = factory()
@@ -110,6 +113,66 @@ def test_send_due_digests_sends_once_and_stamps_the_user(db_session, monkeypatch
     assert digest.send_due_digests(MONDAY_MORNING) == 0
     stamped = db_session.query(User).filter_by(email="in@example.com").one()
     assert stamped.digest_sent_at == MONDAY_MORNING
+
+
+def test_the_plan_line_counts_a_session_done_when_the_dashboard_does(db_session, tmp_path, monkeypatch):
+    """The dashboard's week card (renderWeek in dashboard-tables.js) calls a
+    session done when it is ticked or a run is on its day, except an
+    intervals or tempo day whose runs were analysed without that structure."""
+    path = str(tmp_path / "warehouse.duckdb")
+    warehouse = StravaDB(path)
+    warehouse.con.execute("INSERT INTO dim_athlete (athlete_id, sex) VALUES (?, 'M')", [ATHLETE])
+    for number, (day, kind) in enumerate([
+        (date(2026, 10, 27), "unchecked"),     # the structure pass has not looked at it
+        (date(2026, 10, 28), None),            # looked at, nothing found
+        (date(2026, 10, 29), "intervals"),
+        (date(2026, 10, 31), None),
+    ], start=1):
+        activity_id = 20_000_000_000 + number
+        warehouse.con.execute(
+            "INSERT INTO dim_activity (activity_id, athlete_id, type, start_date_local, distance) VALUES (?, ?, 'Run', ?, 5000)",
+            [activity_id, ATHLETE, datetime.combine(day, datetime.min.time()).replace(hour=7)],
+        )
+        if kind != "unchecked":
+            warehouse.con.execute("INSERT INTO activity_structure (activity_id, kind, rep_count) VALUES (?, ?, 0)", [activity_id, kind])
+    warehouse.con.close()
+    monkeypatch.setattr(digest, "get_db_connection", lambda: duckdb.connect(path))
+    monkeypatch.setattr(digest, "calculate_training_status_logic", lambda *args: None)
+
+    user = User(id=1, email="runner@example.com", password="x", name="Runner", strava_athlete_id=ATHLETE)
+    db_session.add_all([user, TrainingPlan(id=1, user_id=1, name="Plan")])
+    db_session.add_all([
+        TrainingPlanEntry(plan_id=1, date=day, workout_type=workout, is_completed=ticked) for day, workout, ticked in [
+            (date(2026, 10, 26), "Rest", False),
+            (date(2026, 10, 27), "Tempo", False),         # done: the run waits for the pass
+            (date(2026, 10, 28), "Intervals", False),     # not done: ran, not the session
+            (date(2026, 10, 29), "Intervals", False),     # done
+            (date(2026, 10, 30), "Easy Run", False),      # not done: no run
+            (date(2026, 10, 31), "Long Run", False),      # done: a run that day
+            (date(2026, 11, 1), "Easy Run", True),        # done: ticked
+        ]
+    ])
+    db_session.commit()
+
+    _, body = digest.build_digest(db_session, user, MONDAY_MORNING)
+    assert "Plan       4 of 6 planned sessions done" in body
+
+
+def activity(sport="Run", kind=None, checked=True):
+    return {"type": sport, "kind": kind, "checked": checked}
+
+
+@pytest.mark.parametrize("workout, runs, done", [
+    ("Easy Run", [], False),
+    ("Easy Run", [activity("Walk", checked=False)], True),                # any activity on foot, as on the dashboard
+    ("Tempo", [activity(checked=False)], True),                           # waits for the structure pass
+    ("Tempo", [activity(kind="intervals")], False),                       # ran, not the session
+    ("Tempo", [activity(), activity(checked=False)], True),               # one run still waits
+    ("Tempo", [activity(), activity("Walk", checked=False)], False),      # the pass never looks at a walk
+    ("Intervals", [activity("VirtualRun", checked=False)], True),         # nothing looked at
+])
+def test_a_session_is_done_when_the_dashboard_says_so(workout, runs, done):
+    assert digest.session_done(SimpleNamespace(workout_type=workout, is_completed=False), runs) is done
 
 
 def test_record_labels_match_the_best_effort_distances():

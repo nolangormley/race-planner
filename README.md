@@ -159,10 +159,11 @@ Every sync looks at the pace stream of each new run and calls it **intervals**, 
 In short: pace is resampled to one reading a second, adjusted for grade with the same ACSM cost the VO2 max estimator uses, smoothed, and split into a fast and a slow group; the fast group has to be at least 12% faster than the slow one.
 Three or more reps with a median under 8 minutes are intervals; one or two fast blocks of 12 minutes or more are a tempo.
 The activity page then shows a **Detected structure** card (for example "6 × 800 m at 3:42/km, 2:38 recoveries") with a table of the reps, and shades the reps on the stream chart.
-Runs synced before this feature are analysed on the next sync.
+Runs synced before this feature are analysed on the next sync; until then the card says the run is not analysed yet, and a run with neither kind says no intervals or tempo were found.
 
 After each sync, planned sessions from the last seven days are marked done when a run matches them (`src/api/services/plan_match.py`): an Intervals or Tempo session needs a run with that structure, a Long Run needs 80% of the planned distance or the longest run of that week, an Easy Run or Race needs any run that day, and Cross Training or Strength needs any activity that day.
 On the dashboard, a planned Intervals or Tempo day whose runs were analysed and do not match shows **Ran, not the session** instead of Done.
+The weekly digest counts a session done as the dashboard does: ticked, or a run on its day, apart from such an Intervals or Tempo day.
 
 Known blind spots: a run-walk easy run reads as intervals (the walks look like recoveries), and three or more long reps (3 × 10 min) are neither kind.
 

@@ -4,9 +4,12 @@ effort held level over a course's hills.
 Each split gets a relative pace from the strategy (a 2% ramp for a
 negative split) times the grade cost of its ground (Minetti et al. 2002,
 the relation grade-adjusted pace is built on). The paces are then scaled
-so the splits add up to the goal exactly. parse_gpx_course turns a course
-GPX into the per-100 m profile those costs read.
+so the splits add up to the goal exactly, and the split times rounded to
+whole seconds. parse_goal reads a typed goal for the race distance.
+parse_gpx_course turns a course GPX into the per-100 m profile those costs
+read.
 """
+import itertools
 import math
 import xml.etree.ElementTree as ElementTree
 
@@ -18,21 +21,53 @@ NEGATIVE_SPLIT = 0.02        # second half this much faster than the first
 LENGTH_TOLERANCE = 0.03
 MAX_GRADE = 0.20
 STRATEGIES = ("even", "negative")
+# Goal paces a runner can hold, in seconds per mile. 3:30/mi is faster than
+# every world record from the mile up (the mile record is 3:43/mi), and
+# 20:00/mi is a walk at 3 mph.
+GOAL_PACE_RANGE = (210.0, 1200.0)
 
 
 def parse_clock(text):
-    """'1:45:00' or '45:00' to seconds; None when it does not parse."""
+    """'1:45:00', '45:00' or '1:45' as its numbers: [1, 45, 0], [45, 0] or
+    [1, 45]. None when the text is not two or three whole numbers with the
+    numbers after the first under 60."""
     if not text:
         return None
-    try:
-        parts = [int(part) for part in text.strip().split(":")]
-    except ValueError:
+    parts = [part.strip() for part in text.split(":")]
+    if len(parts) not in (2, 3) or not all(part.isdecimal() for part in parts):
         return None
-    if len(parts) == 2:
-        return parts[0] * 60 + parts[1]
-    if len(parts) == 3:
-        return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    return None
+    numbers = [int(part) for part in parts]
+    if any(number >= 60 for number in numbers[1:]):
+        return None
+    return numbers
+
+
+def goal_range(distance_m):
+    """The fastest and the slowest goal for distance_m, in whole seconds."""
+    miles = distance_m / METERS_PER_MILE
+    return math.ceil(GOAL_PACE_RANGE[0] * miles), math.floor(GOAL_PACE_RANGE[1] * miles)
+
+
+def parse_goal(text, distance_m):
+    """A goal time for a race of distance_m, in seconds. None when the text
+    is not a clock time or when no reading of it is in goal_range.
+
+    Three numbers are h:mm:ss. Two numbers are m:ss when that time is in
+    the range ('45:00' for a 10K), else h:mm ('1:45' for a half marathon).
+    The two readings differ by a factor of 60 and the ends of the range by
+    less than 6, so only one reading can be in the range.
+    """
+    numbers = parse_clock(text)
+    if numbers is None:
+        return None
+    if len(numbers) == 3:
+        hours, minutes, seconds = numbers
+        readings = [hours * 3600 + minutes * 60 + seconds]
+    else:
+        first, second = numbers
+        readings = [first * 60 + second, first * 3600 + second * 60]
+    fastest, slowest = goal_range(distance_m)
+    return next((reading for reading in readings if fastest <= reading <= slowest), None)
 
 
 def format_clock(seconds):
@@ -97,6 +132,27 @@ def split_profile(profile, start_m, end_m):
     return grade_sum / total, factor_sum / total, climb
 
 
+def whole_second_splits(planned, full):
+    """Split times in whole seconds for the planned ones, which add up to
+    the goal. full tells which splits have the full split length.
+
+    Each split ends on the planned clock rounded to the second, so the
+    clock ends on the goal. This rounding can give a full split one second
+    more than a full split that is planned slower. The full splits then get
+    the same times again, in the order of their planned times, so a faster
+    plan never shows more time. Each split stays within a second of its
+    planned time.
+    """
+    clocks = [round(clock) for clock in itertools.accumulate(planned)]
+    seconds = [later - earlier for earlier, later in zip([0] + clocks, clocks)]
+    indices = [ii for ii, is_full in enumerate(full) if is_full]
+    # Splits with planned times equal to the millisecond keep the times that rounding gave them.
+    by_plan = sorted(indices, key=lambda ii: (round(planned[ii], 3), seconds[ii]))
+    for ii, value in zip(by_plan, sorted(seconds[ii] for ii in indices)):
+        seconds[ii] = value
+    return seconds
+
+
 def plan_splits(distance_m, goal_seconds, split_m, strategy="even", profile=None):
     """Splits for a race: each with its grade, target pace (seconds per
     kilometre and per mile), split time and cumulative time.
@@ -105,8 +161,12 @@ def plan_splits(distance_m, goal_seconds, split_m, strategy="even", profile=None
     from 1 + NEGATIVE_SPLIT down to 1 - NEGATIVE_SPLIT across the race, so
     the second half runs about 2% faster than the first. With a profile
     (from course_profile) each split's pace also carries the grade cost of
-    its ground, which holds the effort level over hills. Cumulative times
-    are whole seconds and the last one is the goal exactly.
+    its ground, which holds the effort level over hills. Split and
+    cumulative times are whole seconds (whole_second_splits) and the last
+    cumulative time is the goal exactly. A split of full length shows the
+    pace of its whole-second time, so its pace and split time read the
+    same. A short last split shows the planned pace, because over so short
+    a distance one second changes the pace by many seconds.
     """
     if strategy not in STRATEGIES:
         raise ValueError(f"strategy must be one of {', '.join(STRATEGIES)}")
@@ -120,20 +180,20 @@ def plan_splits(distance_m, goal_seconds, split_m, strategy="even", profile=None
         rows.append({"start_m": start, "end_m": end, "length_m": end - start, "grade": grade, "climb_m": climb, "relative": shape * factor})
 
     seconds_per_metre = goal_seconds / sum(row["relative"] * row["length_m"] for row in rows)
-    cumulative = 0.0
-    previous_rounded = 0
-    for index, row in enumerate(rows, start=1):
-        pace = row.pop("relative") * seconds_per_metre
-        cumulative += pace * row["length_m"]
-        rounded = int(round(cumulative)) if index < len(rows) else int(round(goal_seconds))
+    paces = [row.pop("relative") * seconds_per_metre for row in rows]
+    full = [row["length_m"] > split_m - 1.0 for row in rows]
+    split_times = whole_second_splits([pace * row["length_m"] for pace, row in zip(paces, rows)], full)
+    cumulative = 0
+    for ii, row in enumerate(rows):
+        pace = split_times[ii] / row["length_m"] if full[ii] else paces[ii]
+        cumulative += split_times[ii]
         row.update({
-            "index": index,
+            "index": ii + 1,
             "seconds_per_km": pace * 1000.0,
             "seconds_per_mile": pace * METERS_PER_MILE,
-            "split_seconds": rounded - previous_rounded,
-            "cumulative_seconds": rounded,
+            "split_seconds": split_times[ii],
+            "cumulative_seconds": cumulative,
         })
-        previous_rounded = rounded
     return rows
 
 

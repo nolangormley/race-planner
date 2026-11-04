@@ -367,6 +367,9 @@ def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered
     assert rows.count() == 14                                   # 13 miles and the last 0.11
     assert "1:45:00" in rows.nth(13).text_content()
     assert "1:45:00" in page.input_value("#goal")
+    # Pace and split time of every row but the short last one.
+    paces_and_splits = "rows => rows.slice(0, -1).map((row) => [row.cells[2].textContent, row.cells[3].textContent])"
+    assert all(pace == split for pace, split in page.eval_on_selector_all("#splits-table tbody tr", paces_and_splits))
     even_first_row = rows.nth(0).text_content()
 
     page.click('#strategy button[data-strategy="negative"]')
@@ -375,6 +378,23 @@ def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered
     )
     assert "1:45:00" in rows.nth(13).text_content()             # the finish time does not move
     assert page.locator("#pace-band tr").count() == 14
+    assert all(pace == split for pace, split in page.eval_on_selector_all("#splits-table tbody tr", paces_and_splits))
+
+    page.fill("#goal", "1:45")                                  # how most runners write 1 h 45 min
+    page.click("#pacing-form button[type=submit]")
+    expect(page.locator("#goal-source")).to_contain_text("Goal as typed")
+    expect(page.locator("#pacing-summary")).to_contain_text("8:01/mi")
+    assert "1:45:00" in rows.nth(13).text_content()
+
+    page.fill("#goal", "0:30:00")
+    page.click("#pacing-form button[type=submit]")
+    expect(page.locator("#pacing-status")).to_contain_text("Goal 0:30:00 is not a plausible half marathon time")
+    expect(rows).to_have_count(0)
+    expect(page.locator("#pace-band tr")).to_have_count(0)
+    expect(page.locator("#goal-source")).to_have_text("")
+    # The browser logs the refusal, a 400, as an error. This test expects it.
+    refusal = f"/api/races/{race_id}/pacing"
+    page.problems[:] = [problem for problem in page.problems if not ("status of 400" in problem and refusal in problem)]
 
 
 def wait_for_idle_sync(page, app_server, user_id, seconds=60):
@@ -395,13 +415,34 @@ def test_activity_page_shows_what_the_structure_pass_found(app_server, registere
     assert run["structure_checked"]                                   # the sync ran the pass
     structure = page.request.get(f"{app_server}/api/activities/{run['activity_id']}/intervals").json()
     # The fake runs hold one ten-minute faster stretch: too short for a
-    # tempo and too few reps for intervals, so the card stays hidden.
-    assert structure["detected"] and structure["kind"] is None and structure["reps"] == []
+    # tempo and too few reps for intervals, so the card says nothing was found.
+    assert structure == {"kind": None, "checked": True, "pending": False, "reps": [], "recoveries": []}
+    page.goto(f"{app_server}/workout_streams/{run['activity_id']}")
+    page.wait_for_selector("#streams-chart svg path")
+    expect(page.locator("#structure-card")).to_be_visible()
+    expect(page.locator("#structure-sub")).to_have_text("No intervals or tempo found.")
+    expect(page.locator("#structure-reps")).to_have_count(0)
+    assert page.locator("#streams-chart .x-band").count() == 0
+
+
+def test_activity_page_says_when_the_structure_pass_has_not_looked_yet(app_server, registered_user, page):
+    login(page, app_server)
+    run = page.request.get(f"{app_server}/api/activities").json()[0]
+    intervals = f"**/api/activities/{run['activity_id']}/intervals"
+    unchecked = {"kind": None, "checked": False, "pending": True, "reps": [], "recoveries": []}
+    # A run synced before the structure pass existed.
+    page.route(intervals, lambda route: route.fulfill(json=unchecked))
+    page.goto(f"{app_server}/workout_streams/{run['activity_id']}")
+    expect(page.locator("#structure-sub")).to_have_text("Not analysed yet. The next sync looks for intervals and tempo.")
+    expect(page.locator("#structure-card")).to_be_visible()
+
+    # An activity the pass never looks at, such as a ride, gets no card.
+    page.unroute(intervals)
+    page.route(intervals, lambda route: route.fulfill(json={**unchecked, "pending": False}))
     page.goto(f"{app_server}/workout_streams/{run['activity_id']}")
     page.wait_for_selector("#streams-chart svg path")
     page.wait_for_load_state("networkidle")
     assert "hidden" in page.get_attribute("#structure-card", "class")
-    assert page.locator("#streams-chart .x-band").count() == 0
 
 
 def test_a_ride_shows_speed_splits_and_pedal_cadence(app_server, registered_user, page):
@@ -420,6 +461,65 @@ def test_a_ride_shows_speed_splits_and_pedal_cadence(app_server, registered_user
     assert page.locator("#splits tbody tr").first.locator("td").nth(6).text_content().strip() == "85"
     expect(page.locator("#stat-cadence")).to_have_text("85rpm")
     expect(page.locator("#streams-chart .panel-title", has_text="Cadence (rpm)")).to_have_count(1)
+
+
+def test_activities_page_searches_names_and_shows_fifty_rows_at_a_time(app_server, registered_user, page):
+    login(page, app_server)
+    synced = len(page.request.get(f"{app_server}/api/activities?limit=1000").json())
+    # A long history the fakes do not give: every third activity is a hill
+    # session and every fourth a ride, and each is 10 m longer than the last.
+    start = datetime(2025, 1, 6, 7, 0)
+    history = [{
+        "activity_id": 900 + index, "name": f"Hill repeats {index}" if index % 3 == 0 else f"Steady {index}",
+        "type": "Ride" if index % 4 == 0 else "Run", "start_date_local": (start + timedelta(days=index)).isoformat(),
+        "distance": 5000 + 10 * index, "moving_time": 1800, "average_speed": 2.8, "average_heartrate": 140, "training_load": 40,
+    } for index in range(120)]
+
+    def with_history(route):
+        response = route.fetch()
+        route.fulfill(response=response, json=response.json() + history)
+
+    page.route("**/api/activities?limit=1000", with_history)
+    page.goto(f"{app_server}/warehouse")
+    rows = page.locator("#activities-body tr.link")
+    count = page.locator("#activities-sub")
+    total = synced + len(history)
+    expect(rows).to_have_count(50)
+    expect(count).to_contain_text(f"{total} activities")                 # every activity, not only the rows shown
+    expect(page.locator("#activities-shown")).to_have_text(f"Showing 50 of {total}")
+    page.click("#show-more")
+    expect(rows).to_have_count(100)
+    page.click("#show-more")
+    expect(rows).to_have_count(total)
+    expect(page.locator("#activities-more")).to_be_hidden()
+
+    page.fill("#activity-search", "HILL")                                # case does not matter
+    expect(count).to_contain_text("40 activities")
+    expect(rows).to_have_count(40)
+    page.select_option("#type-filter", "Ride")
+    expect(count).to_contain_text("10 activities")
+    page.select_option("#type-filter", "")
+    page.click("#activities-table th[data-sort=distance]")
+    expect(rows.first).to_contain_text("Hill repeats 117")                # the longest first
+    page.fill("#activity-search", "no such name")
+    expect(count).to_have_text("No activities match.")
+    expect(page.locator("#activities-body")).to_contain_text("No matching activities")
+    page.fill("#activity-search", "")
+    expect(rows).to_have_count(50)                                        # a new search starts from 50 rows again
+
+    page.route("**/api/activities/1017", lambda route: route.fulfill(json={"message": "Activity deleted successfully"}))
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.fill("#activity-search", "hill repeats 117")
+    page.click("#activities-body [data-delete='1017']")
+    expect(count).to_have_text("No activities match.")
+    page.fill("#activity-search", "")
+    expect(count).to_contain_text(f"{total - 1} activities")
+
+    page.click("#tabs button[data-tab=workouts]")
+    expect(page.locator("#tab-workouts")).to_be_visible()
+    expect(page.locator("#tab-activities")).to_be_hidden()
+    page.click("#tabs button[data-tab=activities]")
+    expect(rows).to_have_count(50)
 
 
 def test_a_sync_marks_the_planned_run_it_matches_done(app_server, registered_user, page):

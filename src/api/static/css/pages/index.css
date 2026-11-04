@@ -1,0 +1,11 @@
+/* The name search, type filter and Import button need more width than the
+   card title leaves them on a narrow screen, so they take their own line.
+   On a phone the search takes a full line of its own. */
+@media (max-width: 720px) {
+  #tab-activities .card-head { flex-wrap: wrap; }
+  #tab-activities .card-actions { flex-basis: 100%; justify-content: flex-start; }
+  #activity-search { flex: 1 1 160px; }
+}
+@media (max-width: 560px) {
+  #activity-search { flex-basis: 100%; }
+}

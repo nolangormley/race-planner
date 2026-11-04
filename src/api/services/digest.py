@@ -22,6 +22,9 @@ logger = logging.getLogger("race_planner.digest")
 METERS_PER_MILE = 1609.344
 FEET_PER_METER = 3.28084
 SEND_HOUR = 6               # server local time, on Mondays
+# The dashboard's activities on foot (RUN_TYPES in static/js/app.js).
+ON_FOOT = {"Run", "Walk", "Hike", "TrailRun", "VirtualRun"}
+STRUCTURED = {"intervals", "tempo"}
 
 
 def week_start(day):
@@ -193,8 +196,42 @@ def recovery_week(con, athlete_id, start):
     return {"rhr": row[0], "hrv": row[1], "hrv_baseline": row[2], "sleep_min": row[3]}
 
 
-def plan_week(db, user_id, start):
-    """Planned sessions, completed count and planned distance in the week from start."""
+def runs_on_foot(con, athlete_id, start):
+    """The activities on foot in the week from start, with what the structure
+    pass found: {"day", "type", "kind", "checked"}."""
+    rows = con.execute("""
+        SELECT da.start_date_local::DATE, da.type, ast.kind, ast.activity_id IS NOT NULL
+        FROM dim_activity da
+        LEFT JOIN activity_structure ast ON ast.activity_id = da.activity_id
+        WHERE da.athlete_id = ? AND da.start_date_local >= ? AND da.start_date_local < ?
+    """, [athlete_id, start, start + timedelta(days=7)]).fetchall()
+    return [{"day": row[0], "type": row[1], "kind": row[2], "checked": row[3]} for row in rows if row[1] in ON_FOOT]
+
+
+def session_done(entry, runs):
+    """True when the dashboard's week card (renderWeek in
+    static/js/pages/dashboard-tables.js) counts the planned session as done:
+    it is ticked, or there are runs on its day. The exception is an
+    intervals or tempo session when the structure pass looked at the runs of
+    the day and found that structure in none of them. The card then says
+    "Ran, not the session"."""
+    if entry.is_completed:
+        return True
+    if not runs:
+        return False
+    wanted = (entry.workout_type or "").lower()
+    if wanted not in STRUCTURED:
+        return True
+    # The pass looks only at type Run, so only such a run can still wait for it.
+    if any(run["type"] == "Run" and not run["checked"] for run in runs):
+        return True
+    analysed = [run for run in runs if run["checked"]]
+    return not analysed or any(run["kind"] == wanted for run in analysed)
+
+
+def plan_week(db, user_id, start, runs=()):
+    """Planned sessions, done count and planned distance in the week from
+    start. runs are that week's activities on foot (runs_on_foot)."""
     plan_ids = [row[0] for row in db.query(TrainingPlan.id).filter(TrainingPlan.user_id == user_id).all()]
     if not plan_ids:
         return None, []
@@ -206,7 +243,8 @@ def plan_week(db, user_id, start):
     )
     sessions = [item for item in entries if (item.workout_type or "").lower() != "rest"]
     planned_km = sum(planned_distance_km(item.approximate_distance) or 0.0 for item in sessions)
-    summary = {"planned": len(sessions), "done": sum(1 for item in sessions if item.is_completed), "planned_m": planned_km * 1000}
+    done = sum(1 for item in sessions if session_done(item, [run for run in runs if run["day"] == item.date]))
+    summary = {"planned": len(sessions), "done": done, "planned_m": planned_km * 1000}
     return summary, sessions
 
 
@@ -219,7 +257,7 @@ def build_digest(db, user, now=None):
     athlete_id = user.athlete_id
 
     week = previous = {"runs": 0, "distance_m": 0.0, "moving_s": 0.0, "climb_m": 0.0}
-    records, status, recovery, today_energy = [], None, None, None
+    records, status, recovery, today_energy, runs = [], None, None, None, []
     if athlete_id:
         con = get_db_connection()
         try:
@@ -227,6 +265,7 @@ def build_digest(db, user, now=None):
             previous = week_totals(con, athlete_id, last_week - timedelta(days=7))
             records = new_records(con, athlete_id, last_week)
             recovery = recovery_week(con, athlete_id, last_week)
+            runs = runs_on_foot(con, athlete_id, last_week)
             hr_max = user.max_hr or detected_max_hr(con, athlete_id) or DEFAULT_MAX_HR
             hr_rest = resolve_resting_hr(user)
         finally:
@@ -241,7 +280,7 @@ def build_digest(db, user, now=None):
             con.close()
         today_energy = result if result["available"] and result["call"] else None
 
-    plan, _ = plan_week(db, user.id, last_week)
+    plan, _ = plan_week(db, user.id, last_week, runs)
     _, this_week_entries = plan_week(db, user.id, this_week)
     sessions = [(item.date, item.workout_type, item.approximate_distance) for item in this_week_entries]
     races = [

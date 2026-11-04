@@ -1,16 +1,22 @@
-// Activities list (sortable, filterable, deletable, FIT/GPX import) and the workout library.
+// Activities list (name search, type filter, sortable, shown 50 rows at a
+// time, deletable, FIT/GPX import) and the workout library.
 import { fetchJson, units, fmtDate, fmtDuration, escapeHtml, showToast, qs, qsa, openModal, closeModal, RUN_TYPES } from '../app.js';
+
+const PAGE_SIZE = 50;
 
 const state = {
   activities: [],
   sort: { key: 'start_date_local', direction: 'desc' },
   type: '',
+  query: '',
+  shown: PAGE_SIZE,
   workoutsLoaded: false,
 };
 
 // ---- Activities ----
 function visibleActivities() {
-  const rows = state.activities.filter((activity) => !state.type || activity.type === state.type);
+  const rows = state.activities.filter((activity) => (!state.type || activity.type === state.type)
+    && (activity.name || '').toLowerCase().includes(state.query));
   const { key, direction } = state.sort;
   const sign = direction === 'asc' ? 1 : -1;
   rows.sort((left, right) => {
@@ -29,18 +35,24 @@ function renderActivities() {
   const body = qs('#activities-body');
   const rows = visibleActivities();
   const totalMeters = rows.reduce((sum, activity) => sum + (activity.distance || 0), 0);
-  qs('#activities-sub').textContent = rows.length
-    ? `${rows.length} ${rows.length === 1 ? 'activity' : 'activities'} · ${units.distance(totalMeters, 0)} total`
-    : 'No activities match this filter.';
+  let summary = 'No activities yet.';
+  if (rows.length) summary = `${rows.length} ${rows.length === 1 ? 'activity' : 'activities'} · ${units.distance(totalMeters, 0)} total`;
+  else if (state.activities.length) summary = 'No activities match.';
+  qs('#activities-sub').textContent = summary;
   qsa('#activities-table th.sortable').forEach((th) => {
     if (th.dataset.sort === state.sort.key) th.setAttribute('aria-sort', state.sort.direction === 'asc' ? 'ascending' : 'descending');
     else th.removeAttribute('aria-sort');
   });
+  const shown = rows.slice(0, state.shown);
+  qs('#activities-shown').textContent = `Showing ${shown.length} of ${rows.length}`;
+  qs('#activities-more').classList.toggle('hidden', shown.length === rows.length);
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="8"><div class="empty"><strong>No activities yet</strong>Sync Strava, or import FIT and GPX files from your watch.</div></td></tr>`;
+    body.innerHTML = state.activities.length
+      ? '<tr><td colspan="8"><div class="empty"><strong>No matching activities</strong>Try another name or type.</div></td></tr>'
+      : '<tr><td colspan="8"><div class="empty"><strong>No activities yet</strong>Sync Strava, or import FIT and GPX files from your watch.</div></td></tr>';
     return;
   }
-  body.innerHTML = rows.map((activity) => `
+  body.innerHTML = shown.map((activity) => `
     <tr class="link" data-id="${activity.activity_id}" tabindex="0">
       <td class="nowrap">${fmtDate(activity.start_date_local, { month: 'short', day: 'numeric', year: 'numeric' })}</td>
       <td class="primary">${escapeHtml(activity.name)}<span class="cell-sub">${escapeHtml(activity.type)}</span></td>
@@ -94,8 +106,20 @@ async function loadActivities() {
   renderActivities();
 }
 
+qs('#activity-search').addEventListener('input', (event) => {
+  state.query = event.target.value.trim().toLowerCase();
+  state.shown = PAGE_SIZE;
+  renderActivities();
+});
+
 qs('#type-filter').addEventListener('change', (event) => {
   state.type = event.target.value;
+  state.shown = PAGE_SIZE;
+  renderActivities();
+});
+
+qs('#show-more').addEventListener('click', () => {
+  state.shown += PAGE_SIZE;
   renderActivities();
 });
 

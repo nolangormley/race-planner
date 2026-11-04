@@ -261,8 +261,22 @@ function structureSummary(structure) {
   return `${reps.length} × ${repDistance(median(reps.map((rep) => rep.distance)))} at ${units.pace(median(reps.map((rep) => rep.average_speed)))}${rest}`;
 }
 
+// Without reps, the card tells in one line if the pass looked at the run.
+// The card stays hidden for an activity that the pass does not look at.
+function renderStructureNote(structure) {
+  if (!structure?.checked && !structure?.pending) return;
+  qs('#structure-sub').textContent = structure.checked
+    ? 'No intervals or tempo found.'
+    : 'Not analysed yet. The next sync looks for intervals and tempo.';
+  ['#structure-kind', '#structure-summary', '#structure-reps'].forEach((selector) => qs(selector).remove());
+  qs('#structure-card').classList.remove('hidden');
+}
+
 function renderStructure(structure) {
-  if (!structure?.kind || !structure.reps.length) return;
+  if (!structure?.kind || !structure.reps.length) {
+    renderStructureNote(structure);
+    return;
+  }
   qs('#structure-kind').textContent = structure.kind === 'tempo' ? 'Tempo' : 'Intervals';
   qs('#structure-summary').textContent = structureSummary(structure);
   const rows = structure.reps.map((rep) => `<tr>
