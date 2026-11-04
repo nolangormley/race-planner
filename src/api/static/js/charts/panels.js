@@ -22,6 +22,8 @@ import {
 } from './core.js';
 
 const MARGIN = { top: 10, right: 16, bottom: 26, left: 46 };
+const Y_LABEL_GAP = 8;
+const X_LABEL_GAP = 6;
 const END_LABEL_WIDTH = 44;
 const PANEL_GAP = 22;
 const MARKER_LABEL_ROOM = 14;
@@ -100,11 +102,37 @@ export function panelChart(container, initialSpec) {
     }
   }
 
+  // Widths of axis labels in the chart's own font.
+  function labelWidths(labels) {
+    const probe = svgEl('text', { class: 'axis-text' }, svg);
+    const widths = labels.map((label) => {
+      probe.textContent = label;
+      return probe.getComputedTextLength();
+    });
+    probe.remove();
+    return widths;
+  }
+
+  // MARGIN.left is the least room for the y-axis labels; a longer label (a
+  // pace such as 10:00/mi) widens it.
+  function yLabelWidth(panels) {
+    const labels = panels.flatMap((entry) => ticks(entry.domain[0], entry.domain[1], entry.panel.yTicks || 4)
+      .map((tick) => entry.panel.yFormat(tick, true)));
+    return Math.max(0, ...labelWidths(labels));
+  }
+
+  // On a narrow chart, x-axis labels that would touch thin out to every
+  // second one until they fit.
+  function fitXTicks(values) {
+    const halves = labelWidths(values.map((value) => spec.xFormat(value))).map((labelWidth) => labelWidth / 2);
+    const crowded = (kept) => kept.some((index, position) => position > 0
+      && layout.xScale(values[index]) - halves[index] < layout.xScale(values[kept[position - 1]]) + halves[kept[position - 1]] + X_LABEL_GAP);
+    let kept = values.map((value, index) => index);
+    while (kept.length > 2 && crowded(kept)) kept = kept.filter((index, position) => position % 2 === 0);
+    return kept.map((index) => values[index]);
+  }
+
   function computeLayout() {
-    const right = hasEndLabels() ? MARGIN.right + END_LABEL_WIDTH : MARGIN.right;
-    const plotWidth = Math.max(40, width - MARGIN.left - right);
-    const xDomain = [spec.x[0], spec.x[spec.x.length - 1]];
-    const xScale = scaleLinear(xDomain, [MARGIN.left, MARGIN.left + plotWidth]);
     let top = MARGIN.top;
     // Marker labels sit above the first panel: in its title row, or in a row of their own.
     if (!spec.panels[0].title && spec.markers?.some((marker) => marker.label)) top += MARKER_LABEL_ROOM;
@@ -127,6 +155,11 @@ export function panelChart(container, initialSpec) {
       top += panel.height + PANEL_GAP;
       return entry;
     });
+    const left = Math.max(MARGIN.left, Math.ceil(yLabelWidth(panels)) + Y_LABEL_GAP + 2);
+    const right = hasEndLabels() ? MARGIN.right + END_LABEL_WIDTH : MARGIN.right;
+    const plotWidth = Math.max(40, width - left - right);
+    const xDomain = [spec.x[0], spec.x[spec.x.length - 1]];
+    const xScale = scaleLinear(xDomain, [left, left + plotWidth]);
     const totalHeight = top - PANEL_GAP + MARGIN.bottom;
     return { xScale, panels, plotWidth, totalHeight, right };
   }
@@ -139,17 +172,17 @@ export function panelChart(container, initialSpec) {
       for (const tick of yTicks) {
         const y = entry.yScale(tick);
         svgEl('line', { class: tick === 0 ? 'axis-line' : 'grid-line', x1: xScale.range[0], x2: xScale.range[1], y1: y, y2: y }, group);
-        const text = svgEl('text', { class: 'axis-text', x: MARGIN.left - 8, y: y + 4, 'text-anchor': 'end' }, group);
+        const text = svgEl('text', { class: 'axis-text', x: xScale.range[0] - Y_LABEL_GAP, y: y + 4, 'text-anchor': 'end' }, group);
         text.textContent = entry.panel.yFormat(tick, true);
       }
       if (entry.panel.title) {
-        const title = svgEl('text', { class: 'panel-title', x: MARGIN.left, y: entry.top - 6 }, group);
+        const title = svgEl('text', { class: 'panel-title', x: xScale.range[0], y: entry.top - 6 }, group);
         title.textContent = entry.panel.title;
       }
     }
     const last = panels[panels.length - 1];
     svgEl('line', { class: 'axis-line', x1: xScale.range[0], x2: xScale.range[1], y1: last.bottom, y2: last.bottom }, group);
-    const xTickValues = spec.xTicks ? spec.xTicks(xMin, xMax) : ticks(xMin, xMax, 6);
+    const xTickValues = fitXTicks(spec.xTicks ? spec.xTicks(xMin, xMax) : ticks(xMin, xMax, 6));
     for (const tick of xTickValues) {
       const x = xScale(tick);
       const text = svgEl('text', { class: 'axis-text', x, y: last.bottom + 17, 'text-anchor': 'middle' }, group);
@@ -406,6 +439,11 @@ export function panelChart(container, initialSpec) {
   const stopObserving = observeWidth(container, (nextWidth) => {
     width = nextWidth;
     render();
+  });
+  // Axis labels are measured in the page font, which can load after the
+  // first render with other widths than the fallback.
+  document.fonts.ready.then(() => {
+    if (width > 0 && svg.isConnected) render();
   });
 
   return {

@@ -27,6 +27,23 @@ OVERFLOWING = """
 }).slice(0, 6).map((el) => el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '') + [...el.classList].map((name) => `.${name}`).join(''))
 """
 
+# Chart axis labels cut off at the chart's left edge, or x labels that run
+# into each other.
+CRAMPED_AXES = """
+() => [...document.querySelectorAll('.chart svg')].flatMap((svg) => {
+  const box = svg.getBoundingClientRect();
+  const chart = svg.closest('[id]')?.id || 'chart';
+  const cut = [...svg.querySelectorAll('text.axis-text[text-anchor=end]')]
+    .filter((node) => node.getBoundingClientRect().left < box.left - 0.5)
+    .map((node) => `${chart}: "${node.textContent}" cut off`);
+  const xLabels = [...svg.querySelectorAll('text.axis-text[text-anchor=middle]')];
+  const touching = xLabels
+    .filter((node, index) => index > 0 && node.getBoundingClientRect().left < xLabels[index - 1].getBoundingClientRect().right)
+    .map((node) => `${chart}: "${node.textContent}" runs into the label before it`);
+  return [...cut, ...touching];
+})
+"""
+
 
 @pytest.fixture(params=[390, 360])
 def phone(browser, request):
@@ -54,6 +71,8 @@ def test_logged_in_pages_fit_a_phone_screen(app_server, registered_user, phone):
         phone.wait_for_selector(marker)
         overflow = phone.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
         assert overflow == 0, f"{url} is {overflow} px wider than {width} px: {phone.evaluate(OVERFLOWING)}"
+        cramped = phone.evaluate(CRAMPED_AXES)
+        assert not cramped, f"{url}: {cramped}"
         # The three nav links and the Sync button stay on screen without scrolling the nav.
         assert phone.evaluate("(nav => nav.scrollWidth - nav.clientWidth)(document.querySelector('.nav'))") == 0, url
         sync = phone.locator("#sync-btn").bounding_box()
