@@ -71,6 +71,7 @@ What it cannot see: stress during the day (the main drain of Body Battery
 outside exercise), naps, when you actually slept, illness, alcohol, and
 activities without heart rate. It is an estimate, not a measurement.
 """
+from bisect import bisect_right
 from datetime import datetime, time, timedelta
 from math import exp, log
 from statistics import mean, stdev
@@ -191,9 +192,26 @@ def overlap_hours(start, end, left, right):
     return max(0.0, (min(end, right) - max(start, left)) / HOUR)
 
 
+def ledger_row(window, spent, start, close, names):
+    """One waking day and the night after it, in whole points that add up:
+    the night takes the rounding, or the waking drain while the night is
+    still to come."""
+    morning, end = round(start), round(close)
+    drained = round(spent["activities"])
+    if spent["night"] > 0:
+        awake = round(spent["awake"])
+        night = end - morning + drained + awake
+    else:
+        awake = morning - drained - end
+        night = None
+    return {"day": window["day"], "morning": morning, "activities": drained, "names": names, "awake": awake, "night": night, "end": end}
+
+
 def energy(nights, activities, now, days=DEFAULT_DAYS):
     """The energy level hour by hour over the last days up to now, with
-    this morning's level, its trend and the reasons behind today.
+    this morning's level, its trend, the reasons behind today and a ledger
+    of each shown day (the level on waking, what activities and waking
+    hours took, what the night after gave back, the level it came to).
 
     nights: [{"day", "hrv", "rhr", "sleep_min"}], where the row for day D is
     the night that ends on the morning of D; a missing reading is None.
@@ -226,22 +244,36 @@ def energy(nights, activities, now, days=DEFAULT_DAYS):
     marks = sorted(marks)
     level = START_LEVEL
     levels = {begin: level}
+    # What each waking day and the night after it added and took, up to now.
+    wakes = [window["wake"] for window in windows]
+    spent = {window["day"]: {"activities": 0.0, "awake": 0.0, "night": 0.0} for window in windows}
     for left, right in zip(marks, marks[1:]):
         asleep = 0.0
+        charged = 0.0
         for window in windows:
             hours = overlap_hours(window["bed"], window["wake"], left, right)
             if hours:
                 gain = (1 - (1 - window["quality"]) ** (hours / NOMINAL_SLEEP_HOURS)) * (FULL - level)
                 window["charge"] += gain
                 level += gain
+                charged += gain
                 asleep += hours
-        level -= WAKING_DRAIN_PER_HOUR * max(0.0, (right - left) / HOUR - asleep)
+        awake = WAKING_DRAIN_PER_HOUR * max(0.0, (right - left) / HOUR - asleep)
+        active = 0.0
         for activity in activities:
             seconds = max(activity["seconds"] or 0, MIN_ACTIVITY_SECONDS)
             hours = overlap_hours(activity["start"], activity["start"] + timedelta(seconds=seconds), left, right)
-            level -= DRAIN_PER_TRIMP * activity["trimp"] * hours * 3600 / seconds
-        level = clip(level, 0.0, FULL)
+            active += DRAIN_PER_TRIMP * activity["trimp"] * hours * 3600 / seconds
+        # The level stops at 0, so a drain that would go past it counts in part.
+        share = min(1.0, level / (awake + active)) if awake + active else 0.0
+        level = clip(level - (awake + active) * share, 0.0, FULL)
         levels[right] = level
+        position = bisect_right(wakes, left) - 1
+        if position >= 0 and right <= now:
+            day = spent[windows[position]["day"]]
+            day["night"] += charged
+            day["awake"] += awake * share
+            day["activities"] += active * share
 
     mornings = {window["day"]: levels[window["wake"]] for window in windows}
     morning = round(mornings[today])
@@ -257,6 +289,14 @@ def energy(nights, activities, now, days=DEFAULT_DAYS):
         }
         for window in windows if window["wake"] > shown_from
     ]
+    ledger = []
+    for position, window in enumerate(windows):
+        if not shown_from < window["wake"] <= now:
+            continue
+        following = windows[position + 1]["wake"] if position + 1 < len(windows) else now
+        close = min(following, now)
+        names = [activity["name"] for activity in activities if window["wake"] <= activity["start"] < close]
+        ledger.append(ledger_row(window, spent[window["day"]], levels[window["wake"]], levels[close], names))
     since_yesterday = [activity for activity in activities if windows[-2]["wake"] <= activity["start"] <= now]
     largest = sorted(since_yesterday, key=lambda activity: activity["trimp"], reverse=True)[:2]
     reasons = [f"+{shown_nights[-1]['charge']} overnight, {shown_nights[-1]['summary']}"]
@@ -275,6 +315,7 @@ def energy(nights, activities, now, days=DEFAULT_DAYS):
         "reasons": reasons,
         "series": [{"t": mark, "level": round(levels[mark], 1)} for mark in marks if shown_from <= mark <= now],
         "nights": shown_nights,
+        "ledger": ledger,
         "drains": [
             {
                 "activity_id": activity["activity_id"], "name": activity["name"], "type": activity["type"],
