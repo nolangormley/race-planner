@@ -254,12 +254,20 @@ def test_planned_distances_follow_the_unit_switch(app_server, registered_user, p
     distances = page.locator(".chip:not(.activity) .dist").all_text_contents()
     assert all(text.endswith(" km") for text in distances), distances    # the plan was built in miles
 
+    def planned_km():                                                    # "of 144 km planned", or none planned
+        found = re.search(r"of (\d+) km planned", page.text_content("#month-summary"))
+        return int(found.group(1)) if found else 0
+
+    planned_before = planned_km()
+
     page.click("#cal-add")
     expect(page.locator("#entry-distance")).to_have_value("8 km")
     expect(page.locator("#entry-distance")).to_have_attribute("placeholder", "10 km")
     page.fill("#entry-distance", "45 min")
     page.click("#entry-save")
     expect(chip).to_have_text("45 min")                                  # not a distance, so as typed
+    # The 8 km left the month's total (shown to the whole km) and 45 min added nothing.
+    assert planned_before - 9 <= planned_km() <= planned_before - 8
     assert page.request.delete(f"{app_server}/api/training-plan/entry/{created.json()['id']}").ok
 
 

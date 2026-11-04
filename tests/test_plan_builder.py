@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import pytest
 
 from src.plan_builder import (
-    build_plan, interval_session, summarize, tempo_session, week_start, weekly_targets, METERS_PER_MILE, RACE_PROFILES,
+    build_plan, interval_description, summarize, tempo_description, week_start, weekly_targets, METERS_PER_MILE, RACE_PROFILES,
 )
 
 PART = r"(\d+(?:\.\d+)?) (?:miles?|km)"
@@ -105,18 +105,41 @@ def test_quality_sessions_add_up_to_their_planned_distance(metric):
 
 
 def test_interval_reps_follow_the_planned_distance():
-    reps = [re.search(r"(\d+) x 800 m", interval_session(miles, metric=False)[1]).group(1) for miles in (3.5, 4.5, 5, 6, 8, 10.5, 15)]
+    reps = [re.search(r"(\d+) x 800 m", interval_description(miles, metric=False)).group(1) for miles in (3.5, 4.5, 5, 6, 8, 10.5, 15)]
     assert reps == ["3", "3", "4", "5", "6", "8", "8"]
 
 
 def test_tempo_block_is_45_percent_of_the_day():
-    assert tempo_session(4.5, metric=False) == (4.5, "Warm up 1.5 miles easy, then 2 miles at threshold (comfortably hard, about one-hour race effort), cool down 1 mile easy.")
-    assert tempo_session(8, metric=True) == (8, "Warm up 2.5 km easy, then 3.5 km at threshold (comfortably hard, about one-hour race effort), cool down 2 km easy.")
+    assert tempo_description(4.5, metric=False) == "Warm up 1.5 miles easy, then 2 miles at threshold (comfortably hard, about one-hour race effort), cool down 1 mile easy."
+    assert tempo_description(8, metric=True) == "Warm up 2.5 km easy, then 3.5 km at threshold (comfortably hard, about one-hour race effort), cool down 2 km easy."
 
 
-def test_a_quality_day_too_short_for_the_session_grows_to_fit_it():
-    # A 20-mile week's taper leaves 1.5 miles for each quality day.
-    assert interval_session(1.5, metric=False) == (3.5, "Warm up 1 mile easy, then 3 x 800 m at 5K effort with 400 m jog recoveries, cool down 0.5 miles easy.")
-    assert tempo_session(1.5, metric=False) == (3, "Warm up 1 mile easy, then 1.5 miles at threshold (comfortably hard, about one-hour race effort), cool down 0.5 miles easy.")
-    assert interval_session(2.5, metric=True)[0] == 6
-    assert tempo_session(2.5, metric=True)[0] == 5
+def test_a_quality_day_too_short_for_its_session_is_an_easy_run_with_strides():
+    # The shortest sessions: 3.5 miles or 6 km of intervals, 3 miles or 5 km of tempo.
+    assert interval_description(3, metric=False) is None and interval_description(3.5, metric=False)
+    assert tempo_description(2.5, metric=False) is None and tempo_description(3, metric=False)
+    assert interval_description(5.5, metric=True) is None and interval_description(6, metric=True)
+    assert tempo_description(4.5, metric=True) is None and tempo_description(5, metric=True)
+
+    # The plan from the review, a half marathon from 17.8 miles a week: its
+    # taper leaves 1.5 miles for each quality day of race week.
+    entries = build_plan(date(2026, 10, 31), date(2027, 1, 24), "half marathon", 17.8 * METERS_PER_MILE)
+    race_week = [item for item in entries if item["date"] >= "2027-01-18" and item["training_focus"] == "Leg speed"]
+    assert [(item["date"], item["workout_type"], item["approximate_distance"]) for item in race_week] == [
+        ("2027-01-19", "Easy Run", "1.5 miles"), ("2027-01-21", "Easy Run", "1.5 miles"),
+    ]
+    assert race_week[0]["description"] == "Easy 1.5 miles with 4 x 20 s strides near the end: fast but relaxed, walking back between them."
+    metric = build_plan(date(2026, 11, 2), date(2026, 12, 27), "half marathon", 10000, metric=True)
+    assert next(item for item in metric if item["training_focus"] == "Leg speed")["description"].startswith("Easy 2 km with 4 x 20 s strides")
+
+
+@pytest.mark.parametrize("weekly, metric", [(6, False), (10, False), (15, False), (10, True), (25, True)])
+def test_every_full_week_before_race_week_adds_up_to_its_target(weekly, metric):
+    unit_m = 1000.0 if metric else METERS_PER_MILE
+    start = date(2026, 11, 2)                          # a Monday
+    race_day = start + timedelta(weeks=11, days=6)     # a Sunday, 12 weeks out
+    targets = weekly_targets(weekly * unit_m, 12, RACE_PROFILES["half marathon"], taper_weeks=2)
+    for days, quality in ((4, 1), (5, 2), (6, 2)):
+        entries = build_plan(start, race_day, "half marathon", weekly * unit_m, metric=metric, days_per_week=days, quality_sessions=quality)
+        # Race week is shaped around the race, not its target.
+        assert weekly_distance(entries)[:-1] == [round(target / unit_m * 2) / 2 for target in targets[:-1]], (days, quality)
