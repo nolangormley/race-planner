@@ -130,7 +130,8 @@ async function importFiles(fileList) {
   try {
     const result = await fetchJson('/api/activities/import', { method: 'POST', body: form });
     const unreadable = result.results.some((item) => item.status === 'error');
-    showToast(importSummary(result.results), unreadable && !result.imported ? 'error' : 'success');
+    const completed = result.completed ? `. Marked ${result.completed} planned session${result.completed === 1 ? '' : 's'} done` : '';
+    showToast(importSummary(result.results) + completed, unreadable && !result.imported ? 'error' : 'success');
     if (result.imported) await loadActivities();
   } catch (error) {
     showToast(error.message, 'error');
