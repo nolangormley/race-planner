@@ -1,5 +1,6 @@
 """Marks planned sessions done when a synced activity matches them. Runs
-after every Strava sync (routers/sync.py record_sync_result).
+after every Strava sync (routers/sync.py record_sync_result) and every file
+import that adds an activity (routers/imports.py).
 
 For each planned entry of the last seven days that is not done and not a
 rest day, an activity on the same day completes it when:

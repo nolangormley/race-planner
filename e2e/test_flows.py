@@ -434,6 +434,33 @@ def test_a_runner_without_strava_imports_a_gpx_file(app_server, page, tmp_path):
     page.wait_for_selector("#recent tr:has-text('Riverfront loop')")
 
 
+def test_an_imported_run_marks_the_planned_run_done(app_server, page, tmp_path):
+    user = {"email": f"planned{int(time.time())}@example.com", "password": "file-runner-123", "name": "Planned Runner"}
+    response = requests.post(f"{app_server}/register", data={
+        **user, "date_of_birth": "1991-03-04", "gender": "Female", "height": "1.65", "weight": "58",
+    }, allow_redirects=False)
+    assert response.status_code == 302, response.text
+    login(page, app_server, user)
+    user_id = page.evaluate("document.body.dataset.userId")
+    start = (datetime.now(timezone.utc) - timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+    created = page.request.post(f"{app_server}/api/training-plan/{user_id}/entry", data={
+        "date": start.date().isoformat(), "workout_type": "Easy Run", "approximate_distance": "3 miles",
+    })
+    assert created.ok, created.text()
+
+    track = tmp_path / "planned.gpx"
+    track.write_text(gpx_track(start, "Planned easy"))
+    page.goto(f"{app_server}/warehouse")
+    page.wait_for_load_state("networkidle")
+    page.set_input_files("#import-input", str(track))
+    page.wait_for_function("document.querySelector('#toast').textContent.includes('Marked 1 planned session done')")
+
+    entries = page.request.get(f"{app_server}/api/training-plan/{user_id}").json()["entries"]
+    entry = next(item for item in entries if item["id"] == created.json()["id"])
+    assert entry["is_completed"]
+    assert entry["strava_activity_id"]
+
+
 def test_coros_switched_off_leaves_out_the_cards_and_the_routes(app_without_coros, registered_user, page):
     login(page, app_without_coros)
     user_id = page.evaluate("document.body.dataset.userId")
