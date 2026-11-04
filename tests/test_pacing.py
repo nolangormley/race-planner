@@ -1,10 +1,22 @@
-import pytest
+import itertools
+from datetime import date, timedelta
+from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from src.api.database import Base, Race, User
+from src.api.routers import analytics, pacing as pacing_router
 from src.pacing import (
-    METERS_PER_MILE, course_profile, format_clock, grade_factor, parse_clock, parse_gpx_course, plan_splits,
+    METERS_PER_MILE, course_profile, format_clock, goal_range, grade_factor, parse_clock, parse_goal,
+    parse_gpx_course, plan_splits, whole_second_splits,
 )
 
 HALF_MARATHON_M = 21097.5
+MARATHON_M = 42195.0
 
 GPX = """<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">
@@ -19,9 +31,30 @@ GPX = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 def test_clock_parsing_and_formatting():
-    assert parse_clock("1:45:00") == 6300 and parse_clock("45:00") == 2700
-    assert parse_clock("") is None and parse_clock("fast") is None and parse_clock("1:2:3:4") is None
+    assert parse_clock("1:45:00") == [1, 45, 0] and parse_clock("45:00") == [45, 0] and parse_clock(" 1: 45 ") == [1, 45]
+    assert parse_clock("") is None and parse_clock("fast") is None and parse_clock("1:2:3:4") is None and parse_clock("45") is None
+    assert parse_clock("1:75") is None and parse_clock("1:45:60") is None and parse_clock("-1:45") is None
     assert format_clock(6300) == "1:45:00" and format_clock(2700) == "45:00" and format_clock(59.6) == "1:00"
+
+
+def test_two_part_goal_reads_as_minutes_or_hours_by_the_distance():
+    assert parse_goal("45:00", 10000) == 2700                   # m:ss
+    assert parse_goal("1:45", HALF_MARATHON_M) == 6300          # 1 min 45 s is no half marathon: h:mm
+    assert parse_goal("3:30", MARATHON_M) == 12600
+    assert parse_goal("0:45", 10000) == 2700
+    assert parse_goal("90:00", HALF_MARATHON_M) == 5400         # minutes past the hour
+    assert parse_goal("1:45:00", HALF_MARATHON_M) == 6300
+
+
+def test_goal_outside_a_plausible_pace_is_refused():
+    fastest, slowest = goal_range(HALF_MARATHON_M)
+    assert (format_clock(fastest), format_clock(slowest)) == ("45:53", "4:22:11")   # 3:30/mi and 20:00/mi
+    assert parse_goal("45:53", HALF_MARATHON_M) == fastest and parse_goal("4:22:11", HALF_MARATHON_M) == slowest
+    assert parse_goal("45:52", HALF_MARATHON_M) is None and parse_goal("4:22:12", HALF_MARATHON_M) is None
+    assert parse_goal("0:30:00", HALF_MARATHON_M) is None       # 2:17/mi
+    assert parse_goal("45:00", HALF_MARATHON_M) is None         # 3:26/mi as minutes, 45 hours as h:mm
+    assert parse_goal("30:00", MARATHON_M) is None
+    assert parse_goal("0:00", 5000) is None and parse_goal("fast", 5000) is None
 
 
 def test_even_splits_share_the_goal_to_the_second():
@@ -34,7 +67,43 @@ def test_even_splits_share_the_goal_to_the_second():
     half = plan_splits(HALF_MARATHON_M, 6300, METERS_PER_MILE, "even")
     assert len(half) == 14 and half[-1]["length_m"] == pytest.approx(HALF_MARATHON_M - 13 * METERS_PER_MILE)
     assert sum(split["split_seconds"] for split in half) == 6300 and half[-1]["cumulative_seconds"] == 6300
-    assert half[0]["seconds_per_mile"] == pytest.approx(6300 / (HALF_MARATHON_M / METERS_PER_MILE))
+    assert {split["split_seconds"] for split in half[:-1]} == {480, 481}        # 8:00.57 a mile in whole seconds
+    assert all(abs(split["cumulative_seconds"] - 6300 * split["end_m"] / HALF_MARATHON_M) <= 0.5 for split in half)
+
+
+@pytest.mark.parametrize("split_m, pace_key", [(METERS_PER_MILE, "seconds_per_mile"), (1000.0, "seconds_per_km")])
+@pytest.mark.parametrize("goal, strategy", [(6300, "even"), (6600, "negative")])
+def test_full_splits_show_the_pace_of_their_split_time(goal, strategy, split_m, pace_key):
+    splits = plan_splits(HALF_MARATHON_M, goal, split_m, strategy)
+    for split in splits[:-1]:
+        assert split[pace_key] == pytest.approx(split["split_seconds"])
+    assert list(itertools.accumulate(split["split_seconds"] for split in splits)) == [split["cumulative_seconds"] for split in splits]
+    assert splits[-1]["cumulative_seconds"] == goal
+
+
+def test_a_short_last_split_keeps_the_planned_pace():
+    finish = plan_splits(HALF_MARATHON_M, 6300, METERS_PER_MILE, "even")[-1]
+    planned = 6300 / HALF_MARATHON_M
+    # Its 53 s over 0.11 mi would read 8:05/mi; the plan is 8:00.57/mi.
+    assert finish["seconds_per_mile"] == pytest.approx(planned * METERS_PER_MILE)
+    assert abs(finish["split_seconds"] - planned * finish["length_m"]) < 1
+
+
+def test_whole_second_splits_keep_the_clock_on_the_plan_and_the_paces_in_order():
+    # A steady 300.4 s a split: the clock rounds to the second, so the splits alternate.
+    assert whole_second_splits([300.4] * 5, [True] * 5) == [300, 301, 300, 301, 300]
+    # Rounding the clock alone gives 300, 301, 300 to a plan that gets faster.
+    assert whole_second_splits([300.4, 300.3, 300.2], [True] * 3) == [301, 300, 300]
+    # A short last split keeps its own time.
+    assert whole_second_splits([300.4, 300.3, 52.6], [True, True, False]) == [301, 300, 52]
+
+
+def test_rounding_never_slows_a_negative_split_down():
+    # By the km over a marathon the plan gains less than a second a split.
+    splits = plan_splits(MARATHON_M, 12600, 1000, "negative")
+    times = [split["split_seconds"] for split in splits[:-1]]
+    assert times == sorted(times, reverse=True)
+    assert splits[-1]["cumulative_seconds"] == 12600
 
 
 def test_negative_split_runs_the_second_half_about_two_percent_faster():
@@ -106,3 +175,73 @@ def test_goal_fallback_predicts_from_the_closest_shorter_effort():
     seconds, source = predict_from_efforts(efforts, HALF_MARATHON_M)
     assert source["label"] == "10K"                             # the mile is under a quarter of the distance
     assert seconds == round(2700 * (HALF_MARATHON_M / 10000.0) ** 1.06)
+
+
+@pytest.fixture
+def db(monkeypatch):
+    """SQLite in place of Postgres for the pacing and predictions endpoints."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine, tables=[User.__table__, Race.__table__])
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(pacing_router, "SessionLocal", factory)
+    monkeypatch.setattr(analytics, "SessionLocal", factory)
+    session = factory()
+    yield session
+    session.close()
+
+
+@pytest.fixture
+def runner(db):
+    user = User(email="pacer@example.com", password="unused", name="Pacer")
+    db.add(user)
+    db.commit()
+    return user
+
+
+def add_half(db, runner, goal_time):
+    race = Race(user_id=runner.id, name="Winter Half", race_length="half marathon",
+                race_date=date.today() + timedelta(weeks=8), goal_time=goal_time)
+    db.add(race)
+    db.commit()
+    return race.id
+
+
+def test_pacing_reads_typed_and_race_goals_for_the_distance(db, runner, monkeypatch):
+    monkeypatch.setattr(pacing_router, "predicted_goal", lambda user, distance_m: 6600)
+    plan = pacing_router.pacing_plan(add_half(db, runner, "1:45"), current_user=runner)
+    assert (plan["goal_seconds"], plan["goal"], plan["goal_source"]) == (6300, "1:45:00", "race")
+    assert plan["splits"][-1]["cumulative_seconds"] == 6300
+    plan = pacing_router.pacing_plan(add_half(db, runner, "1:45:00"), goal="1:55", current_user=runner)
+    assert (plan["goal_seconds"], plan["goal_source"]) == (6900, "query")
+    plan = pacing_router.pacing_plan(add_half(db, runner, "finish"), current_user=runner)   # not a clock time
+    assert (plan["goal_seconds"], plan["goal_source"]) == (6600, "prediction")
+
+
+def test_pacing_refuses_a_goal_no_runner_can_hold(db, runner):
+    race_id = add_half(db, runner, "1:45:00")
+    with pytest.raises(HTTPException) as refused:
+        pacing_router.pacing_plan(race_id, goal="0:30:00", current_user=runner)
+    assert refused.value.status_code == 400
+    assert refused.value.detail == (
+        "Goal 0:30:00 is not a plausible half marathon time. Type a goal between 45:53 and 4:22:11 (3:30 to 20:00/mi)."
+    )
+    with pytest.raises(HTTPException) as refused:
+        pacing_router.pacing_plan(add_half(db, runner, "0:30:00"), unit="km", current_user=runner)
+    assert refused.value.detail == (
+        "The race goal 0:30:00 is not a plausible half marathon time. Type a goal between 45:53 and 4:22:11 (2:10 to 12:26/km)."
+    )
+    with pytest.raises(HTTPException) as refused:
+        pacing_router.pacing_plan(race_id, goal="1:75", current_user=runner)
+    assert refused.value.detail == "Goal time should look like 1:45:00 or 45:00."
+
+
+def test_predictions_card_reads_each_race_goal_for_its_distance(db, runner, monkeypatch):
+    monkeypatch.setattr(analytics, "get_db_connection", lambda: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(analytics, "recent_best_efforts", lambda con, athlete_id: [
+        {"distance_m": 10000.0, "seconds": 2700, "label": "10K", "date": "2026-10-04", "name": "Tempo"},
+    ])
+    monkeypatch.setattr(analytics, "calculate_vo2max", lambda athlete_id, hr_max, hr_rest: None)
+    two_part, implausible = add_half(db, runner, "1:45"), add_half(db, runner, "0:30:00")
+    races = {race["id"]: race for race in analytics.get_predictions(runner.athlete_id, current_user=runner)["races"]}
+    assert races[two_part]["goal_seconds"] == 6300              # as the pace band reads it, not 105 s
+    assert races[implausible]["goal_seconds"] is None           # no verdict against a goal no runner can hold

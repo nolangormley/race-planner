@@ -5,7 +5,7 @@ import logging
 
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, Race, User
-from src.pacing import parse_clock
+from src.pacing import parse_goal
 from src.metrics import race_time_for_vdot, riegel_prediction, BEST_EFFORT_DISTANCES_M
 from src.api.services.coach import get_ai_insight
 from src.api.services.llm import cached_call
@@ -247,7 +247,8 @@ def get_predictions(user_id: int, current_user: User = Depends(get_current_user)
             prediction = row_for(race.name or race.race_length, distance) if distance else {}
             race_rows.append({
                 "id": race.id, "name": race.name, "race_length": race.race_length, "race_date": str(race.race_date),
-                "goal_time": race.goal_time, "goal_seconds": parse_clock(race.goal_time), **prediction,
+                "goal_time": race.goal_time, "goal_seconds": parse_goal(race.goal_time, distance) if distance else None,
+                **prediction,
             })
     finally:
         db.close()
