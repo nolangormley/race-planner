@@ -133,6 +133,14 @@ def test_a_quality_day_too_short_for_its_session_is_an_easy_run_with_strides():
     assert next(item for item in metric if item["training_focus"] == "Leg speed")["description"].startswith("Easy 2 km with 4 x 20 s strides")
 
 
+def test_a_week_too_small_for_its_run_days_still_gives_each_run_a_distance():
+    start = date(2026, 11, 2)
+    for weekly in (3, 4, 5, 6):
+        entries = build_plan(start, start + timedelta(weeks=12), "half marathon", weekly * METERS_PER_MILE, days_per_week=7)
+        runs = [item for item in entries if item["workout_type"] not in ("Rest", "Race")]
+        assert all(item["approximate_distance"] for item in runs), weekly
+
+
 @pytest.mark.parametrize("weekly, metric", [(6, False), (10, False), (15, False), (10, True), (25, True)])
 def test_every_full_week_before_race_week_adds_up_to_its_target(weekly, metric):
     unit_m = 1000.0 if metric else METERS_PER_MILE

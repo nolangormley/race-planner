@@ -162,11 +162,12 @@ def easy_runs(week_target, long_m, quality_m, quality_sessions, count, metric):
     """The meters of a week's easy runs: whole half units, as even as
     possible, that bring the week to its target to the half unit once the
     long run and the quality days are rounded. The runs farther from the
-    long run take any extra half unit."""
+    long run take any extra half unit. Each run is at least half a unit, so
+    a week too small for its run days goes over its target."""
     unit_m = unit_meters(metric)
     steps = round(week_target / unit_m * 2) - round(long_m / unit_m * 2) - quality_sessions * round(quality_m / unit_m * 2)
     base, extra = divmod(steps, count)
-    return [(base + (ii >= count - extra)) * unit_m / 2 for ii in range(count)]
+    return [max(1, base + (ii >= count - extra)) * unit_m / 2 for ii in range(count)]
 
 
 def build_plan(start, race_date, race_length, current_weekly_m, metric=False, days_per_week=5, long_run_day=6, quality_sessions=2, race_label=None):
