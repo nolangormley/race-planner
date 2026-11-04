@@ -311,10 +311,14 @@ export function renderEfficiency(data) {
   // that is a speed, and a speed is a pace.
   const paceAt = (ef) => metersPerUnit / (ef * data.reference_hr);
   // A couple of odd runs (a hike logged as a run, a watch glitch) would
-  // stretch the axis and flatten the trend, so the axis stops at the 2nd
-  // and 98th percentiles and the chart clips the rest.
+  // stretch the axis and flatten the trend, so the axis stops at Tukey's
+  // fences, 1.5 interquartile ranges beyond the quartiles, and the chart
+  // clips the runs outside them. The table still lists every run.
   const sortedPaces = data.points.map((point) => paceAt(point.ef)).sort((left, right) => left - right);
-  const percentile = (share) => sortedPaces[Math.min(sortedPaces.length - 1, Math.floor(sortedPaces.length * share))];
+  const quartile = (share) => sortedPaces[Math.floor((sortedPaces.length - 1) * share)];
+  const spread = quartile(0.75) - quartile(0.25);
+  const fastest = Math.max(sortedPaces[0], quartile(0.25) - 1.5 * spread);
+  const slowest = Math.min(sortedPaces[sortedPaces.length - 1], quartile(0.75) + 1.5 * spread);
   charts.efficiency = panelChart(container, {
     x: data.points.map((point) => parseDate(point.date).getTime()),
     xTicks: (min, max) => dateTicks(min, max, 6),
@@ -325,7 +329,7 @@ export function renderEfficiency(data) {
     legend: true,
     table: true,
     panels: [{
-      kind: 'line', height: 200, reverse: true, yTicks: 4, min: percentile(0.02), max: percentile(0.98),
+      kind: 'line', height: 200, reverse: true, yTicks: 4, min: fastest, max: slowest,
       yFormat: (value) => `${fmtMinutes(value)}${units.paceLabel()}`,
       series: [
         { key: 'runs', label: 'Each run', color: 'series-muted', values: data.points.map((point) => paceAt(point.ef)), points: true, width: 0 },
