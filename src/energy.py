@@ -91,6 +91,7 @@ SWC_Z = 0.5                  # smallest worthwhile change, in standard deviation
 HRV_DEV_LIMITS = (-3.0, 1.5)
 RHR_DEV_LIMITS = (-1.5, 3.0)
 BASELINE_NIGHTS = 28
+BASELINE_WORDS = f"your {BASELINE_NIGHTS // 7}-week average"
 MIN_BASELINE_NIGHTS = 7
 LN_HRV_SD_FLOOR = 0.05       # about 5 % of HRV, so a very steady history does not magnify small changes
 RHR_SD_FLOOR = 1.5           # bpm
@@ -154,6 +155,18 @@ def assess_night(night, history):
     }
 
 
+def night_verdict(night):
+    """The night against a normal night of the same length, or None when no
+    reading has a baseline to judge it by. The size of a charge also
+    depends on the level at bedtime, so the words compare the night, not
+    the number."""
+    if night["hrv_z"] is None and night["rhr_z"] is None:
+        return None
+    if abs(night["quality"] - Q_BASE) < 0.005:
+        return "a normal night"
+    return "more than a normal night" if night["quality"] > Q_BASE else "less than a normal night"
+
+
 def describe_night(night):
     """What drove the charge of a night, in words."""
     if not night["reading"]:
@@ -162,14 +175,16 @@ def describe_night(night):
     if night["hrv_z"] is not None:
         change = night["hrv"] / night["hrv_baseline"] - 1
         parts.append("HRV in your normal range" if abs(night["hrv_z"]) <= SWC_Z
-                     else f"HRV {abs(change):.0%} {'over' if change > 0 else 'under'} baseline")
+                     else f"HRV {abs(change):.0%} {'over' if change > 0 else 'under'} {BASELINE_WORDS}")
     if night["rhr_z"] is not None:
         delta = night["rhr"] - night["rhr_baseline"]
         parts.append("resting heart rate in your normal range" if abs(night["rhr_z"]) <= SWC_Z
-                     else f"resting heart rate {abs(delta):.0f} bpm {'over' if delta > 0 else 'under'} baseline")
+                     else f"resting heart rate {abs(delta):.0f} bpm {'over' if delta > 0 else 'under'} {BASELINE_WORDS}")
     if parts == ["HRV in your normal range", "resting heart rate in your normal range"]:
-        return "HRV and resting heart rate in your normal range"
-    return ", ".join(parts) or "your baseline is still building"
+        parts = ["HRV and resting heart rate in your normal range"]
+    readings = ", ".join(parts) or f"{BASELINE_WORDS} is still building"
+    verdict = night_verdict(night)
+    return f"{verdict}: {readings}" if verdict else readings
 
 
 def overlap_hours(start, end, left, right):
@@ -244,7 +259,7 @@ def energy(nights, activities, now, days=DEFAULT_DAYS):
     ]
     since_yesterday = [activity for activity in activities if windows[-2]["wake"] <= activity["start"] <= now]
     largest = sorted(since_yesterday, key=lambda activity: activity["trimp"], reverse=True)[:2]
-    reasons = [f"+{shown_nights[-1]['charge']} overnight: {shown_nights[-1]['summary']}"]
+    reasons = [f"+{shown_nights[-1]['charge']} overnight, {shown_nights[-1]['summary']}"]
     reasons += [
         f"-{DRAIN_PER_TRIMP * activity['trimp']:.0f} {activity['name']}, {'today' if activity['start'].date() == today else 'yesterday'}"
         for activity in largest

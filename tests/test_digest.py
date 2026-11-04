@@ -50,7 +50,7 @@ def test_compose_digest_reads_like_a_summary():
     assert "3 of 4 planned sessions done, 28.4 mi of 30.0 mi planned" in body
     assert "Form       -7  (neutral)" in body
     assert "Resting HR 48 bpm" in body
-    assert "HRV        62 ms (baseline 58)" in body
+    assert "HRV        62 ms (COROS baseline 58)" in body
     assert "In bed     7h 10m a night" in body
     assert "22:31 on Oct 28" in body
     assert "Tue  Tempo · 5 miles" in body
