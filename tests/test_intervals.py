@@ -128,10 +128,10 @@ def test_missing_readings_and_short_runs_are_handled():
     assert structure["reps"][0]["average_heartrate"] is None
 
 
-def add_run(db, activity_id, times, speeds, beats=None):
+def add_run(db, activity_id, times, speeds, beats=None, sport="Run"):
     db.con.execute(
-        "INSERT INTO dim_activity (activity_id, athlete_id, type, start_date_local, moving_time) VALUES (?, 1, 'Run', '2026-11-02 07:00:00', ?)",
-        [activity_id, len(times)],
+        "INSERT INTO dim_activity (activity_id, athlete_id, type, start_date_local, moving_time) VALUES (?, 1, ?, '2026-11-02 07:00:00', ?)",
+        [activity_id, sport, len(times)],
     )
     streams = {"time": {"data": times}, "velocity_smooth": {"data": speeds}}
     if beats:
@@ -147,14 +147,30 @@ def test_the_warehouse_pass_stores_structure_once():
 
     assert run_detect_structure(db, 1) == 2
     intervals = stored_structure(db.con, 100)
-    assert intervals["kind"] == "intervals" and intervals["detected"]
+    assert intervals["kind"] == "intervals" and intervals["checked"]
     assert [rep["index"] for rep in intervals["reps"]] == [1, 2, 3, 4, 5, 6]
     assert len(intervals["recoveries"]) == 5
     assert intervals["recoveries"][0]["start_offset"] == intervals["reps"][0]["end_offset"]
-    assert stored_structure(db.con, 101) == {"kind": None, "detected": True, "reps": [], "recoveries": []}
-    assert stored_structure(db.con, 999)["detected"] is False
+    assert stored_structure(db.con, 101) == {"kind": None, "checked": True, "pending": False, "reps": [], "recoveries": []}
 
     assert run_detect_structure(db, 1) == 0                                  # nothing new
     db.con.execute("UPDATE dim_activity SET updated_at = now() + INTERVAL 1 MINUTE WHERE activity_id = 100")
     assert run_detect_structure(db, 1) == 1                                  # re-synced run is redone
     assert db.con.execute("SELECT count(*) FROM activity_intervals WHERE activity_id = 100").fetchone()[0] == 6
+
+
+def test_an_unchecked_run_waits_for_the_pass_and_other_activities_do_not():
+    db = StravaDB(":memory:")
+    db.con.execute("INSERT INTO dim_athlete (athlete_id, sex) VALUES (1, 'M')")
+    add_run(db, 100, *run_from_blocks([(2400, 3.3, 150)]))
+    add_run(db, 101, *run_from_blocks([(2400, 7.5, 130)]), sport="Ride")
+    db.con.execute("INSERT INTO dim_activity (activity_id, athlete_id, type) VALUES (102, 1, 'Run')")      # entered by hand: no pace stream
+
+    unchecked = {"kind": None, "checked": False, "pending": True, "reps": [], "recoveries": []}
+    assert stored_structure(db.con, 100) == unchecked
+    assert stored_structure(db.con, 101) == {**unchecked, "pending": False}
+    assert stored_structure(db.con, 102) == {**unchecked, "pending": False}
+
+    assert run_detect_structure(db, 1) == 1                                  # only the run with a pace stream
+    assert stored_structure(db.con, 100) == {**unchecked, "checked": True, "pending": False}
+    assert stored_structure(db.con, 101) == {**unchecked, "pending": False}

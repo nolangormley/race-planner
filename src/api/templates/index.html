@@ -2,6 +2,10 @@
 
 {% block title %}Activities · Race Planner{% endblock %}
 
+{% block styles %}
+<link rel="stylesheet" href="/static/css/pages/index.css">
+{% endblock %}
+
 {% block content %}
 <div class="page-head">
     <div>
@@ -23,6 +27,7 @@
             <div class="card-sub" id="activities-sub">Loading</div>
         </div>
         <div class="card-actions">
+            <input type="search" id="activity-search" class="input input-sm" placeholder="Search by name" aria-label="Search activities by name" autocomplete="off">
             <select id="type-filter" class="input input-sm" aria-label="Filter by activity type">
                 <option value="">All types</option>
             </select>
@@ -46,6 +51,10 @@
             </thead>
             <tbody id="activities-body"></tbody>
         </table>
+    </div>
+    <div class="card-foot row spread hidden" id="activities-more">
+        <span id="activities-shown"></span>
+        <button type="button" class="btn btn-sm" id="show-more">Show more</button>
     </div>
 </section>
 

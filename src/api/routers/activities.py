@@ -320,8 +320,9 @@ def get_activity_laps(activity_id: int, current_user: User = Depends(get_current
 def get_activity_intervals(activity_id: int, current_user: User = Depends(get_current_user)):
     """The structure detected in a run (src/intervals.py): kind (intervals,
     tempo or null), the reps with offsets in seconds from the start of the
-    streams, and the recoveries between them. detected is False until a
-    sync has looked at the run."""
+    streams, and the recoveries between them. checked is False until a sync
+    or import has looked at the run; pending is True while it waits for
+    one, and stays False for an activity the pass does not look at."""
     con = get_db_connection()
     try:
         owner_row = con.execute(
