@@ -129,7 +129,7 @@ def compose_digest(name, today, week, previous, plan, sessions, races, records, 
         if recovery.get("rhr"):
             lines.append(f"  Resting HR {recovery['rhr']:.0f} bpm")
         if recovery.get("hrv"):
-            baseline = f" (baseline {recovery['hrv_baseline']:.0f})" if recovery.get("hrv_baseline") else ""
+            baseline = f" (COROS baseline {recovery['hrv_baseline']:.0f})" if recovery.get("hrv_baseline") else ""
             lines.append(f"  HRV        {recovery['hrv']:.0f} ms{baseline}")
         if recovery.get("sleep_min"):
             lines.append(f"  In bed     {duration(recovery['sleep_min'] * 60)} a night")

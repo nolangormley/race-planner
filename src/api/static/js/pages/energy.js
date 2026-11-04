@@ -30,7 +30,7 @@ function hourNote(time, drains, nights) {
   const drain = drains.find((item) => item.from < time && Math.max(item.to, item.from + 1) > time - HOUR_MS);
   if (drain) return `${drain.name}, TRIMP ${drain.trimp}: -${drain.cost}`;
   const night = nights.find((item) => item.from < time && item.to > time - HOUR_MS);
-  return night ? `Asleep. +${night.charge} that night: ${night.summary}` : null;
+  return night ? `Asleep. +${night.charge} that night, ${night.summary}` : null;
 }
 
 export function renderEnergy(data) {

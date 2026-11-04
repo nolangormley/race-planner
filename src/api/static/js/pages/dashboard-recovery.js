@@ -30,13 +30,13 @@ export function renderRecovery(data) {
   }
   const latest = data.latest;
   tiles.append(
-    recoveryTile('Overnight HRV', latest.hrv ?? '–', 'ms', latest.hrv_baseline ? `baseline ${latest.hrv_baseline} ms` : ''),
+    recoveryTile('Overnight HRV', latest.hrv ?? '–', 'ms', latest.hrv_baseline ? `COROS baseline ${latest.hrv_baseline} ms` : ''),
     recoveryTile('Resting heart rate', latest.rhr ?? '–', 'bpm', data.resting_hr_7d ? `7-night average ${data.resting_hr_7d} bpm` : ''),
   );
   if (latest.time_in_bed_min || data.sleep_7d_min) {
     tiles.append(recoveryTile('Time in bed', hoursMinutes(latest.time_in_bed_min), '', data.sleep_7d_min ? `7-night average ${hoursMinutes(data.sleep_7d_min)}` : ''));
   }
-  qs('#recovery-sub').textContent = `Energy over the last week, then ${data.days.length} nights of HRV and resting heart rate from COROS. HRV at or above its baseline with a steady resting heart rate means you are absorbing the training.`;
+  qs('#recovery-sub').textContent = `Energy over the last week, then ${data.days.length} nights of HRV and resting heart rate from COROS. HRV at or above the COROS baseline with a steady resting heart rate means you are absorbing the training.`;
   charts.recovery = panelChart(container, {
     x: data.days.map((night) => parseDate(night.day).getTime()),
     xTicks: (min, max) => dateTicks(min, max, 6),
@@ -51,7 +51,7 @@ export function renderRecovery(data) {
         kind: 'line', height: 140, yTicks: 3, yFormat: (value) => `${Math.round(value)} ms`,
         series: [
           { key: 'hrv', label: 'HRV', color: 'series-1', values: data.days.map((night) => night.hrv), points: true },
-          { key: 'baseline', label: 'Baseline', color: 'series-muted', values: data.days.map((night) => night.hrv_baseline), dash: true },
+          { key: 'baseline', label: 'COROS baseline', color: 'series-muted', values: data.days.map((night) => night.hrv_baseline), dash: true },
         ],
       },
       {

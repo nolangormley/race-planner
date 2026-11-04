@@ -101,7 +101,7 @@ def test_resting_heart_rate_counts_without_hrv():
 def test_a_short_history_counts_as_normal():
     nights = [{"day": TODAY - timedelta(days=offset), "hrv": 40, "rhr": 60, "sleep_min": None} for offset in range(1, 4)]
     result = energy(nights + last_night(hrv=80, rhr=40), [], NOW)
-    assert result["night"]["summary"] == "your baseline is still building"
+    assert result["night"]["summary"] == "your 4-week average is still building"
     assert result["morning"] == energy([], [], NOW)["morning"]
 
 
@@ -141,9 +141,17 @@ def test_reasons_name_the_night_and_the_largest_drains():
     activities = easy_days()[1:] + [run(at(0, 7, 30), 150, name="Intervals")]
     result = energy(history() + last_night(hrv=54, rhr=48), activities, NOW)
     overnight, intervals, easy = result["reasons"]
-    assert overnight.startswith("+") and overnight.endswith("overnight: HRV 10% under baseline, resting heart rate in your normal range")
+    assert overnight.startswith("+") and overnight.endswith(
+        "overnight, less than a normal night: HRV 10% under your 4-week average, resting heart rate in your normal range")
     assert intervals == "-33 Intervals, today"
     assert easy == "-13 Easy Run, yesterday"
+
+
+def test_the_night_is_judged_against_a_normal_night_not_by_the_size_of_its_charge():
+    summary = lambda **readings: energy(history() + last_night(**readings), easy_days(), NOW)["night"]["summary"]
+    assert summary() == "a normal night: HRV and resting heart rate in your normal range"
+    assert summary(hrv=70, rhr=45) == "more than a normal night: HRV 17% over your 4-week average, resting heart rate 3 bpm under your 4-week average"
+    assert summary(hrv=None, rhr=None) == "no COROS reading, so the usual rate"
 
 
 def test_the_trend_compares_this_morning_with_the_usual_one():
