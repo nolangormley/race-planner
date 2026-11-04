@@ -188,7 +188,7 @@ function rerenderUnits() {
   if (state.predictions) renderPredictions(state.predictions);
   if (state.efficiency) renderEfficiency(state.efficiency);
   if (state.records) renderRecords(state.records);
-  if (state.activities.length) {
+  if (state.activities.length || state.plan.length) {
     renderWeek(state);
     renderRecent(state);
   }

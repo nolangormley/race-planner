@@ -53,9 +53,27 @@ export function showToast(message, kind = 'success') {
 
 // ---- Units ----
 const METERS_PER_MILE = 1609.344;
+// A planned distance that is only a number of miles or kilometres.
+const PLAIN_DISTANCE = /^\s*\d+(?:\.\d+)?\s*(k(?:m|ilomet\w*)?|mi(?:les?)?)\s*$/i;
+// A duration unit right after a number: "45 min", "1 hr", "90s".
+const DURATION_UNIT = /^\s*(?:min(?:ute)?s?|h(?:ou)?rs?|h|sec(?:ond)?s?|s)\b/i;
 
 // Activities on foot: they show a pace, and Strava counts their cadence for one leg.
 export const RUN_TYPES = new Set(['Run', 'Walk', 'Hike', 'TrailRun', 'VirtualRun']);
+
+// "6 miles", "8 km", "10K", "5 mi" -> meters; null when there is no number or
+// the number is a duration ("45 min"). A bare number is miles. The server reads
+// planned distances the same way (planned_distance_km in src/metrics.py).
+export function plannedMeters(text) {
+  if (!text) return null;
+  const match = text.match(/(\d+(?:\.\d+)?)\s*(k(?:m|ilomet\w*)?\b|mi(?:les?)?\b|m\b)?/i);
+  if (!match || (!match[2] && DURATION_UNIT.test(text.slice(match.index + match[1].length)))) return null;
+  const amount = Number(match[1]);
+  const unit = (match[2] || '').toLowerCase();
+  if (unit.startsWith('k')) return amount * 1000;
+  if (unit === 'm') return amount;
+  return amount * METERS_PER_MILE;
+}
 
 export const units = {
   isMetric() {
@@ -80,6 +98,13 @@ export const units = {
   distance(meters, digits = 1) {
     if (meters == null) return '–';
     return `${this.distanceValue(meters).toFixed(digits)} ${this.distanceLabel()}`;
+  },
+  // Planned distances are free text. A number of miles shows in km and a
+  // number of km in miles ("3.5 miles" -> "5.6 km"); other text stays as typed.
+  planned(text) {
+    const match = text.match(PLAIN_DISTANCE);
+    if (!match || match[1].toLowerCase().startsWith('k') === this.isMetric()) return text;
+    return `${Number(this.distanceValue(plannedMeters(text)).toFixed(1))} ${this.distanceLabel()}`;
   },
   // Meters per second to minutes per unit, as a number.
   paceMinutes(metersPerSecond) {

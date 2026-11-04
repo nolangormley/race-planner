@@ -144,6 +144,8 @@ On the training plan page, **Build plan** fills the calendar from tomorrow to on
 The generator (`src/plan_builder.py`) is deterministic: weekly distance starts from your last four weeks of running,
 climbs no more than 10% a week toward a peak that suits the race distance, drops back every fourth week and tapers before the race.
 Each week has a long run on the day you choose, up to two quality sessions (tempo and intervals), easy runs on the other training days and rest otherwise.
+A quality day spells out its warm-up, its tempo block or 800 m reps, and its cool-down in distances that add up to the day's planned distance; a day too short for the shortest such session (3 miles or 5 km of tempo, 3.5 miles or 6 km of intervals) is an easy run with a few strides instead.
+Every full week before race week adds up to its target to the half unit.
 Every entry is an ordinary calendar entry afterwards, so edit or delete whatever does not fit.
 Building again replaces planned days after today unless you untick that option, in which case only empty days are filled.
 

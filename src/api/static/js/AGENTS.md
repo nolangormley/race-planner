@@ -3,6 +3,7 @@
 ES modules, no bundler. `base.html` loads `app.js` on every page; each template loads its own module from `pages/`.
 
 - `app.js`: `fetchJson` (JSON-encodes object bodies, passes `FormData` through as multipart, throws with the API's `detail`), `units` (mi/km preference from localStorage and all distance/pace formatting), date and duration formatters, toast, theme toggle, modal open/close, `config` (the `data-*` attributes on `<body>`: user id, athlete id, date of birth, sex).
+  Planned distances are free text: `plannedMeters` reads the first distance in it the way the server's `planned_distance_km` does (a bare number is miles; a number with a duration, "45 min", is not a distance), and `units.planned` shows a text that is only a number of miles or km in the preferred unit and any other text as typed. The calendar and the dashboard's This week card show planned distances through it.
   `RUN_TYPES` is the one set of activities on foot: they show a pace, and their cadence doubles to steps per minute.
   `applyTheme` also sets the `theme-color` meta to the top bar color, so the browser bar follows the theme.
 - `sync.js`: the top bar Sync button. Starts `POST /api/sync-strava/{id}`, polls `GET` on the same path, renders the floating progress panel and fires a `strava:synced` event on `document` when a sync finishes. Pages listen for it and reload their data.
