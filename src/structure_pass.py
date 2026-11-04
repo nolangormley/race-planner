@@ -3,6 +3,9 @@ stores it in activity_structure (one row per run, kind NULL when nothing
 was found) and activity_intervals (one row per rep)."""
 from src.intervals import detect_structure
 
+# The activities the pass looks at. The detector reads the pace stream.
+RUN_WITH_PACE = "da.type = 'Run' AND EXISTS (SELECT 1 FROM stream_velocity sv WHERE sv.activity_id = da.activity_id)"
+
 
 def load_streams(con, activity_id):
     """(times, speeds, altitudes, heart rates) for one activity; altitudes
@@ -53,11 +56,15 @@ def store_structure(con, activity_id, structure):
 
 
 def stored_structure(con, activity_id):
-    """The stored structure of one activity as {"kind", "detected", "reps",
-    "recoveries"}; detected is False before the pass has looked at it."""
+    """The stored structure of one activity as {"kind", "checked", "pending",
+    "reps", "recoveries"}. checked is True when the pass has looked at the
+    activity (kind is None when it found nothing). pending is True when the
+    pass has not looked at it yet and the next sync or import will, which is
+    only for a run with a pace stream."""
     row = con.execute("SELECT kind FROM activity_structure WHERE activity_id = ?", [activity_id]).fetchone()
     if row is None:
-        return {"kind": None, "detected": False, "reps": [], "recoveries": []}
+        pending = con.execute(f"SELECT {RUN_WITH_PACE} FROM dim_activity da WHERE da.activity_id = ?", [activity_id]).fetchone()[0]
+        return {"kind": None, "checked": False, "pending": pending, "reps": [], "recoveries": []}
     rows = con.execute("""
         SELECT rep_index, start_offset, end_offset, distance, moving_time, average_speed,
                average_heartrate, max_heartrate, recovery_time
@@ -71,7 +78,7 @@ def stored_structure(con, activity_id):
          "moving_time": rep["recovery_time"]}
         for rep in reps if rep["recovery_time"] is not None
     ]
-    return {"kind": row[0], "detected": True, "reps": reps, "recoveries": recoveries}
+    return {"kind": row[0], "checked": True, "pending": False, "reps": reps, "recoveries": recoveries}
 
 
 def run_detect_structure(db, athlete_id, progress=None):
@@ -79,10 +86,9 @@ def run_detect_structure(db, athlete_id, progress=None):
     streams the pass has not seen since the run was last synced. Returns how
     many it looked at."""
     con = db.con
-    pending = [row[0] for row in con.execute("""
+    pending = [row[0] for row in con.execute(f"""
         SELECT da.activity_id FROM dim_activity da
-        WHERE da.athlete_id = ? AND da.type = 'Run'
-          AND EXISTS (SELECT 1 FROM stream_velocity sv WHERE sv.activity_id = da.activity_id)
+        WHERE da.athlete_id = ? AND {RUN_WITH_PACE}
           AND NOT EXISTS (
               SELECT 1 FROM activity_structure ast
               WHERE ast.activity_id = da.activity_id AND ast.detected_at >= da.updated_at
