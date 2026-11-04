@@ -122,7 +122,7 @@ export function renderWeek(state) {
     } else if (isRest) status = '<span class="badge">Rest</span>';
     const hint = isToday && entry && state.readiness?.hint ? `<span class="hint">${escapeHtml(state.readiness.hint)}</span>` : '';
     const plannedText = entry
-      ? `<span class="strong">${escapeHtml(entry.workout_type || 'Workout')}</span>${entry.approximate_distance ? ` <span class="faint">${escapeHtml(entry.approximate_distance)}</span>` : ''}${hint}`
+      ? `<span class="strong">${escapeHtml(entry.workout_type || 'Workout')}</span>${entry.approximate_distance ? ` <span class="faint">${escapeHtml(units.planned(entry.approximate_distance))}</span>` : ''}${hint}`
       : '<span class="faint">–</span>';
     const actualText = runs.length
       ? `${units.distance(actual)} <span class="cell-sub">${escapeHtml(runs.map((activity) => activity.type).join(', '))}</span>`

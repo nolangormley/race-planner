@@ -1,7 +1,7 @@
 // Training plan calendar: a month grid of planned workouts next to synced
 // Strava activities, with add/edit/delete and attach-to-activity.
 import {
-  config, fetchJson, units, fmtDate, parseDate, isoDate, escapeHtml, showToast,
+  config, fetchJson, units, plannedMeters, fmtDate, parseDate, isoDate, escapeHtml, showToast,
   qs, qsa, openModal, closeModal, renderEmpty, RUN_TYPES,
 } from '../app.js';
 
@@ -18,18 +18,6 @@ state.month.setDate(1);
 state.month.setHours(0, 0, 0, 0);
 
 const todayKey = isoDate(new Date());
-
-// "6 miles", "8 km", "10K", "5 mi" -> meters, or null.
-export function plannedMeters(text) {
-  if (!text) return null;
-  const match = String(text).match(/(\d+(?:\.\d+)?)\s*(k(?:m|ilomet\w*)?|mi(?:les?)?|m\b)?/i);
-  if (!match) return null;
-  const amount = Number(match[1]);
-  const unit = (match[2] || '').toLowerCase();
-  if (unit.startsWith('k')) return amount * 1000;
-  if (unit === 'm') return amount;
-  return amount * 1609.344;
-}
 
 function activitiesOn(dateKey) {
   return state.activities.filter((activity) => activity.start_date_local?.slice(0, 10) === dateKey);
@@ -105,7 +93,7 @@ function entryChip(entry, key) {
   const done = !isRest(entry) && entryDone(entry);
   const missed = !isRest(entry) && !done && key < todayKey;
   chip.className = `chip${isRest(entry) ? ' rest' : done ? ' done' : missed ? ' missed' : ''}`;
-  chip.innerHTML = `${done ? CHECK : ''}<span class="label">${escapeHtml(entry.workout_type || 'Workout')}</span>${entry.approximate_distance ? `<span class="dist">${escapeHtml(entry.approximate_distance)}</span>` : ''}`;
+  chip.innerHTML = `${done ? CHECK : ''}<span class="label">${escapeHtml(entry.workout_type || 'Workout')}</span>${entry.approximate_distance ? `<span class="dist">${escapeHtml(units.planned(entry.approximate_distance))}</span>` : ''}`;
   chip.setAttribute('aria-label', `${entry.workout_type || 'Workout'} on ${fmtDate(key, { month: 'long', day: 'numeric' })}${done ? ', done' : ''}`);
   chip.addEventListener('click', () => openEntryModal(key, entry));
   return chip;
@@ -167,7 +155,7 @@ function renderUpcoming() {
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
     const done = entryDone(entry);
-    row.innerHTML = `<span class="date">${entry.date === todayKey ? 'Today' : fmtDate(entry.date, { weekday: 'short', day: 'numeric' })}</span><span class="label">${escapeHtml(entry.workout_type || 'Workout')}${entry.training_focus ? ` <span class="muted">· ${escapeHtml(entry.training_focus)}</span>` : ''}</span><span class="dist">${escapeHtml(entry.approximate_distance || '')}</span>${done ? '<span class="badge badge-good">Done</span>' : ''}`;
+    row.innerHTML = `<span class="date">${entry.date === todayKey ? 'Today' : fmtDate(entry.date, { weekday: 'short', day: 'numeric' })}</span><span class="label">${escapeHtml(entry.workout_type || 'Workout')}${entry.training_focus ? ` <span class="muted">· ${escapeHtml(entry.training_focus)}</span>` : ''}</span><span class="dist">${escapeHtml(units.planned(entry.approximate_distance || ''))}</span>${done ? '<span class="badge badge-good">Done</span>' : ''}`;
     const open = () => openEntryModal(entry.date, entry);
     row.addEventListener('click', open);
     row.addEventListener('keydown', (event) => { if (event.key === 'Enter') open(); });
@@ -193,7 +181,9 @@ function openEntryModal(dateKey, entry = null) {
   const type = entry?.workout_type || 'Easy Run';
   if (![...typeSelect.options].some((option) => option.value === type)) typeSelect.add(new Option(type, type));
   typeSelect.value = type;
-  qs('#entry-distance').value = entry?.approximate_distance ?? '';
+  const distance = qs('#entry-distance');
+  distance.value = units.planned(entry?.approximate_distance ?? '');
+  distance.placeholder = units.isMetric() ? '10 km' : '6 miles';
   qs('#entry-focus').value = entry?.training_focus ?? '';
   qs('#entry-desc').value = entry?.description ?? '';
   qs('#entry-completed').checked = Boolean(entry?.is_completed);
