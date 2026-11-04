@@ -16,6 +16,7 @@ services:
     restart: always
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/raceplanner
+      - TZ=${TZ:-UTC}
 
   db:
     image: postgres:15
