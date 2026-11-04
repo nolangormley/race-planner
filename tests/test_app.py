@@ -74,6 +74,30 @@ def test_energy_answers_only_for_the_signed_in_user(app):
         app.dependency_overrides.clear()
 
 
+def test_intervals_tell_a_run_not_analysed_yet_from_one_with_nothing_found(app):
+    import src.api.deps as deps
+    from src.api.auth_routes import get_current_user
+    from src.pipeline import StravaDB
+
+    warehouse = StravaDB(deps.DB_PATH)
+    warehouse.con.execute("INSERT INTO dim_athlete (athlete_id, sex) VALUES (7, 'F')")
+    for activity_id in (71, 72):
+        warehouse.con.execute("INSERT INTO dim_activity (activity_id, athlete_id, type) VALUES (?, 7, 'Run')", [activity_id])
+        warehouse.con.execute("INSERT INTO stream_velocity (activity_id, time_offset, value) VALUES (?, 0, 3.0)", [activity_id])
+    warehouse.con.execute("INSERT INTO activity_structure (activity_id, kind, rep_count) VALUES (72, NULL, 0)")
+    warehouse.con.close()
+
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=7, athlete_id=7)
+    try:
+        client = TestClient(app)
+        nothing = {"kind": None, "reps": [], "recoveries": []}
+        assert client.get("/api/activities/71/intervals").json() == {**nothing, "checked": False, "pending": True}
+        assert client.get("/api/activities/72/intervals").json() == {**nothing, "checked": True, "pending": False}
+        assert client.get("/api/activities/73/intervals").status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_removed_endpoints_stay_removed(app):
     paths = {path for _, path in route_table(app)}
     for gone in ("/schedule/{user_id}", "/api/training-plan/{user_id}/chat", "/api/mileage-summary/{user_id}",

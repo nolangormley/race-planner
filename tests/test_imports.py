@@ -41,7 +41,7 @@ def test_import_writes_the_activity_and_runs_the_analysis(make_gpx):
     assert count(con, "SELECT COUNT(*) FROM stream_heartrate WHERE activity_id = ?", [activity_id]) == 700
     assert count(con, "SELECT COUNT(*) FROM activity_effectiveness WHERE activity_id = ? AND trimp_banister > 0", [activity_id]) == 1
     assert count(con, "SELECT COUNT(*) FROM best_efforts WHERE activity_id = ?", [activity_id]) >= 2      # a mile and a 5K
-    assert stored_structure(con, activity_id)["detected"]                                               # steady: no kind, but looked at
+    assert stored_structure(con, activity_id)["checked"]                                                # steady: no kind, but looked at
 
 
 def test_an_imported_track_session_gets_its_reps_detected(make_gpx):
