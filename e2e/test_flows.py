@@ -355,6 +355,7 @@ def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered
     expect(page.locator("#pacing-status")).to_contain_text("Goal 0:30:00 is not a plausible half marathon time")
     expect(rows).to_have_count(0)
     expect(page.locator("#pace-band tr")).to_have_count(0)
+    expect(page.locator("#goal-source")).to_have_text("")
     # The browser logs the refusal, a 400, as an error. This test expects it.
     refusal = f"/api/races/{race_id}/pacing"
     page.problems[:] = [problem for problem in page.problems if not ("status of 400" in problem and refusal in problem)]
