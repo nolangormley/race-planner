@@ -178,6 +178,7 @@ async function loadPlan() {
     state.plan = null;
     status.textContent = error.message;
     status.classList.remove('hidden');
+    qs('#goal-source').textContent = '';
   }
   renderAll();
 }

@@ -331,6 +331,9 @@ def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered
     assert rows.count() == 14                                   # 13 miles and the last 0.11
     assert "1:45:00" in rows.nth(13).text_content()
     assert "1:45:00" in page.input_value("#goal")
+    # Pace and split time of every row but the short last one.
+    paces_and_splits = "rows => rows.slice(0, -1).map((row) => [row.cells[2].textContent, row.cells[3].textContent])"
+    assert all(pace == split for pace, split in page.eval_on_selector_all("#splits-table tbody tr", paces_and_splits))
     even_first_row = rows.nth(0).text_content()
 
     page.click('#strategy button[data-strategy="negative"]')
@@ -339,6 +342,23 @@ def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered
     )
     assert "1:45:00" in rows.nth(13).text_content()             # the finish time does not move
     assert page.locator("#pace-band tr").count() == 14
+    assert all(pace == split for pace, split in page.eval_on_selector_all("#splits-table tbody tr", paces_and_splits))
+
+    page.fill("#goal", "1:45")                                  # how most runners write 1 h 45 min
+    page.click("#pacing-form button[type=submit]")
+    expect(page.locator("#goal-source")).to_contain_text("Goal as typed")
+    expect(page.locator("#pacing-summary")).to_contain_text("8:01/mi")
+    assert "1:45:00" in rows.nth(13).text_content()
+
+    page.fill("#goal", "0:30:00")
+    page.click("#pacing-form button[type=submit]")
+    expect(page.locator("#pacing-status")).to_contain_text("Goal 0:30:00 is not a plausible half marathon time")
+    expect(rows).to_have_count(0)
+    expect(page.locator("#pace-band tr")).to_have_count(0)
+    expect(page.locator("#goal-source")).to_have_text("")
+    # The browser logs the refusal, a 400, as an error. This test expects it.
+    refusal = f"/api/races/{race_id}/pacing"
+    page.problems[:] = [problem for problem in page.problems if not ("status of 400" in problem and refusal in problem)]
 
 
 def wait_for_idle_sync(page, app_server, user_id, seconds=60):

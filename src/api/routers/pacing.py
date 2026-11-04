@@ -3,7 +3,8 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 import logging
 
 from src.pacing import (
-    METERS_PER_MILE, STRATEGIES, course_profile, format_clock, parse_clock, parse_gpx_course, plan_splits,
+    METERS_PER_MILE, STRATEGIES, course_profile, format_clock, goal_range, parse_clock, parse_goal, parse_gpx_course,
+    plan_splits,
 )
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User, Race
@@ -47,6 +48,22 @@ def course_summary(course):
     if not course:
         return None
     return {"length_m": course["length_m"], "ascent_m": course["ascent_m"], "descent_m": course["descent_m"]}
+
+
+def checked_goal(text, race, distance_m, unit, label="Goal"):
+    """Seconds for a goal typed on the page or set on the race, or a 400
+    that tells the runner what is wrong with it."""
+    seconds = parse_goal(text, distance_m)
+    if seconds is not None:
+        return seconds
+    if parse_clock(text) is None:
+        raise HTTPException(status_code=400, detail="Goal time should look like 1:45:00 or 45:00.")
+    fastest, slowest = goal_range(distance_m)
+    fast_pace, slow_pace = (format_clock(bound / distance_m * UNITS_M[unit]) for bound in (fastest, slowest))
+    raise HTTPException(status_code=400, detail=(
+        f"{label} {text} is not a plausible {race.race_length} time. Type a goal between "
+        f"{format_clock(fastest)} and {format_clock(slowest)} ({fast_pace} to {slow_pace}/{unit})."
+    ))
 
 
 def predicted_goal(user, distance_m):
@@ -97,7 +114,10 @@ def remove_course(race_id: int, current_user: User = Depends(get_current_user)):
 @router.get("/api/races/{race_id}/pacing")
 def pacing_plan(race_id: int, goal: str = None, strategy: str = "even", unit: str = "mi", current_user: User = Depends(get_current_user)):
     """Split targets for the race. The goal is the query's, else the race's
-    goal time, else the prediction from recent best efforts."""
+    goal time, else the prediction from recent best efforts. A race goal
+    that is not a clock time (such as "finish") gives way to the
+    prediction; a typed or race goal that is not a plausible time for the
+    distance is refused."""
     if strategy not in STRATEGIES:
         raise HTTPException(status_code=400, detail=f"strategy must be one of {', '.join(STRATEGIES)}")
     if unit not in UNITS_M:
@@ -109,13 +129,11 @@ def pacing_plan(race_id: int, goal: str = None, strategy: str = "even", unit: st
         db.close()
     distance = race_distance(race)
 
-    goal_source = "query"
-    goal_seconds = parse_clock(goal) if goal else None
-    if goal and goal_seconds is None:
-        raise HTTPException(status_code=400, detail="Goal time should look like 1:45:00 or 45:00.")
-    if goal_seconds is None and race.goal_time:
-        goal_seconds, goal_source = parse_clock(race.goal_time), "race"
-    if goal_seconds is None:
+    if goal:
+        goal_seconds, goal_source = checked_goal(goal, race, distance, unit), "query"
+    elif parse_clock(race.goal_time):
+        goal_seconds, goal_source = checked_goal(race.goal_time, race, distance, unit, "The race goal"), "race"
+    else:
         goal_seconds, goal_source = predicted_goal(current_user, distance), "prediction"
     if not goal_seconds:
         raise HTTPException(status_code=400, detail="Set a goal time on the race, or type one above.")
