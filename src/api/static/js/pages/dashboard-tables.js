@@ -14,7 +14,7 @@ export function renderPredictions(data) {
     : "From your fastest efforts in the last six months, scaled with Riegel's formula.";
   const cell = (row) => `
     <td class="num">${fmtClock(row.seconds)}<span class="cell-sub">${units.pace(row.distance_m / row.seconds)}</span></td>
-    <td class="muted small">from your ${escapeHtml(row.from.label)} best, ${fmtClock(row.from.seconds)} on ${fmtDate(row.from.date)}</td>
+    <td class="muted small">from your ${fmtClock(row.from.seconds)} ${escapeHtml(row.from.label)} on ${fmtDate(row.from.date)}</td>
     <td class="num faint small">${row.ceiling_seconds ? fmtClock(row.ceiling_seconds) : ''}</td>`;
   const races = data.races.filter((race) => race.seconds).map((race) => {
     let verdict = '';

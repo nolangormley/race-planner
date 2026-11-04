@@ -98,8 +98,8 @@ def get_analytics(user_id: int, current_user: User = Depends(get_current_user)):
         SELECT
             CASE
                 WHEN value < ? THEN 'Zone 1 (Recovery)'
-                WHEN value < ? THEN 'Zone 2 (Aerobic)'
-                WHEN value < ? THEN 'Zone 3 (Tempo)'
+                WHEN value < ? THEN 'Zone 2 (Easy)'
+                WHEN value < ? THEN 'Zone 3 (Aerobic)'
                 WHEN value < ? THEN 'Zone 4 (Threshold)'
                 ELSE 'Zone 5 (Anaerobic)'
             END as zone,

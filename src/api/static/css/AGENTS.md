@@ -13,7 +13,7 @@ Every page fits a 360 px screen; `e2e/test_layout.py` checks the logged-in pages
 
 - Grid columns are `minmax(0, 1fr)`, never a bare `1fr`.
   A bare `1fr` track cannot get narrower than its widest content, so one wide table widens the whole page.
-- A table that can be wider than a phone goes inside `.table-wrap`, which scrolls sideways inside its card.
+- A table that can be wider than a phone goes inside `.table-wrap`, which scrolls sideways inside its card and shows a shadow at each edge where the table goes on (covers in `--surface` hide it at the ends, so the wrapper must sit on a card).
   Put the class on the element the page module renders the table into, as `#predictions` and `#splits` do.
 - Touch sizes go in a `@media (pointer: coarse)` block, so the mouse layout stays the same.
   Controls are at least 36 px (chart legend toggles 32 px).
