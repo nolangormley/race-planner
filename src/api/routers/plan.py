@@ -201,7 +201,9 @@ def get_projection(user_id: int, current_user: User = Depends(get_current_user))
     of running over the last 90 days, scaled by workout type (see
     src.metrics.estimate_entry_load). Days without an entry count as rest.
     The projection runs to the last planned day or the next race, whichever
-    is later, at least two weeks and at most 120 days ahead.
+    is later, at least two weeks and at most 120 days ahead. A race day shows
+    the morning of the race, before its own load: the fitness, fatigue and
+    form the runner starts with. Its load still counts for the days after.
     """
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this projection")
@@ -254,12 +256,15 @@ def get_projection(user_id: int, current_user: User = Depends(get_current_user))
         types.append(", ".join(entry.workout_type or "Workout" for entry in sessions) or None)
 
     projected = project_training_load(status["fitness_ctl"], status["fatigue_atl"], loads)
+    start = (status["fitness_ctl"], status["fatigue_atl"], status["fitness_ctl"] - status["fatigue_atl"])
+    race_days = {race.race_date for race in races}
+    shown = [morning if day in race_days else evening for day, morning, evening in zip(days, [start, *projected[:-1]], projected)]
     return {
         "has_plan": True,
         "trimp_per_km": round(trimp_per_km, 2),
         "days": [
             {"date": str(day), "workout_type": kind, "load": round(load, 1), "ctl": round(ctl, 2), "atl": round(atl, 2), "tsb": round(tsb, 2)}
-            for day, kind, load, (ctl, atl, tsb) in zip(days, types, loads, projected)
+            for day, kind, load, (ctl, atl, tsb) in zip(days, types, loads, shown)
         ],
         "races": race_rows,
     }

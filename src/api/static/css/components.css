@@ -81,7 +81,17 @@ select.input {
 @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
 
 /* ---- Tables ---- */
-.table-wrap { overflow-x: auto; margin: 0 -20px; padding: 0 20px; }
+/* A shadow shows at each edge where the table goes on out of view. The
+   surface-colored covers move with the content and hide the shadow at
+   the end the table has reached. */
+.table-wrap {
+  overflow-x: auto; margin: 0 -20px; padding: 0 20px;
+  background:
+    linear-gradient(to right, var(--surface) 40%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(to left, var(--surface) 40%, transparent) right / 32px 100% no-repeat local,
+    linear-gradient(to right, var(--scroll-shadow), transparent) left / 14px 100% no-repeat scroll,
+    linear-gradient(to left, var(--scroll-shadow), transparent) right / 14px 100% no-repeat scroll;
+}
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th {
   text-align: left; padding: 8px 10px;

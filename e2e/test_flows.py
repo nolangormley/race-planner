@@ -244,8 +244,12 @@ def test_planned_race_sits_inside_the_fitness_chart(app_server, registered_user,
     assert chart["x"] <= box["x"] and box["x"] + box["width"] <= chart["x"] + chart["width"], (chart, box)
     assert box["y"] >= chart["y"], (chart, box)
 
-    # The solid lines stop today, so the right edge carries the planned values on race day.
-    race_day = page.request.get(f"{app_server}/api/projection/{user_id}").json()["days"][-1]
+    # The solid lines stop today, so the right edge carries the planned values on race day:
+    # those of its morning, before the race's own load.
+    days = page.request.get(f"{app_server}/api/projection/{user_id}").json()["days"]
+    race_day = days[-1]
+    assert race_day["workout_type"] == "Race" and race_day["load"] > 0, race_day
+    assert (race_day["ctl"], race_day["atl"]) == (days[-2]["ctl"], days[-2]["atl"]), days[-2:]
     expected = sorted(str(math.floor(race_day[key] + 0.5)) for key in ("ctl", "atl"))
     expect(page.locator("#pmc-chart .end-label")).to_have_count(2)
     assert sorted(page.locator("#pmc-chart .end-label").all_text_contents()) == expected

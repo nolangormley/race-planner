@@ -13,8 +13,8 @@ const charts = {};
 // Shares of heart rate reserve (resting to max), matching the TRIMP model.
 const ZONES = [
   { label: 'Zone 1', sub: 'Recovery · under 60%' },
-  { label: 'Zone 2', sub: 'Aerobic · 60–70%' },
-  { label: 'Zone 3', sub: 'Tempo · 70–80%' },
+  { label: 'Zone 2', sub: 'Easy · 60–70%' },
+  { label: 'Zone 3', sub: 'Aerobic · 70–80%' },
   { label: 'Zone 4', sub: 'Threshold · 80–90%' },
   { label: 'Zone 5', sub: 'Anaerobic · over 90%' },
 ];

@@ -55,6 +55,7 @@
   --radius: 8px;
   --radius-lg: 12px;
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --scroll-shadow: rgba(0, 0, 0, 0.9);
   --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
 }
@@ -102,4 +103,5 @@
   --axis: #cdd2da;
 
   --shadow-pop: 0 12px 32px rgba(20, 24, 32, 0.14);
+  --scroll-shadow: rgba(20, 24, 32, 0.22);
 }
