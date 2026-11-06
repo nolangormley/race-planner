@@ -7,4 +7,3 @@ Tools run by hand, not by the app.
 - `strava_webhook.py`: create, view or delete the Strava push subscription.
 - `rebuild_warehouse.py`: copy a warehouse into a fresh schema (README, "Repairing the warehouse").
 - `coros_probe.py`: print the raw COROS dayDetail fields for an account, to check a field before mapping it.
-- `manual_check_*.py`: one-off checks of the LLM providers' answers.

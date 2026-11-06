@@ -46,7 +46,7 @@ DATABASE_URL=postgresql://user:pass@localhost/raceplanner python scripts/demo.py
 
 *   Python 3.12 and Postgres 15 or later.
 *   A Strava account, to register an API application. Without one you can still sign up and import FIT and GPX files.
-*   Optional: an SMTP account for password-reset and digest emails, a COROS account, an API key for one of the LLM providers (for the coach's note on the dashboard).
+*   Optional: an SMTP account for password-reset and digest emails, and a COROS account.
 
 ### 1. Register a Strava API application
 
@@ -76,7 +76,6 @@ Copy `.env.example` to `.env` and fill it in:
 | `STRAVA_REFRESH_TOKEN` | Only for the single-athlete command-line pipeline. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Optional; without `SMTP_HOST`, emails are written to the server log. |
 | `APP_URL` | The link at the foot of the weekly digest. |
-| `LLM_PROVIDER`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY` | Optional coach's note; `local` means LM Studio on `localhost:1234`, and with no provider reachable the note is simply left out. |
 | `COROS_ENABLED` | `false` switches COROS off entirely, see [COROS](#coros-unofficial). |
 
 `STRAVA_API_BASE` and `COROS_API_BASE` point the app at stand-ins for the tests and the demo; leave them unset.

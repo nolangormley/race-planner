@@ -1,4 +1,4 @@
-"""Synced and imported activities: list, detail, streams, effectiveness, AI note, delete."""
+"""Synced and imported activities: list, detail, streams, effectiveness, delete."""
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 import numpy as np
@@ -6,14 +6,9 @@ import logging
 
 from src.api.auth_routes import get_current_user
 from src.api.database import User
-from src.api.services.coach import get_ai_insight
 from src.api.deps import get_db_connection
 from src.pipeline import ACTIVITY_CHILD_TABLES
 from src.structure_pass import stored_structure
-from src.api.services.metrics import (
-    calculate_training_status_logic,
-    resolve_resting_hr,
-)
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
@@ -206,52 +201,6 @@ def get_activity_effectiveness(activity_id: int, current_user: User = Depends(ge
     except Exception as e:
         logger.exception("Effectiveness error")
         raise HTTPException(status_code=500, detail="Internal server error.")
-    finally:
-        con.close()
-
-@router.get("/api/activities/{activity_id}/ai_summary")
-def get_activity_ai_summary(activity_id: int, current_user: User = Depends(get_current_user)):
-    # This endpoint provides a coaching summary for a SPECIFIC completed activity
-    con = get_db_connection()
-    try:
-        # Get activity and athlete details
-        query = """
-        SELECT
-            da.*,
-            ath.sex,
-            ath.weight as weight_lbs,
-            ae.trimp_banister as trimp,
-            ae.efficiency_factor,
-            ae.aerobic_decoupling
-        FROM dim_activity da
-        JOIN dim_athlete ath ON da.athlete_id = ath.athlete_id
-        LEFT JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
-        WHERE da.activity_id = ? AND da.athlete_id = ?
-        """
-        row = con.execute(query, [activity_id, current_user.athlete_id]).fetchone()
-        if not row: raise HTTPException(status_code=404, detail="Activity not found")
-        cols = [desc[0] for desc in con.description]
-        stats = dict(zip(cols, row))
-
-        # Get current training status (CTL/TSB) to give context
-        # Reuse logic from calculate_training_status_logic but for specific athlete
-        status = calculate_training_status_logic(stats['athlete_id'], hr_max=current_user.max_hr, hr_rest=resolve_resting_hr(current_user))
-        if status:
-            stats.update(status)
-
-        mock_workout = {
-            "name": stats.get('name'),
-            "category": stats.get('type'),
-            "description": stats.get('description', 'A completed effort.')
-        }
-
-        summary = get_ai_insight(stats, context="workout", workout=mock_workout)
-        return {"summary": summary}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"AI summary error for activity {activity_id}: {e}")
-        return {"error": str(e)}
     finally:
         con.close()
 
