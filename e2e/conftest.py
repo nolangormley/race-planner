@@ -22,6 +22,7 @@ from playwright.sync_api import sync_playwright
 
 from e2e.fake_strava import ATHLETE_ID, make_app
 from e2e.fake_coros import make_app as fake_coros_app
+from e2e.fake_courses import make_app as fake_courses_app
 
 REPO = Path(__file__).resolve().parents[1]
 DATABASE_URL = os.environ.get("E2E_DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/raceplanner_e2e")
@@ -91,6 +92,18 @@ def fake_coros():
     server.should_exit = True
 
 
+@pytest.fixture(scope="session")
+def fake_courses():
+    port = free_port()
+    server = uvicorn.Server(uvicorn.Config(fake_courses_app(), host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{port}"
+    wait_for(f"{base}/index.json", 30)
+    yield base
+    server.should_exit = True
+
+
 @contextmanager
 def running_app(workdir, settings):
     """The app in a uvicorn subprocess with its warehouse in workdir and
@@ -121,8 +134,11 @@ def running_app(workdir, settings):
 
 
 @pytest.fixture(scope="session")
-def app_server(tmp_path_factory, fake_strava, fake_coros, database):
-    settings = {"DATABASE_URL": database, "STRAVA_API_BASE": fake_strava, "COROS_API_BASE": fake_coros}
+def app_server(tmp_path_factory, fake_strava, fake_coros, fake_courses, database):
+    settings = {
+        "DATABASE_URL": database, "STRAVA_API_BASE": fake_strava, "COROS_API_BASE": fake_coros,
+        "RACE_COURSES_URL": f"{fake_courses}/",
+    }
     with running_app(tmp_path_factory.mktemp("app"), settings) as base:
         yield base
 

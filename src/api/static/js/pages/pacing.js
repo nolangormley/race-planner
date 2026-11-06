@@ -1,13 +1,14 @@
 // Race-day pacing: goal and strategy controls, the course profile with split
 // markers, the splits table and a printable pace band.
-import { fetchJson, units, fmtClock, qs, qsa, escapeHtml, showToast, renderEmpty } from '../app.js';
+import { fetchJson, units, fmtClock, qs, qsa, escapeHtml, showToast, renderEmpty, openModal, closeModal } from '../app.js';
 import { panelChart } from '../charts/panels.js';
 
 const root = qs('#pacing');
 const raceId = root.dataset.raceId;
 // defaultGoal is the goal the server chose (race goal or prediction); the
-// field only counts as typed when it differs from it.
-const state = { strategy: 'even', plan: null, chart: null, defaultGoal: null };
+// field only counts as typed when it differs from it. library holds the
+// course library's courses of this race's distance once the modal loaded them.
+const state = { strategy: 'even', plan: null, chart: null, defaultGoal: null, library: null };
 const TICK_STRIDES = [1, 2, 5, 10, 20];
 
 const GOAL_SOURCES = {
@@ -58,7 +59,7 @@ function renderSummary() {
     tile('Goal', plan.goal, `${plan.splits.length} splits`),
     tile('Average pace', paceText(plan.average_seconds_per_km, plan.average_seconds_per_mile), `${units.distance(plan.distance_m, 1)} in ${plan.goal}`),
     tile('Strategy', plan.strategy === 'negative' ? 'Negative split' : 'Even effort', plan.strategy === 'negative' ? 'second half about 2% faster' : 'one effort start to finish'),
-    tile('Course', course, plan.course ? `${units.elevation(plan.course.descent_m)} down` : 'upload a GPX to pace the hills'),
+    tile('Course', course, plan.course ? `${units.elevation(plan.course.descent_m)} down` : 'find or upload one to pace the hills'),
   ].join('');
   qs('#goal-source').textContent = GOAL_SOURCES[plan.goal_source] || '';
 }
@@ -71,7 +72,7 @@ function renderCourseControls() {
   const note = qs('#course-note');
   if (plan?.warnings?.length) note.textContent = plan.warnings.join(' ');
   else if (hasCourse) note.textContent = 'Elevation along the course, with each split marked. Pace is adjusted so the effort stays level over the hills.';
-  else note.textContent = 'Elevation along the course, with each split marked. Upload the race GPX and the splits follow the hills at one effort.';
+  else note.textContent = "Elevation along the course, with each split marked. Find your race's course or upload its GPX, and the splits follow the hills at one effort.";
 }
 
 function renderProfile() {
@@ -81,7 +82,7 @@ function renderProfile() {
   container.replaceChildren();
   const plan = state.plan;
   if (!plan || !plan.profile.length) {
-    renderEmpty(container, 'No course yet', 'Upload the race GPX to see the elevation profile and let the splits follow the hills.');
+    renderEmpty(container, 'No course yet', "Find your race's course or upload its GPX to see the elevation profile and let the splits follow the hills.");
     return;
   }
   const unitM = plan.split_m;
@@ -192,6 +193,61 @@ async function uploadCourse(file) {
   return payload;
 }
 
+// ---- Course library ----
+function libraryRow(course) {
+  const warn = course.status === 'warn';
+  return `<div class="list-row">
+    <div>
+      <div class="strong">${escapeHtml(course.name)}</div>
+      <div class="small muted">${escapeHtml(course.event_name)} · ${escapeHtml(course.city)}, ${escapeHtml(course.state)} · ${units.distance(course.length_m, 1)} · ${units.elevation(course.ascent_m)} up</div>
+      ${warn ? `<div class="small faint">${escapeHtml(course.detail)}</div>` : ''}
+    </div>
+    <div class="row">${warn ? '<span class="badge badge-warning">Check it</span>' : ''}<button type="button" class="btn btn-sm" data-race="${escapeHtml(course.race)}" data-event="${escapeHtml(course.event)}">Use</button></div>
+  </div>`;
+}
+
+// Every word typed must appear in the race name, event, city or state.
+function renderLibrary() {
+  const list = qs('#library-list');
+  const words = qs('#library-search').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = state.library.filter((course) => {
+    const text = `${course.name} ${course.event_name} ${course.city} ${course.state}`.toLowerCase();
+    return words.every((word) => text.includes(word));
+  });
+  if (matches.length) list.innerHTML = matches.map(libraryRow).join('');
+  else if (state.library.length) renderEmpty(list, 'No match', 'Try the race name or its city.');
+  else renderEmpty(list, 'No course of this distance yet', 'Upload the race GPX instead.');
+}
+
+async function openLibrary() {
+  openModal(qs('#library-modal'));
+  if (!state.library) {
+    try {
+      state.library = (await fetchJson(`/api/races/${raceId}/course-library`)).courses;
+    } catch (error) {
+      renderEmpty(qs('#library-list'), 'Could not load the course library', error.message);
+      return;
+    }
+  }
+  renderLibrary();
+}
+
+async function useLibraryCourse(button) {
+  button.disabled = true;
+  try {
+    const result = await fetchJson(`/api/races/${raceId}/course/library`, {
+      method: 'POST', body: { race: button.dataset.race, event: button.dataset.event },
+    });
+    closeModal(qs('#library-modal'));
+    showToast(`Course saved: ${units.distance(result.course.length_m, 1)}, ${units.elevation(result.course.ascent_m)} of climbing`);
+    loadPlan();
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // ---- Events ----
 qs('#pacing-form').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -208,6 +264,14 @@ qsa('#units-toggle button').forEach((button) => {
     units.set(button.dataset.units);
     loadPlan();
   });
+});
+qs('#course-find').addEventListener('click', openLibrary);
+qs('#library-search').addEventListener('input', () => {
+  if (state.library) renderLibrary();
+});
+qs('#library-list').addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-race]');
+  if (button) useLibraryCourse(button);
 });
 qs('#gpx-upload').addEventListener('click', () => qs('#gpx-file').click());
 qs('#gpx-file').addEventListener('change', async (event) => {

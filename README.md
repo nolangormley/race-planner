@@ -152,6 +152,8 @@ Building again replaces planned days after today unless you untick that option, 
 ### Race-day pacing
 Each race on the profile page has a **Pacing** page: split targets for your goal time (the race's goal, or your predicted time from recent best efforts when there is none), as even effort or a negative split (second half about 2% faster), in miles or kilometres.
 Upload the course GPX and the splits follow the hills at one effort: each split's pace carries the grade cost of its ground (Minetti et al. 2002, the relation grade-adjusted pace is built on), with downhills giving back half the saving, and the whole plan still adds up to the goal to the second.
+**Find course** picks the course from [race-courses](https://github.com/nolangormley/race-courses) instead: GPX files of large US road races, read from the organizers' maps every week, with USGS elevation.
+It lists the courses of the race's distance; one marked **Check it** was joined from part of a larger map or is up to 8% off the distance, so look at its profile before you trust it.
 **Print pace band** prints only a narrow strip of split clock times to wear on race day.
 
 ### Detected intervals and automatic plan completion
