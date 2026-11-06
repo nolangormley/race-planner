@@ -742,6 +742,8 @@ def test_admin_page_shows_sign_ups_and_notes_to_an_admin_only(app_server, regist
     assert response.status_code == 302, response.text
     page.goto(f"{app_server}/logout")
     login(page, app_server, other)
+    # The dashboard's reads must finish before the logout below, or one answers 401 after it.
+    page.wait_for_load_state("networkidle")
     expect(page.locator(".nav a[href='/admin']")).to_have_count(0)
     assert page.request.get(f"{app_server}/admin").status == 404
     assert page.request.get(f"{app_server}/api/admin/stats").status == 404

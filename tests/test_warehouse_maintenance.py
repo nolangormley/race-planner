@@ -6,6 +6,7 @@ import duckdb
 
 from src.pipeline import ACTIVITY_CHILD_TABLES, StravaDB
 from src.api.routers.activities import delete_activity_rows
+from src.api.services.account import delete_warehouse_rows
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 ATHLETE_ID = 424242
@@ -48,6 +49,30 @@ def test_an_activity_with_laps_and_best_efforts_can_be_deleted():
     for table in ACTIVITY_CHILD_TABLES + ("dim_activity",):
         assert warehouse.con.execute(f"SELECT COUNT(*) FROM {table} WHERE activity_id = ?", [ACTIVITY_ID]).fetchone()[0] == 0
 
+
+
+def test_rows_can_be_deleted_while_the_app_holds_the_warehouse_open(tmp_path):
+    # The app keeps one StravaDB open for its whole life (src/api/main.py).
+    # Opened on a warehouse whose migrations are all applied, it must not
+    # leave a read transaction open: an older open transaction keeps deleted
+    # rows in the indexes, so removing an activity after its streams failed
+    # the foreign key check, and so did deleting an account.
+    path = str(tmp_path / "warehouse.duckdb")
+    StravaDB(path).con.close()
+    anchor = StravaDB(path)
+    con = duckdb.connect(path)
+    add_activity_with_children(con)
+
+    assert delete_activity_rows(con, ACTIVITY_ID) == []
+    con.execute(
+        "INSERT INTO dim_activity (activity_id, athlete_id, name, type, start_date_local, distance, moving_time) VALUES (?, ?, 'Run', 'Run', '2026-10-21 07:30:00', 5000, 1500)",
+        [ACTIVITY_ID + 1, ATHLETE_ID],
+    )
+    con.execute("INSERT INTO stream_heartrate (activity_id, time_offset, value) VALUES (?, 0, 150)", [ACTIVITY_ID + 1])
+    delete_warehouse_rows(con, ATHLETE_ID)
+    assert con.execute("SELECT COUNT(*) FROM dim_athlete WHERE athlete_id = ?", [ATHLETE_ID]).fetchone()[0] == 0
+    con.close()
+    anchor.con.close()
 
 def test_rebuild_copies_every_table(tmp_path):
     source = tmp_path / "warehouse.duckdb"
