@@ -1,5 +1,7 @@
+import pathlib
 from types import SimpleNamespace
 
+import duckdb
 import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -117,3 +119,31 @@ def test_removed_endpoints_stay_removed(app):
     for gone in ("/schedule/{user_id}", "/api/training-plan/{user_id}/chat", "/api/mileage-summary/{user_id}",
                  "/users/", "/recommend/{user_id}", "/settings/{user_id}", "/api/activities/{activity_id}/ai_summary"):
         assert gone not in paths, gone
+
+
+def test_stopping_the_app_leaves_no_write_ahead_log(app):
+    # A stopped app keeps the whole warehouse in its .duckdb file. A .wal
+    # left next to it is lost when the file is copied, and DuckDB replays it
+    # onto the wrong file after a swap (README, Repairing the warehouse).
+    from src.api import main
+    main.warehouse_anchor.con.execute("CREATE TABLE wal_probe (id INTEGER)")
+    main.warehouse_anchor.con.execute("DROP TABLE wal_probe")
+    wal = pathlib.Path(f"{main.DB_PATH}.wal")
+    assert wal.exists()
+    with TestClient(app):
+        pass
+    assert not wal.exists()
+
+
+def test_a_sync_writing_at_shutdown_does_not_stop_the_app_from_stopping(app, capsys):
+    from src.api import main
+    sync = duckdb.connect(main.DB_PATH)
+    sync.execute("BEGIN")
+    sync.execute("CREATE TABLE wal_probe (id INTEGER)")
+    try:
+        with TestClient(app):
+            pass
+        assert "The warehouse was not checkpointed at shutdown" in capsys.readouterr().out
+    finally:
+        sync.execute("ROLLBACK")
+        sync.close()

@@ -10,6 +10,7 @@ import os
 import secrets
 import sys
 from dotenv import load_dotenv
+import duckdb
 
 logging.basicConfig(level=logging.INFO)
 
@@ -44,6 +45,15 @@ async def lifespan(_app):
     from src.api.services.coros_sync import sync_due_coros
     start_scheduler([send_due_digests, sync_due_coros] if COROS_ENABLED else [send_due_digests])
     yield
+    # Write the write-ahead log into the warehouse file, so that a stopped app
+    # leaves no .wal: a copy of the .duckdb file then has all the data, and a
+    # file swapped in does not get the log of the old file. While a sync
+    # writes, DuckDB refuses; the log then stays and is replayed at the next
+    # start. FORCE CHECKPOINT is not an option: it waits for the sync.
+    try:
+        warehouse_anchor.con.execute("CHECKPOINT")
+    except duckdb.TransactionException as error:
+        print(f"The warehouse was not checkpointed at shutdown: {error}")
 
 
 app = FastAPI(lifespan=lifespan)
