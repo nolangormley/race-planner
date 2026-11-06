@@ -167,17 +167,6 @@ def test_bad_files_are_rejected():
         plan_splits(10000, 2700, 1000, "chaotic")
 
 
-def test_goal_fallback_predicts_from_the_closest_shorter_effort():
-    from src.api.routers.analytics import predict_from_efforts
-    efforts = [
-        {"distance_m": 1609.344, "seconds": 360, "label": "1 mile"},
-        {"distance_m": 10000.0, "seconds": 2700, "label": "10K"},
-    ]
-    seconds, source = predict_from_efforts(efforts, HALF_MARATHON_M)
-    assert source["label"] == "10K"                             # the mile is under a quarter of the distance
-    assert seconds == round(2700 * (HALF_MARATHON_M / 10000.0) ** 1.06)
-
-
 @pytest.fixture
 def db(monkeypatch):
     """SQLite in place of Postgres for the pacing and predictions endpoints."""
@@ -208,7 +197,7 @@ def add_half(db, runner, goal_time):
 
 
 def test_pacing_reads_typed_and_race_goals_for_the_distance(db, runner, monkeypatch):
-    monkeypatch.setattr(pacing_router, "predicted_goal", lambda user, distance_m: 6600)
+    monkeypatch.setattr(pacing_router, "predicted_goal", lambda user, distance_m, course: 6600)
     plan = pacing_router.pacing_plan(add_half(db, runner, "1:45"), current_user=runner)
     assert (plan["goal_seconds"], plan["goal"], plan["goal_source"]) == (6300, "1:45:00", "race")
     assert plan["splits"][-1]["cumulative_seconds"] == 6300
@@ -238,9 +227,10 @@ def test_pacing_refuses_a_goal_no_runner_can_hold(db, runner):
 
 def test_predictions_card_reads_each_race_goal_for_its_distance(db, runner, monkeypatch):
     monkeypatch.setattr(analytics, "get_db_connection", lambda: SimpleNamespace(close=lambda: None))
-    monkeypatch.setattr(analytics, "recent_best_efforts", lambda con, athlete_id: [
-        {"distance_m": 10000.0, "seconds": 2700, "label": "10K", "date": "2026-10-04", "name": "Tempo"},
-    ])
+    monkeypatch.setattr(analytics.predictions, "gather", lambda con, user, today: {
+        "efforts": [{"distance_m": 10000.0, "seconds": 2700, "label": "10K", "date": today - timedelta(days=9), "name": "Tempo"}],
+        "old": False, "training": None,
+    })
     monkeypatch.setattr(analytics, "calculate_vo2max", lambda athlete_id, hr_max, hr_rest: None)
     two_part, implausible = add_half(db, runner, "1:45"), add_half(db, runner, "0:30:00")
     races = {race["id"]: race for race in analytics.get_predictions(runner.athlete_id, current_user=runner)["races"]}

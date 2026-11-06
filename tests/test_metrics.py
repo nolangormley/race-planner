@@ -181,13 +181,6 @@ def test_best_effort_finds_the_fastest_stretch():
     assert best_effort_seconds(paused_times, np.full(600, 3.0), 1800.0) is None
 
 
-def test_riegel_scales_time_with_distance():
-    from src.metrics import riegel_prediction
-    # A 20:00 5K predicts a 10K just over double the time.
-    assert riegel_prediction(1200, 5000, 10000) == pytest.approx(2502, abs=2)
-    assert riegel_prediction(1200, 5000, 5000) == 1200
-
-
 def test_training_status_says_when_the_history_is_long_enough_for_the_ratio(tmp_path, monkeypatch):
     from datetime import date, datetime, time, timedelta
     import src.api.deps as deps

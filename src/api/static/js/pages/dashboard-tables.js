@@ -9,12 +9,23 @@ export function renderPredictions(data) {
     renderEmpty(container, 'No prediction yet', 'Predictions need runs with pace data in the last six months.');
     return;
   }
-  qs('#pred-sub').textContent = data.vdot
-    ? `From your fastest efforts in the last six months, scaled with Riegel's formula. The faint time is the aerobic ceiling from a VO2 max of ${data.vdot.toFixed(1)}: what the engine allows with race-specific training.`
-    : "From your fastest efforts in the last six months, scaled with Riegel's formula.";
+  const old = data.predictions[0]?.old_efforts
+    ? ' Nothing in the last 12 weeks counts yet, so these use older efforts and a wider range.' : '';
+  const ceiling = data.vdot
+    ? ` The faint time is the aerobic ceiling from a VO2 max of ${data.vdot.toFixed(1)}: what the engine allows with race-specific training.` : '';
+  qs('#pred-sub').textContent = 'What you would run if you raced today, with a likely range. Each time scales your strongest effort of the last 12 weeks to the distance; '
+    + `the marathon also counts your last 8 weeks of training, and a race with a course map counts its hills.${old}${ceiling}`;
+  // The adjustments behind a time, after the effort it scales: the marathon's
+  // training prediction (Tanda) and the time the course's hills add.
+  const basis = (row) => {
+    let text = `from your ${fmtClock(row.from.seconds)} ${escapeHtml(row.from.label)} on ${fmtDate(row.from.date)}`;
+    if (row.training_seconds) text += ` · ${fmtClock(row.training_seconds)} from ${units.distance(row.training_weekly_m)} a week of training`;
+    if (row.course_factor > 1.001) text += ` · hills +${fmtClock(row.seconds - row.seconds / row.course_factor)}`;
+    return text;
+  };
   const cell = (row) => `
-    <td class="num">${fmtClock(row.seconds)}<span class="cell-sub">${units.pace(row.distance_m / row.seconds)}</span></td>
-    <td class="muted small">from your ${fmtClock(row.from.seconds)} ${escapeHtml(row.from.label)} on ${fmtDate(row.from.date)}</td>
+    <td class="num">${fmtClock(row.seconds)}<span class="cell-sub nowrap">${fmtClock(row.low_seconds)}–${fmtClock(row.high_seconds)}</span><span class="cell-sub">${units.pace(row.distance_m / row.seconds)}</span></td>
+    <td class="muted small">${basis(row)}</td>
     <td class="num faint small">${row.ceiling_seconds ? fmtClock(row.ceiling_seconds) : ''}</td>`;
   const races = data.races.filter((race) => race.seconds).map((race) => {
     let verdict = '';
