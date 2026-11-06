@@ -110,5 +110,5 @@ def test_intervals_tell_a_run_not_analysed_yet_from_one_with_nothing_found(app):
 def test_removed_endpoints_stay_removed(app):
     paths = {path for _, path in route_table(app)}
     for gone in ("/schedule/{user_id}", "/api/training-plan/{user_id}/chat", "/api/mileage-summary/{user_id}",
-                 "/users/", "/recommend/{user_id}", "/settings/{user_id}"):
+                 "/users/", "/recommend/{user_id}", "/settings/{user_id}", "/api/activities/{activity_id}/ai_summary"):
         assert gone not in paths, gone

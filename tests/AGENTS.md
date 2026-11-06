@@ -22,7 +22,7 @@ Unit tests (`pytest`, no network, no database server). DuckDB tests use `StravaD
 - `test_courses.py`: the public course pages logged out with the library stubbed: the course list, a plan for any goal at a course's own distance, the refusals (no course file, unknown course, implausible goal, bad strategy or unit, 503 without the library), the home page, list and course page rendered server-side (with the check note and the OpenStreetMap credit), and the sitemap and robots.txt.
 - `test_races.py`: the race catalog (planned distances only, biggest first, `has_course`, 503 when the library cannot be read), races created from it with their course or without one (none in the dataset, library offline), and the first race at sign-up named and given its course, with SQLite in place of Postgres.
 - `test_coros.py`: the COROS client against a fake HTTP session (login hashing, chunked daily fetch, auth and rate-limit errors), and the sync into an in-memory warehouse: nights stored, resting heart rate default and recompute trigger, expired sessions, unlink.
-- `test_webhook.py`, `test_password_reset.py`, `test_llm_parsing.py`: the webhook dispatcher, reset tokens, LLM response cleaning.
+- `test_webhook.py`, `test_password_reset.py`: the webhook dispatcher, reset tokens.
 
 `conftest.py` has `make_gpx`, a factory for GPX bytes of a straight run with heart rate, at a steady pace or in `(seconds, speed)` blocks. `fixtures/sample_run.fit` is a ten-minute, two-lap run written by `fixtures/make_fit_fixture.py` (a minimal FIT encoder; run it only to change the fixture).
 

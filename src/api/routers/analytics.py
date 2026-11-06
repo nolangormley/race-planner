@@ -7,8 +7,6 @@ from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, Race, User
 from src.pacing import parse_goal
 from src.metrics import race_time_for_vdot, riegel_prediction, BEST_EFFORT_DISTANCES_M
-from src.api.services.coach import get_ai_insight
-from src.api.services.llm import cached_call
 from src.api.deps import get_db_connection
 from src.api.services.metrics import (
     calculate_training_status_logic,
@@ -33,21 +31,6 @@ def get_status(user_id: int, current_user: User = Depends(get_current_user)):
     status = calculate_training_status_logic(user_id, hr_max=current_user.max_hr, hr_rest=resolve_resting_hr(current_user))
     if not status:
         raise HTTPException(status_code=404, detail="No training data found for user")
-
-    status['race_type'] = current_user.race_length
-    status['race_date'] = str(current_user.race_date) if current_user.race_date else None
-    status['goal_time'] = current_user.race_goal_time
-
-    # Cached for an hour — this route is hit on every dashboard load, and
-    # was previously a fresh, unbounded billed LLM call every single time
-    # (see agent_prompting/improvement_plan.md Section 3). CTL/ATL/TSB don't
-    # meaningfully change within an hour, so a little staleness is an
-    # acceptable trade for not re-billing/re-latency-ing every page view.
-    status['ai_insight'] = cached_call(
-        f"ai_insight:status:{user_id}",
-        ttl_seconds=3600,
-        compute_fn=lambda: get_ai_insight(status, context="status"),
-    )
     return status
 
 @router.get("/vo2max/{user_id}")
