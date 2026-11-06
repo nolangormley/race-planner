@@ -50,8 +50,8 @@ def preview_digest(user_id: int, current_user: User = Depends(get_current_user))
     db = SessionLocal()
     try:
         user = own_user(db, user_id, current_user)
-        subject, body = build_digest(db, user)
-        return {"subject": subject, "body": body}
+        subject, body, html = build_digest(db, user)
+        return {"subject": subject, "body": body, "html": html}
     finally:
         db.close()
 

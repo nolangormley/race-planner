@@ -84,7 +84,7 @@ def client(db, monkeypatch):
     from src.api.main import app
 
     sent = []
-    monkeypatch.setattr(auth_routes, "send_email", lambda to, subject, body: sent.append((to, body)))
+    monkeypatch.setattr(auth_routes, "send_email", lambda to, subject, body, html: sent.append((to, body, html)))
     app.dependency_overrides[auth_routes.get_db] = lambda: db
     monkeypatch.setattr(app.state, "secret_key", SECRET, raising=False)
     client = TestClient(app)
@@ -98,9 +98,12 @@ def test_forgot_password_emails_a_link_that_resets_the_password(client, db, user
     assert response.status_code == 200
     assert "reset link is on its way" in response.text
     assert len(client.sent) == 1
-    to, body = client.sent[0]
+    to, body, html = client.sent[0]
     assert to == "runner@example.com"
     token = body.split("token=")[1].split()[0]
+    # The HTML version carries the same link, as the button and as text to paste.
+    assert html.count(f"/reset-password?token={token}") == 3
+    assert "Choose a new password" in html and "runner@example.com" in html
 
     assert "Choose a new password" in client.get(f"/reset-password?token={token}").text
 

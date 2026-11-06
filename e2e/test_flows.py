@@ -303,9 +303,11 @@ def test_weekly_digest_can_be_previewed_and_switched_on(app_server, registered_u
     page.wait_for_load_state("networkidle")
     assert not page.is_checked("#digest-enabled")
     page.click("#digest-preview")
-    page.wait_for_function("document.querySelector('#digest-body').textContent.startsWith('Subject:')")
-    preview = page.text_content("#digest-body")
-    assert "Your week in running" in preview and "Last week" in preview
+    page.wait_for_function("document.querySelector('#digest-subject').textContent.startsWith('Subject:')")
+    assert "Your week in running" in page.text_content("#digest-subject")
+    # The HTML email, in a frame grown to the email's height.
+    expect(page.frame_locator("#digest-frame").get_by_text("Last week").first).to_be_visible()
+    assert page.locator("#digest-frame").bounding_box()["height"] > 400
 
     page.check("#digest-enabled")
     page.wait_for_selector("#toast.show")

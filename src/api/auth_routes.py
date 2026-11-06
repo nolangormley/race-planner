@@ -218,6 +218,9 @@ def send_reset_email(to: str, link: str) -> None:
             "Someone asked to reset the password for your Race Planner account.\n\n"
             f"Open this link within an hour to choose a new password:\n{link}\n\n"
             "If it wasn't you, ignore this email; your password stays the same.",
+            templates.get_template("email/password_reset.html").render(
+                link=link, email=to, app_url=HOST_URL.rstrip("/"), preheader="Choose a new password within an hour.",
+            ),
         )
     except Exception as e:
         print(f"Failed to send password reset email to {to}: {e}")

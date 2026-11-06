@@ -449,13 +449,23 @@ qs('#digest-preview').addEventListener('click', async () => {
     block.classList.add('hidden');
     return;
   }
-  block.textContent = 'Building…';
+  const subject = qs('#digest-subject');
+  const frame = qs('#digest-frame');
+  subject.textContent = 'Building…';
+  frame.hidden = true;
   block.classList.remove('hidden');
   try {
     const preview = await fetchJson(`/api/digest/${userId}/preview`);
-    block.textContent = `Subject: ${preview.subject}\n\n${preview.body}`;
+    subject.textContent = `Subject: ${preview.subject}`;
+    // The email as the inbox shows it: a sandboxed frame that runs no
+    // scripts, sized to its content, with links opening in a new tab.
+    frame.addEventListener('load', () => {
+      frame.hidden = false;
+      frame.style.height = `${frame.contentDocument.documentElement.scrollHeight}px`;
+    }, { once: true });
+    frame.srcdoc = preview.html.replace('<head>', '<head><base target="_blank">');
   } catch (error) {
-    block.textContent = error.message;
+    subject.textContent = error.message;
   }
 });
 qs('#digest-send').addEventListener('click', async (event) => {
