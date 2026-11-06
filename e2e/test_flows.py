@@ -47,6 +47,8 @@ def test_dashboard_before_any_sync_shows_empty_states(app_server, registered_use
     page.wait_for_load_state("networkidle")
     assert "No training history yet" in page.text_content("#pmc-chart")
     assert "Never synced" in page.text_content("#sync-status")
+    page.wait_for_selector("#insights .empty")
+    assert "Nothing to flag" in page.text_content("#insights-card")
 
 
 def test_sync_button_runs_a_sync_with_progress_and_fills_the_dashboard(app_server, registered_user, page):

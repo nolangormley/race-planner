@@ -30,6 +30,9 @@ logger = logging.getLogger("race_planner.api")
 
 # The acute:chronic ratio means nothing before the chronic side has a history: four weeks from the first activity.
 ACWR_HISTORY_DAYS = 28
+# The easy runs whose efficiency the dashboard plots (routers/analytics.get_efficiency) and services/insights.py
+# reads: runs of 20 minutes or more at 60-82% of max heart rate. Needs dim_activity as da, activity_effectiveness as ae.
+EASY_RUN_SQL = "da.type = 'Run' AND da.moving_time >= 1200 AND ae.efficiency_factor > 0 AND ae.intensity_factor BETWEEN 0.60 AND 0.82"
 
 
 def recorded_max_hr(con, athlete_id):
@@ -48,6 +51,59 @@ def detected_max_hr(con, athlete_id):
     """recorded_max_hr, or DEFAULT_MAX_HR without any. The profile's max_hr
     overrides it wherever it is used."""
     return recorded_max_hr(con, athlete_id) or float(DEFAULT_MAX_HR)
+
+
+def load_history(con, athlete_id, today=None):
+    """One row per day from the first activity to today (default: the real
+    today) with the daily load, fitness (CTL), fatigue (ATL), form (TSB), the
+    acute:chronic ratio and the day's mean efficiency and decoupling; None
+    without any load."""
+    try:
+        df = con.execute("""
+            SELECT
+                da.start_date_local::DATE as activity_date,
+                SUM(ae.trimp_banister) as daily_load,
+                AVG(ae.efficiency_factor) as daily_ef,
+                AVG(ae.aerobic_decoupling) as daily_decoup
+            FROM dim_activity da
+            JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
+            WHERE da.athlete_id = ?
+            GROUP BY 1
+            ORDER BY 1
+        """, [athlete_id]).fetchdf()
+    except Exception as e:
+        print(f"Error computing daily training load from activity_effectiveness: {e}")
+        return None
+
+    if df.empty:
+        return None
+
+    start_date = df['activity_date'].min()
+    end_date = pd.Timestamp(today or datetime.now().date())
+
+    if start_date > end_date:
+        start_date = end_date
+
+    date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+    daily_data = pd.DataFrame({'date': date_range.date})
+    daily_data['activity_date'] = pd.to_datetime(daily_data['date'])
+    df['activity_date'] = pd.to_datetime(df['activity_date'])
+
+    merged = pd.merge(daily_data, df, on='activity_date', how='left')
+    merged['daily_load'] = merged['daily_load'].fillna(0)
+
+    # Treat 0s as NaNs for EF and decoup so they don't skew the average or display as 0
+    merged['daily_ef'] = merged['daily_ef'].replace(0, np.nan)
+    merged['daily_decoup'] = merged['daily_decoup'].replace(0, np.nan)
+
+    loads = merged['daily_load'].values
+    ctl, atl = calculate_ctl_atl(loads)
+
+    merged['CTL'] = ctl
+    merged['ATL'] = atl
+    merged['TSB'] = calculate_tsb(merged['CTL'], merged['ATL'])
+    merged['ACWR'] = calculate_acwr(merged['CTL'], merged['ATL'])
+    return merged
 
 
 def calculate_training_status_logic(user_id: int, hr_max=None, hr_rest=None):
@@ -72,56 +128,11 @@ def calculate_training_status_logic(user_id: int, hr_max=None, hr_rest=None):
     """
     con = get_db_connection()
     try:
-        try:
-            df = con.execute("""
-                SELECT
-                    da.start_date_local::DATE as activity_date,
-                    SUM(ae.trimp_banister) as daily_load,
-                    AVG(ae.efficiency_factor) as daily_ef,
-                    AVG(ae.aerobic_decoupling) as daily_decoup
-                FROM dim_activity da
-                JOIN activity_effectiveness ae ON da.activity_id = ae.activity_id
-                WHERE da.athlete_id = ?
-                GROUP BY 1
-                ORDER BY 1
-            """, [user_id]).fetchdf()
-        except Exception as e:
-            print(f"Error computing daily training load from activity_effectiveness: {e}")
+        merged = load_history(con, user_id)
+        if merged is None:
             return None
-
-        if df.empty:
-            return None
-
-
-        # 2. Reindex
-        start_date = df['activity_date'].min()
-        end_date = pd.Timestamp(datetime.now().date())
-
-        if start_date > end_date:
-            start_date = end_date
-
-        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-        daily_data = pd.DataFrame({'date': date_range.date})
-        daily_data['activity_date'] = pd.to_datetime(daily_data['date'])
-        df['activity_date'] = pd.to_datetime(df['activity_date'])
-
-        merged = pd.merge(daily_data, df, on='activity_date', how='left')
-        merged['daily_load'] = merged['daily_load'].fillna(0)
         # One row per day from the first activity to today.
         history_days = len(merged)
-
-        # Treat 0s as NaNs for EF and decoup so they don't skew the average or display as 0
-        merged['daily_ef'] = merged['daily_ef'].replace(0, np.nan)
-        merged['daily_decoup'] = merged['daily_decoup'].replace(0, np.nan)
-
-        # 3. Calculate CTL, ATL, TSB
-        loads = merged['daily_load'].values
-        ctl, atl = calculate_ctl_atl(loads)
-
-        merged['CTL'] = ctl
-        merged['ATL'] = atl
-        merged['TSB'] = calculate_tsb(merged['CTL'], merged['ATL'])
-        merged['ACWR'] = calculate_acwr(merged['CTL'], merged['ATL'])
 
         # 7-day rolling averages
         merged['EF_7d'] = merged['daily_ef'].rolling(window=7, min_periods=1).mean()
