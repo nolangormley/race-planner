@@ -1,4 +1,5 @@
 """Race-day pacing: a course file per race and split targets for a goal."""
+from datetime import date
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 import logging
 
@@ -9,9 +10,10 @@ from src.pacing import (
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User, Race
 from src.api.deps import get_db_connection
-from src.api.routers.analytics import RACE_DISTANCES_M, recent_best_efforts, predict_from_efforts
+from src.api.routers.analytics import RACE_DISTANCES_M
 from src.api.schemas import LibraryCourse
 from src.api.services import course_library as library
+from src.api.services import predictions
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
@@ -34,17 +36,6 @@ def race_distance(race):
     if not distance:
         raise HTTPException(status_code=400, detail="Pacing plans cover 5K, 5 mile, 10K, 10 mile, half marathon and marathon.")
     return distance
-
-
-def course_of(race):
-    """The parsed course, or None without a file (or with one that no
-    longer parses)."""
-    if not race.course_gpx:
-        return None
-    try:
-        return parse_gpx_course(race.course_gpx)
-    except ValueError:
-        return None
 
 
 def course_summary(course):
@@ -90,17 +81,18 @@ def checked_goal(text, distance_name, distance_m, unit, label="Goal"):
     ))
 
 
-def predicted_goal(user, distance_m):
-    """Riegel prediction from recent best efforts, or None without runs."""
+def predicted_goal(user, distance_m, course):
+    """The predictions card's time for the distance (src/predictions.py),
+    over the race's course when it has one, or None without efforts."""
+    today = date.today()
     con = get_db_connection()
     try:
-        efforts = recent_best_efforts(con, user.athlete_id)
+        inputs = predictions.gather(con, user, today)
     finally:
         con.close()
-    if not efforts:
+    if not inputs["efforts"]:
         return None
-    seconds, _ = predict_from_efforts(efforts, distance_m)
-    return seconds
+    return round(predictions.predict(inputs, distance_m, course)["seconds"])
 
 
 def save_course(db, race, text):
@@ -192,18 +184,19 @@ def pacing_plan(race_id: int, goal: str = None, strategy: str = "even", unit: st
     finally:
         db.close()
     distance = race_distance(race)
+    course = predictions.course_of(race)
 
     if goal:
         goal_seconds, goal_source = checked_goal(goal, race.race_length, distance, unit), "query"
     elif parse_clock(race.goal_time):
         goal_seconds, goal_source = checked_goal(race.goal_time, race.race_length, distance, unit, "The race goal"), "race"
     else:
-        goal_seconds, goal_source = predicted_goal(current_user, distance), "prediction"
+        goal_seconds, goal_source = predicted_goal(current_user, distance, course), "prediction"
     if not goal_seconds:
         raise HTTPException(status_code=400, detail="Set a goal time on the race, or type one above.")
 
     return {
-        **plan_payload(distance, goal_seconds, strategy, unit, course_of(race)),
+        **plan_payload(distance, goal_seconds, strategy, unit, course),
         "race": {"id": race.id, "name": race.name, "race_length": race.race_length, "race_date": str(race.race_date), "goal_time": race.goal_time},
         "goal_source": goal_source,
     }

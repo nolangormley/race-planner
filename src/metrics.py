@@ -249,8 +249,3 @@ def best_effort_seconds(time_offsets, velocities, distance_m):
         return None
     durations = times[ends[valid]] - times[valid]
     return float(durations.min())
-
-
-def riegel_prediction(seconds, from_distance_m, to_distance_m, exponent=1.06):
-    """Riegel (1981): race time scales with distance to the power 1.06."""
-    return seconds * (to_distance_m / from_distance_m) ** exponent
