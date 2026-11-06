@@ -215,8 +215,12 @@ class StravaDB:
         self.init_schema()
         
     def _migration_applied(self, name):
-        row = self.con.execute("SELECT 1 FROM schema_migrations WHERE name = ?", [name]).fetchone()
-        return row is not None
+        # fetchall, not fetchone: a result that is not read to the end keeps
+        # its read transaction open. On a warehouse whose migrations are all
+        # applied this is the last query of the connection the app keeps
+        # open, and an older open transaction makes DuckDB refuse to delete a
+        # parent row after its children (deleted index entries stay visible).
+        return bool(self.con.execute("SELECT 1 FROM schema_migrations WHERE name = ?", [name]).fetchall())
 
     def _mark_migration_applied(self, name):
         self.con.execute(
