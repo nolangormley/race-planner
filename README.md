@@ -256,15 +256,19 @@ The running app holds the warehouse file open, so stop it first (`sudo systemctl
 Stream tables that were migrated with a rename in an earlier version keep a foreign-key reference to their old name inside DuckDB, and every delete on them fails at commit (`Table with name stream_x_new does not exist`). That breaks the activity Delete button and webhook deletes. Rebuild the file once, with the app stopped:
 
 ```bash
+cd /opt/race-planner/app
 sudo systemctl stop race-planner
 sudo -u raceplanner /opt/race-planner/.venv/bin/python scripts/rebuild_warehouse.py data/strava_warehouse.duckdb
-# check the printed row counts, then swap:
+# check the printed row counts, then swap; the old file's write-ahead log goes with it:
 sudo -u raceplanner mv data/strava_warehouse.duckdb data/strava_warehouse.duckdb.bak
+[ -f data/strava_warehouse.duckdb.wal ] && sudo -u raceplanner mv data/strava_warehouse.duckdb.wal data/strava_warehouse.duckdb.bak.wal
 sudo -u raceplanner mv data/strava_warehouse.rebuilt.duckdb data/strava_warehouse.duckdb
 sudo systemctl start race-planner
 ```
 
 The rebuild copies every table into a fresh schema (about 4 s for 400 activities) and leaves the original untouched until you swap it.
+Move the `.wal` file too: DuckDB replays a `.wal` next to the database file when it opens it, and the old file's log replayed onto the rebuilt file stops the app from starting (`Failure while replaying WAL file`).
+Once the app runs on the rebuilt file, delete the `.bak` files: an account deleted after the backup is still in them.
 
 ## Project structure
 
