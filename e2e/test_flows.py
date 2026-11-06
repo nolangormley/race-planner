@@ -465,6 +465,32 @@ def test_profile_race_search_names_the_race_and_brings_its_course(app_server, re
     expect(page.locator("#races .list-row", has_text="Three Rivers Marathon")).to_contain_text("course map")
     expect(page.locator("#races .list-row", has_text="Monongahela Half")).not_to_contain_text("course map")
 
+def test_a_visitor_finds_a_course_and_its_pace_band_without_an_account(app_server, page):
+    page.goto(f"{app_server}/")
+    expect(page.locator("h1")).to_have_text("Pace your race on its real course.")
+    page.fill("#home-search", "three rivers")                  # the fake race-courses catalog
+    page.click("#home-search-races [role=option]:has-text('Three Rivers Half')")
+    page.wait_for_url("**/courses/three-rivers-half/half-marathon")
+    expect(page.locator("#goal")).to_have_value("1:58:00")      # 13.1 miles at the example 9:00 a mile
+    expect(page.locator("#goal-source")).to_contain_text("Example goal")
+    expect(page.locator("#pacing-summary")).to_contain_text("ft up")
+    expect(page.locator("#profile-chart svg").first).to_be_visible()
+
+    page.fill("#goal", "1:45:00")
+    page.click("#pacing-form button[type=submit]")
+    expect(page.locator("#splits-table tbody tr").last).to_contain_text("1:45:00")
+    expect(page.locator("#goal-source")).to_have_text("")
+    expect(page.locator("#pace-band tr")).to_have_count(14)
+    expect(page.locator(".course-cta a")).to_have_attribute("href", "/register")
+
+    page.goto(f"{app_server}/courses")
+    rows = page.locator(".course-row:not(.hidden)")
+    expect(rows).to_have_count(3)                               # the three events with a course file
+    page.fill("#course-filter", "allegheny")
+    expect(rows).to_have_count(1)
+    page.fill("#course-filter", "boston")
+    expect(page.locator("#course-empty")).to_be_visible()
+
 def wait_for_idle_sync(page, app_server, user_id, seconds=60):
     """The last sync job once nothing is running (the COROS link above may
     have started a recompute)."""
@@ -734,3 +760,56 @@ def test_coros_switched_off_leaves_out_the_cards_and_the_routes(app_without_coro
     assert page.locator("#recovery-card").count() == 0
     for path in (f"/api/coros/{user_id}", f"/api/recovery/{user_id}", f"/api/readiness/{user_id}", f"/api/energy/{user_id}"):
         assert page.request.get(f"{app_without_coros}{path}").status == 404
+
+
+def test_the_privacy_page_renders_signed_out(app_server, page):
+    page.goto(f"{app_server}/privacy")
+    expect(page.locator("h1")).to_have_text("Privacy")
+    text = page.text_content("article")
+    assert "Nolan Gormley" in text and "Last updated: November 6, 2026" in text
+    expect(page.locator(".topbar a[href='/login']")).to_be_visible()      # signed out: the visitor top bar
+    expect(page.locator("footer a[href='/privacy']")).to_be_visible()
+    page.goto(f"{app_server}/login")
+    expect(page.locator(".auth a[href='/privacy']")).to_be_visible()
+
+
+def test_a_runner_deletes_their_account_from_the_profile(app_server, page, tmp_path):
+    user = {"email": f"leaving{int(time.time())}@example.com", "password": "leaving-123456", "name": "Leaving Runner"}
+    page.goto(f"{app_server}/register")
+    page.fill("#name", user["name"])
+    page.fill("#email", user["email"])
+    page.fill("#password", user["password"])
+    page.fill("#date_of_birth", "1993-06-07")
+    page.select_option("#gender", "Other")
+    page.fill("#height-ft", "5")
+    page.fill("#height-in", "9")
+    page.fill("#weight-input", "150")
+    page.click("button[type=submit]")
+    page.wait_for_url("**/setup-race")
+    # Rows in the warehouse to delete as well: an imported run.
+    start = (datetime.now(timezone.utc) - timedelta(days=2)).replace(hour=7, minute=0, second=0, microsecond=0)
+    track = tmp_path / "last.gpx"
+    track.write_text(gpx_track(start, "Last run"))
+    page.goto(f"{app_server}/warehouse")
+    page.wait_for_load_state("networkidle")
+    page.set_input_files("#import-input", str(track))
+    page.wait_for_selector("#activities-body tr:has-text('Last run')")
+
+    page.goto(f"{app_server}/profile")
+    page.wait_for_load_state("networkidle")
+    page.click("#delete-account")
+    page.wait_for_selector("#delete-modal.open")
+    page.fill("#delete-password", "not-the-password")
+    page.click("#delete-confirm")
+    expect(page.locator("#delete-form .status")).to_have_text("The password is incorrect.")
+    page.fill("#delete-password", user["password"])
+    page.click("#delete-confirm")
+    page.wait_for_url(re.compile(r"/login\?deleted=1$"))
+    expect(page.locator(".alert-info")).to_have_text("Your account and data were deleted.")
+
+    page.fill("input[name=username]", user["email"])
+    page.fill("input[name=password]", user["password"])
+    page.click("button[type=submit]")
+    expect(page.locator(".alert-error")).to_have_text("Invalid email or password.")
+    # The browser logs the refused password, a 400, as an error. This test expects it.
+    page.problems[:] = [problem for problem in page.problems if not ("status of 400" in problem and "/api/account" in problem)]

@@ -17,6 +17,14 @@ PAGES = [
     ("/admin", "#cohorts tbody tr"),
 ]
 
+# The pages a visitor sees without an account.
+PUBLIC_PAGES = [
+    ("/", "#home-search"),
+    ("/courses", "#course-list .course-row"),
+    ("/courses/three-rivers-half/half-marathon", "#splits-table tbody tr"),
+    ("/privacy", ".prose h2"),
+]
+
 # Elements that stick out past the right edge with no scrolling parent to hold them.
 OVERFLOWING = """
 () => [...document.querySelectorAll('body *')].filter((el) => {
@@ -83,3 +91,19 @@ def test_logged_in_pages_fit_a_phone_screen(app_server, registered_user, phone):
         assert profile and profile["x"] + profile["width"] <= width, url
         if path == "/profile":
             assert phone.locator("section.card a[href='/logout']").is_visible()
+
+
+def test_public_pages_fit_a_phone_screen(app_server, phone):
+    width = phone.viewport_size["width"]
+    for path, marker in PUBLIC_PAGES:
+        phone.goto(f"{app_server}{path}")
+        phone.wait_for_load_state("networkidle")
+        phone.wait_for_selector(marker)
+        overflow = phone.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        assert overflow == 0, f"{path} is {overflow} px wider than {width} px: {phone.evaluate(OVERFLOWING)}"
+        cramped = phone.evaluate(CRAMPED_AXES)
+        assert not cramped, f"{path}: {cramped}"
+        # The Courses link, Log in and Sign up stay on screen.
+        assert phone.evaluate("(nav => nav.scrollWidth - nav.clientWidth)(document.querySelector('.nav'))") == 0, path
+        sign_up = phone.locator(".topbar a[href='/register']").bounding_box()
+        assert sign_up["x"] + sign_up["width"] <= width, path

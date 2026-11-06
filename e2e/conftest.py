@@ -29,11 +29,10 @@ DATABASE_URL = os.environ.get("E2E_DATABASE_URL", "postgresql://postgres:postgre
 USER = {"email": "e2e@example.com", "password": "e2e-password-123", "name": "E2E Runner"}
 # The app reads the repo's .env whatever its working directory (dotenv looks
 # next to the code), but never over a variable that is already set, even to
-# an empty value. These are set empty so a developer's mail server, model
-# keys and public URL stay out of the test app.
+# an empty value. These are set empty so a developer's mail server and
+# public URL stay out of the test app.
 BLANK_SETTINGS = {name: "" for name in (
-    "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM",
-    "GROQ_API_KEY", "DEEPSEEK_API_KEY", "GEMINI_API_KEY", "APP_URL",
+    "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "APP_URL",
 )}
 
 
@@ -116,7 +115,6 @@ def running_app(workdir, settings):
         "DB_PATH": str(workdir / "warehouse.duckdb"),
         "STRAVA_CLIENT_ID": "e2e", "STRAVA_CLIENT_SECRET": "e2e",
         "SECRET_KEY": "e2e-secret", "SECURE_COOKIES": "false",
-        "LLM_PROVIDER": "local",
         "HOST_URL": base, "ALLOWED_ORIGINS": base,
         **settings,
     }

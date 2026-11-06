@@ -125,6 +125,7 @@ from src.api.routers import digest  # noqa: E402
 from src.api.routers import coros  # noqa: E402
 from src.api.routers import imports  # noqa: E402
 from src.api.routers import pacing  # noqa: E402
+from src.api.routers import courses  # noqa: E402
 from src.api.routers import feedback  # noqa: E402
 from src.api.routers import admin  # noqa: E402
 
@@ -142,6 +143,7 @@ if COROS_ENABLED:
     app.include_router(coros.router)
 app.include_router(imports.router)
 app.include_router(pacing.router)
+app.include_router(courses.router)
 app.include_router(feedback.router)
 app.include_router(admin.router)
 

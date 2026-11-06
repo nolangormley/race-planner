@@ -23,6 +23,9 @@ PUBLISHED = ("ok", "warn", "stale")
 
 clock = time.monotonic
 cache = {"entries": None, "read_at": 0.0}
+# GPX text by (race, event) with the clock reading when it was fetched; the public course pages read
+# the same files again and again.
+files = {}
 
 
 class LibraryUnavailable(Exception):
@@ -74,13 +77,23 @@ def courses():
     return [entry for entry in entries() if has_course(entry)]
 
 
+def course_entry(race, event):
+    """The index entry of one published course, or None when the index does not list it."""
+    return next((course for course in courses() if (course["race"], course["event"]) == (race, event)), None)
+
+
 def course_file(race, event):
-    """The GPX text of one published course, or None when the index does not list it."""
-    entry = next((course for course in courses() if (course["race"], course["event"]) == (race, event)), None)
+    """The GPX text of one published course, kept in memory for a day, or None when the index does not
+    list it."""
+    entry = course_entry(race, event)
     if entry is None:
         return None
-    response = fetch(entry["file"])
-    return response.content.decode("utf-8", errors="replace")
+    now = clock()
+    text, read_at = files.get((race, event), (None, 0.0))
+    if text is None or now - read_at >= INDEX_TTL_S:
+        text = fetch(entry["file"]).content.decode("utf-8", errors="replace")
+        files[(race, event)] = (text, now)
+    return text
 
 
 def attach(race, race_slug, event_slug):

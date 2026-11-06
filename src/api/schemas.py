@@ -17,17 +17,6 @@ class WorkoutCreate(BaseModel):
     source: Optional[str] = "Manual"
 
 
-class SettingsUpdate(BaseModel):
-    # race_length/race_goal_time flow into get_ai_insight's system prompt
-    # (via User.race_length/race_goal_time) with no length limit at all
-    # previously — length-capped per
-    # agent_prompting/improvement_plan.md Section 3 ("length-cap and
-    # validate free-text fields before they reach a prompt").
-    race_length: str = Field(max_length=50)
-    race_date: str
-    race_goal_time: str = Field(max_length=20)
-
-
 class LibraryCourse(BaseModel):
     race: str = Field(max_length=200)
     event: str = Field(max_length=200)
@@ -57,6 +46,10 @@ class ProfileUpdate(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str = Field(max_length=200)
     new_password: str = Field(max_length=200)
+
+
+class AccountDelete(BaseModel):
+    password: str = Field(max_length=200)
 
 
 class PlanEntryCreate(BaseModel):

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Race courses: elevation and pace bands · Race Planner{% endblock %}
+{% block meta %}<meta name="description" content="Course maps with elevation profiles for large US road races, and a free pace band that follows each course's hills for your goal time.">{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="/static/css/pages/courses.css">
+{% endblock %}
+
+{% block content %}
+<div id="courses">
+    <div class="page-head">
+        <div>
+            <h1>Race courses</h1>
+            <p class="sub">Large US road races with their course, read from the organizers' maps every week. Pick one for its elevation profile and a pace band for your goal.</p>
+        </div>
+    </div>
+    <section class="card">
+        {% if courses is none %}
+        <div class="empty"><strong>The course library cannot be read right now</strong>Try again in a few minutes.</div>
+        {% else %}
+        <div class="field">
+            <label for="course-filter">Race or city</label>
+            <input id="course-filter" class="input" type="search" autocomplete="off">
+        </div>
+        <div id="course-list" class="mt-3">
+            {% for course in courses %}
+            <a class="list-row course-row" href="/courses/{{ course.race }}/{{ course.event }}" data-search="{{ (course.title ~ ' ' ~ course.city ~ ' ' ~ course.state)|lower }}">
+                <span>
+                    <span class="strong course-title">{{ course.title }}</span>
+                    <span class="small muted">{{ course.city }}, {{ course.state }}{% if course.month_name %} · {{ course.month_name }}{% endif %}</span>
+                </span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+            </a>
+            {% endfor %}
+        </div>
+        <div class="empty hidden" id="course-empty"><strong>No match</strong>Try the race name or its city.</div>
+        {% endif %}
+    </section>
+    <p class="small faint mt-4">Missing your race? Most organizers publish the course only as a PDF or a picture, which has to be traced by hand. <a href="https://github.com/nolangormley/race-courses/issues/2">Help trace one</a>.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/courses.js"></script>
+{% endblock %}

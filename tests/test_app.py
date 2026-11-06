@@ -27,7 +27,9 @@ def test_every_router_is_mounted(app):
         ("GET", "/warehouse"),
         ("GET", "/workout_streams/{activity_id}"),
         ("GET", "/profile"),
+        ("GET", "/privacy"),
         ("POST", "/profile/{user_id}"),
+        ("DELETE", "/api/account"),
         ("GET", "/api/hr-profile/{user_id}"),
         ("GET", "/api/readiness/{user_id}"),
         ("GET", "/api/energy/{user_id}"),
@@ -54,6 +56,12 @@ def test_every_router_is_mounted(app):
         ("GET", "/api/races/{race_id}/course-library"),
         ("POST", "/api/races/{race_id}/course/library"),
         ("GET", "/api/race-catalog"),
+        ("GET", "/api/courses"),
+        ("GET", "/api/courses/{race}/{event}/pacing"),
+        ("GET", "/courses"),
+        ("GET", "/courses/{race}/{event}"),
+        ("GET", "/sitemap.xml"),
+        ("GET", "/robots.txt"),
         ("GET", "/api/training-plan/{user_id}"),
         ("PUT", "/api/training-plan/entry/{entry_id}"),
         ("GET", "/api/strava/webhook/{token}"),
@@ -107,5 +115,5 @@ def test_intervals_tell_a_run_not_analysed_yet_from_one_with_nothing_found(app):
 def test_removed_endpoints_stay_removed(app):
     paths = {path for _, path in route_table(app)}
     for gone in ("/schedule/{user_id}", "/api/training-plan/{user_id}/chat", "/api/mileage-summary/{user_id}",
-                 "/users/", "/recommend/{user_id}", "/settings/{user_id}"):
+                 "/users/", "/recommend/{user_id}", "/settings/{user_id}", "/api/activities/{activity_id}/ai_summary"):
         assert gone not in paths, gone

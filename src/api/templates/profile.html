@@ -282,6 +282,45 @@
             {% endfor %}
         </div>
     </section>
+
+    <section class="card card-danger span-2" id="delete-card">
+        <div class="card-head">
+            <div>
+                <h2 class="card-title">Delete account</h2>
+                <div class="card-sub">Removes your account and everything stored with it. The <a href="/privacy">privacy page</a> lists what that is.</div>
+            </div>
+            <div class="card-actions"><button type="button" class="btn btn-danger btn-sm" id="delete-account">Delete account</button></div>
+        </div>
+    </section>
+</div>
+
+<div class="modal" id="delete-modal" aria-hidden="true">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title" tabindex="-1">
+        <div class="modal-head">
+            <div>
+                <h2 id="delete-modal-title">Delete your account?</h2>
+                <div class="card-sub">This cannot be undone.</div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon btn-sm" data-close aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <form id="delete-form" class="stack">
+            <p>
+                This deletes your account and everything stored with it: your details, races and training plans, every activity with its streams and laps, whether synced from Strava or imported from files, and any COROS nights.
+                {% if user.strava_athlete_id %}The app also asks Strava to revoke its access to your account.{% endif %}
+            </p>
+            <div class="field">
+                <label for="delete-password">Your password</label>
+                <input id="delete-password" type="password" class="input" required autocomplete="current-password">
+            </div>
+            <div class="form-actions">
+                <span class="status"></span>
+                <button type="button" class="btn" data-close>Cancel</button>
+                <button type="submit" class="btn btn-danger-fill" id="delete-confirm">Delete my account</button>
+            </div>
+        </form>
+    </div>
 </div>
 {% endblock %}
 

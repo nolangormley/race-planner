@@ -1,6 +1,6 @@
 // Dashboard: loads each card's data and hands it to the renderers in
 // dashboard-training.js, dashboard-tables.js, dashboard-recovery.js and
-// energy.js; also the header, the coach's note and the unit and range toggles.
+// energy.js; also the header and the unit and range toggles.
 import { config, fetchJson, units, fmtDate, daysUntil, escapeHtml, qs, qsa } from '../app.js';
 import {
   renderTiles, renderVo2, renderPmc, renderPmcEmpty, renderVolume, renderHrZones, renderTypeShare, renderEfficiency,
@@ -28,7 +28,7 @@ const state = {
   pmcDays: Number(localStorage.getItem('pmcWindow') || 42),
 };
 
-// ---- Header, coach's note ----
+// ---- Header ----
 function renderHeader(races) {
   const sub = qs('#dash-sub');
   const next = races.map((race) => ({ ...race, days: daysUntil(race.race_date) })).filter((race) => race.days >= 0)[0];
@@ -38,27 +38,6 @@ function renderHeader(races) {
   }
   const when = next.days === 0 ? 'today' : next.days === 1 ? 'tomorrow' : `in ${next.days} days`;
   sub.innerHTML = `Training for <span class="strong">${escapeHtml(next.name || next.race_length)}</span><span class="sep">·</span>${escapeHtml(next.race_length)}<span class="sep">·</span>${fmtDate(next.race_date, { month: 'long', day: 'numeric' })}, ${when}${next.goal_time ? `<span class="sep">·</span>goal ${escapeHtml(next.goal_time)}` : ''}<span class="sep">·</span><a href="/races/${next.id}/pacing">Pacing plan</a>`;
-}
-
-function renderNote() {
-  const note = state.status?.ai_insight;
-  const card = qs('#ai-card');
-  if (!note || /api key|not set|error/i.test(note)) {
-    card.classList.add('hidden');
-    return;
-  }
-  const html = [];
-  let list = [];
-  const flush = () => { if (list.length) { html.push(`<ul>${list.join('')}</ul>`); list = []; } };
-  for (const raw of note.split('\n')) {
-    const line = raw.replace(/[*#]/g, '').trim();
-    if (!line) continue;
-    if (/^-\s+/.test(line)) list.push(`<li>${escapeHtml(line.replace(/^-\s+/, ''))}</li>`);
-    else { flush(); html.push(`<p>${escapeHtml(line)}</p>`); }
-  }
-  flush();
-  qs('#ai-note').innerHTML = html.join('');
-  card.classList.remove('hidden');
 }
 
 // ---- Loading ----
@@ -73,7 +52,6 @@ async function loadStatus() {
   }
   renderTiles(state);
   renderPmc(state);
-  renderNote();
 }
 
 async function loadAnalytics() {
