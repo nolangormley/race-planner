@@ -16,6 +16,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from .database import SessionLocal, User, Race
 from .schemas import PasswordChange
+from .services import course_library as library
 from .services.email import send_email
 
 load_dotenv()
@@ -291,6 +292,9 @@ def setup_race_post(
     race_length: str = Form(...),
     race_date: str = Form(...),
     race_goal_time: str = Form(None),
+    race_name: str = Form(None),
+    course_race: str = Form(None),
+    course_event: str = Form(None),
     db: Session = Depends(get_db)
 ):
     user = get_current_user_from_session(request, db)
@@ -307,7 +311,12 @@ def setup_race_post(
     user.race_goal_time = race_goal_time
     # The dashboard and training plan read races from the races table, so
     # the first-run race goes there too.
-    db.add(Race(user_id=user.id, race_length=race_length, race_date=r_date, goal_time=race_goal_time or None))
+    race = Race(user_id=user.id, name=(race_name or "").strip()[:200] or None, race_length=race_length,
+                race_date=r_date, goal_time=race_goal_time or None)
+    # A race picked from the race-courses catalog brings its course when the dataset has one.
+    if course_race and course_event:
+        library.attach(race, course_race, course_event)
+    db.add(race)
     db.commit()
 
     return RedirectResponse(url="/strava-auth", status_code=status.HTTP_302_FOUND)

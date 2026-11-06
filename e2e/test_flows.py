@@ -26,7 +26,10 @@ def test_sign_up_leads_to_a_first_race_and_the_strava_prompt(app_server, page):
     page.click("button[type=submit]")
     page.wait_for_url("**/setup-race")
 
-    page.select_option("#race_length", "10k")
+    page.fill("#race_name", "three rivers")                  # the fake race-courses catalog
+    page.click("#race_name-races [role=option]:has-text('Three Rivers Half')")
+    expect(page.locator("#race_length")).to_have_value("half marathon")
+    expect(page.locator("#race-course-note")).to_contain_text("course map comes with the race")
     page.fill("#race_date", "2027-04-10")
     page.click("button[type=submit]")
     page.wait_for_url("**/strava-auth")
@@ -34,7 +37,8 @@ def test_sign_up_leads_to_a_first_race_and_the_strava_prompt(app_server, page):
 
     page.goto(f"{app_server}/profile")
     page.wait_for_load_state("networkidle")
-    assert "10k" in page.text_content("#races")
+    races = page.text_content("#races")
+    assert "Three Rivers Half" in races and "half marathon" in races and "course map" in races
     assert page.text_content("#view-height").strip().startswith("5′ 6″")
 
 
@@ -432,6 +436,34 @@ def test_pacing_page_takes_a_course_from_the_course_library(app_server, register
     expect(page.locator("#splits-table.no-grade")).to_have_count(0)
     assert "1:50:00" in page.locator("#splits-table tbody tr").last.text_content()
 
+
+def test_profile_race_search_names_the_race_and_brings_its_course(app_server, registered_user, page):
+    login(page, app_server)
+    page.goto(f"{app_server}/profile")
+    page.wait_for_load_state("networkidle")
+    race_day = (date.today() + timedelta(weeks=40)).isoformat()
+
+    page.click("#add-race")
+    page.fill("#r-name", "monon")
+    expect(page.locator("#r-name-races [role=option]")).to_have_count(1)
+    page.press("#r-name", "ArrowDown")
+    page.press("#r-name", "Enter")                              # picks the race, does not submit the form
+    expect(page.locator("#r-name")).to_have_value("Monongahela Half – Half Marathon")
+    expect(page.locator("#r-length")).to_have_value("half marathon")
+    expect(page.locator("#r-course-note")).to_contain_text("No course map")
+    page.fill("#r-date", race_day)
+    page.click("#race-form button[type=submit]")
+    expect(page.locator("#races")).to_contain_text("Monongahela Half")
+
+    page.click("#add-race")
+    page.fill("#r-name", "three rivers")
+    expect(page.locator("#r-name-races [role=option]")).to_have_count(2)   # the half and the marathon
+    page.click("#r-name-races [role=option]:has-text('Three Rivers Marathon')")
+    expect(page.locator("#r-length")).to_have_value("marathon")
+    page.fill("#r-date", race_day)
+    page.click("#race-form button[type=submit]")
+    expect(page.locator("#races .list-row", has_text="Three Rivers Marathon")).to_contain_text("course map")
+    expect(page.locator("#races .list-row", has_text="Monongahela Half")).not_to_contain_text("course map")
 
 def wait_for_idle_sync(page, app_server, user_id, seconds=60):
     """The last sync job once nothing is running (the COROS link above may

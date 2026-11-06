@@ -4,8 +4,11 @@ import {
   applyTheme, currentTheme, qs, qsa, renderEmpty, RUN_TYPES,
 } from '../app.js';
 import { refreshSync } from '../sync.js';
+import { attachRaceSearch, courseNote } from '../race-search.js';
 
 const userId = config.userId;
+// The catalog race behind the race form's name, until the runner edits the name.
+let pickedRace = null;
 const root = qs('#profile');
 let heightMeters = root.dataset.height ? Number(root.dataset.height) : null;
 let weightKg = root.dataset.weight ? Number(root.dataset.weight) : null;
@@ -205,7 +208,7 @@ async function loadRaces() {
     return `<div class="list-row">
       <div>
         <div class="strong">${escapeHtml(race.name || race.race_length)}</div>
-        <div class="small muted">${escapeHtml(race.race_length)} · ${fmtDate(race.race_date, { month: 'long', day: 'numeric', year: 'numeric' })}${race.goal_time ? ` · goal ${escapeHtml(race.goal_time)}` : ''}</div>
+        <div class="small muted">${escapeHtml(race.race_length)} · ${fmtDate(race.race_date, { month: 'long', day: 'numeric', year: 'numeric' })}${race.goal_time ? ` · goal ${escapeHtml(race.goal_time)}` : ''}${race.has_course ? ' · course map' : ''}</div>
       </div>
       <div class="row">${when}<a class="btn btn-sm" href="/races/${race.id}/pacing">Pacing</a><button type="button" class="btn btn-ghost btn-icon btn-sm" data-delete-race="${race.id}" aria-label="Delete race">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
@@ -233,15 +236,20 @@ async function saveRace(event) {
     race_length: qs('#r-length').value,
     race_date: qs('#r-date').value,
     goal_time: qs('#r-goal').value.trim() || null,
+    course: pickedRace && { race: pickedRace.race, event: pickedRace.event },
   };
   const status = qs('#race-form .status');
   status.textContent = 'Saving…';
   try {
-    await fetchJson(`/api/races/${userId}`, { method: 'POST', body: payload });
+    const result = await fetchJson(`/api/races/${userId}`, { method: 'POST', body: payload });
+    const wanted = pickedRace?.has_course;
     qs('#race-form').reset();
     qs('#race-form').classList.add('hidden');
+    pickedRace = null;
+    qs('#r-course-note').textContent = '';
     status.textContent = '';
-    showToast('Race added');
+    if (result.course) showToast('Race added with its course map');
+    else showToast(wanted ? 'Race added; its course map could not be loaded, so upload it on the pacing page' : 'Race added');
     loadRaces();
   } catch (error) {
     status.textContent = error.message;
@@ -291,6 +299,17 @@ qs('#add-race').addEventListener('click', () => {
 });
 qs('#cancel-race').addEventListener('click', () => qs('#race-form').classList.add('hidden'));
 qs('#race-form').addEventListener('submit', saveRace);
+attachRaceSearch(qs('#r-name'), {
+  onPick: (entry) => {
+    pickedRace = entry;
+    qs('#r-length').value = entry.race_length;
+    qs('#r-course-note').textContent = courseNote(entry);
+  },
+  onEdit: () => {
+    pickedRace = null;
+    qs('#r-course-note').textContent = '';
+  },
+});
 qsa('#pref-units button').forEach((button) => {
   button.addEventListener('click', () => {
     units.set(button.dataset.units);
