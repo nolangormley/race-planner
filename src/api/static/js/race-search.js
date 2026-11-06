@@ -1,17 +1,18 @@
-// Race name search over the race-courses catalog (/api/race-catalog): suggestions as the runner types,
-// picked with the arrow keys and Enter or with a click. The catalog is fetched once per page.
+// Race name search over the race-courses catalog: suggestions as the runner types, picked with the arrow
+// keys and Enter or with a click. The catalog (/api/race-catalog, or the public /api/courses) is fetched
+// once per page.
 // Markup: <div class="race-search"><input id="…"></div>; the list of suggestions goes after the input.
 import { fetchJson, escapeHtml } from './app.js';
 
 const MAX_SHOWN = 8;
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',
   'October', 'November', 'December'];
-let catalog = null;
+const catalogs = {};
 
-function loadCatalog() {
+function loadCatalog(source) {
   // A catalog that cannot be read leaves the field a plain text input.
-  catalog ??= fetchJson('/api/race-catalog').then((data) => data.races, () => []);
-  return catalog;
+  catalogs[source] ??= fetchJson(source).then((data) => data.races, () => []);
+  return catalogs[source];
 }
 
 // The name to store: the event is added when the race's name does not already say it.
@@ -38,7 +39,7 @@ function matching(races, query) {
 }
 
 // onPick(entry) runs when the runner picks a race, onEdit() when they type, so the page can forget a pick.
-export function attachRaceSearch(input, { onPick, onEdit }) {
+export function attachRaceSearch(input, { onPick, onEdit, source = '/api/race-catalog' }) {
   const list = document.createElement('ul');
   list.id = `${input.id}-races`;
   list.className = 'race-search-list';
@@ -90,7 +91,7 @@ export function attachRaceSearch(input, { onPick, onEdit }) {
   input.addEventListener('input', async () => {
     onEdit();
     const query = input.value;
-    const races = await loadCatalog();
+    const races = await loadCatalog(source);
     if (input.value !== query) return; // a later keystroke renders its own list
     shown = matching(races, query);
     render();

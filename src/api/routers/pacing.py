@@ -53,7 +53,28 @@ def course_summary(course):
     return {"length_m": course["length_m"], "ascent_m": course["ascent_m"], "descent_m": course["descent_m"]}
 
 
-def checked_goal(text, race, distance_m, unit, label="Goal"):
+def plan_payload(distance, goal_seconds, strategy, unit, course):
+    """The split plan for a distance and goal as the pacing pages read it, over the course when there is one.
+    The race pacing endpoint and the public course pages both answer with it."""
+    profile, warnings = course_profile(course, distance) if course else ([], [])
+    split_m = UNITS_M[unit]
+    return {
+        "distance_m": distance,
+        "goal_seconds": goal_seconds,
+        "goal": format_clock(goal_seconds),
+        "strategy": strategy,
+        "unit": unit,
+        "split_m": split_m,
+        "average_seconds_per_km": goal_seconds / distance * 1000.0,
+        "average_seconds_per_mile": goal_seconds / distance * METERS_PER_MILE,
+        "splits": plan_splits(distance, goal_seconds, split_m, strategy, profile),
+        "profile": profile,
+        "course": course_summary(course),
+        "warnings": warnings,
+    }
+
+
+def checked_goal(text, distance_name, distance_m, unit, label="Goal"):
     """Seconds for a goal typed on the page or set on the race, or a 400
     that tells the runner what is wrong with it."""
     seconds = parse_goal(text, distance_m)
@@ -64,7 +85,7 @@ def checked_goal(text, race, distance_m, unit, label="Goal"):
     fastest, slowest = goal_range(distance_m)
     fast_pace, slow_pace = (format_clock(bound / distance_m * UNITS_M[unit]) for bound in (fastest, slowest))
     raise HTTPException(status_code=400, detail=(
-        f"{label} {text} is not a plausible {race.race_length} time. Type a goal between "
+        f"{label} {text} is not a plausible {distance_name} time. Type a goal between "
         f"{format_clock(fastest)} and {format_clock(slowest)} ({fast_pace} to {slow_pace}/{unit})."
     ))
 
@@ -173,30 +194,16 @@ def pacing_plan(race_id: int, goal: str = None, strategy: str = "even", unit: st
     distance = race_distance(race)
 
     if goal:
-        goal_seconds, goal_source = checked_goal(goal, race, distance, unit), "query"
+        goal_seconds, goal_source = checked_goal(goal, race.race_length, distance, unit), "query"
     elif parse_clock(race.goal_time):
-        goal_seconds, goal_source = checked_goal(race.goal_time, race, distance, unit, "The race goal"), "race"
+        goal_seconds, goal_source = checked_goal(race.goal_time, race.race_length, distance, unit, "The race goal"), "race"
     else:
         goal_seconds, goal_source = predicted_goal(current_user, distance), "prediction"
     if not goal_seconds:
         raise HTTPException(status_code=400, detail="Set a goal time on the race, or type one above.")
 
-    course = course_of(race)
-    profile, warnings = course_profile(course, distance) if course else ([], [])
-    split_m = UNITS_M[unit]
     return {
+        **plan_payload(distance, goal_seconds, strategy, unit, course_of(race)),
         "race": {"id": race.id, "name": race.name, "race_length": race.race_length, "race_date": str(race.race_date), "goal_time": race.goal_time},
-        "distance_m": distance,
-        "goal_seconds": goal_seconds,
-        "goal": format_clock(goal_seconds),
         "goal_source": goal_source,
-        "strategy": strategy,
-        "unit": unit,
-        "split_m": split_m,
-        "average_seconds_per_km": goal_seconds / distance * 1000.0,
-        "average_seconds_per_mile": goal_seconds / distance * METERS_PER_MILE,
-        "splits": plan_splits(distance, goal_seconds, split_m, strategy, profile),
-        "profile": profile,
-        "course": course_summary(course),
-        "warnings": warnings,
     }

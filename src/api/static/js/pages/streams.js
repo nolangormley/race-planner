@@ -1,6 +1,6 @@
 // Activity detail: summary strip, linked stream panels with pace-zone
-// shading, detected intervals or tempo, laps, effort metrics, time in zones
-// and the optional coach's note.
+// shading, detected intervals or tempo, laps, effort metrics and time in
+// zones.
 import { config, fetchJson, units, fmtDuration, fmtClock, fmtMinutes, escapeHtml, renderEmpty, qs, RUN_TYPES } from '../app.js';
 import { panelChart } from '../charts/panels.js';
 import { barList } from '../charts/bars.js';
@@ -291,17 +291,6 @@ function renderStructure(structure) {
   qs('#structure-card').classList.remove('hidden');
 }
 
-async function loadNote() {
-  try {
-    const data = await fetchJson(`/api/activities/${activityId}/ai_summary`);
-    if (!data.summary) return;
-    qs('#ai-note').textContent = data.summary;
-    qs('#ai-card').classList.remove('hidden');
-  } catch {
-    // The note is optional; the page is complete without it.
-  }
-}
-
 async function load() {
   let activity;
   try {
@@ -323,7 +312,6 @@ async function load() {
   renderStreams(streams, activity, paceZones, laps, structure);
   renderStructure(structure);
   renderSplits(laps, activity);
-  loadNote();
 }
 
 load();

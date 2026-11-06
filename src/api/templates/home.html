@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Race Planner · pace your race on its real course{% endblock %}
+{% block meta %}<meta name="description" content="Free pacing plans that follow the hills of the real course, with a printable pace band, for {{ course_count }} large US road races. Plus a free training plan to race day.">{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="/static/css/pages/home.css">
+{% endblock %}
+
+{% block content %}
+<div class="home">
+    <section class="home-hero">
+        <h1>Pace your race on its real course.</h1>
+        <p class="sub">Splits that follow the hills of the course you will actually run, and a pace band to print{% if course_count %}, for {{ course_count }} large US road races{% endif %}. Free, no account needed.</p>
+        <div class="race-search home-search">
+            <input id="home-search" class="input" type="search" placeholder="Find your race: Boston, Pittsburgh, CIM…" aria-label="Find your race">
+        </div>
+        <p class="small faint">Or <a href="/courses">browse every course</a>.</p>
+    </section>
+
+    {% if featured %}
+    <section class="home-section">
+        <h2>Big races with their courses</h2>
+        <div class="home-grid">
+            {% for course in featured %}
+            <a class="card home-course" href="/courses/{{ course.race }}/{{ course.event }}">
+                <span class="strong">{{ course.title }}</span>
+                <span class="small muted">{{ course.city }}, {{ course.state }}{% if course.month_name %} · {{ course.month_name }}{% endif %}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="home-section">
+        <h2>Training for one? The rest is free too.</h2>
+        <div class="home-grid">
+            <div class="card">
+                <div class="strong">A plan to race day</div>
+                <p class="small muted">Week by week from what you run now: long runs, quality sessions, cutback weeks and a taper.</p>
+            </div>
+            <div class="card">
+                <div class="strong">Fitness from your runs</div>
+                <p class="small muted">From Strava, COROS, or the FIT and GPX files of any watch: fitness, fatigue, form, VO2 max and race predictions.</p>
+            </div>
+            <div class="card">
+                <div class="strong">Readiness from your nights</div>
+                <p class="small muted">Link COROS and your HRV and resting heart rate become a daily call: go, normal, easy or rest.</p>
+            </div>
+            <div class="card">
+                <div class="strong">Your course, on race day</div>
+                <p class="small muted">Pick your race when you add it and its course comes with it, so the pacing plan follows the hills at one effort.</p>
+            </div>
+        </div>
+        <div class="row wrap home-actions">
+            <a class="btn btn-primary" href="/register">Create a free account</a>
+            <a class="btn" href="/login">Log in</a>
+        </div>
+    </section>
+
+    <p class="small faint home-foot">Race Planner is open source on <a href="https://github.com/nolangormley/race-planner">GitHub</a>. The course maps come from <a href="https://github.com/nolangormley/race-courses">race-courses</a>, an open dataset read from the organizers' maps every week.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/home.js"></script>
+{% endblock %}

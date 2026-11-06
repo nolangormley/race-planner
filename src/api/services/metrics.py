@@ -1,7 +1,7 @@
 """CTL/ATL/TSB/VO2max/pace-zone calculations against the DuckDB warehouse.
 
 Extracted from main.py, where this ~250-line metrics engine lived as bare
-functions mixed in with route handlers and LLM prompt-building code (see
+functions mixed in with route handlers (see
 agent_prompting/improvement_plan.md Section 6). Pure move — no behavior
 change; see the improvement plan for the actual metrics fixes that already
 landed in Phase 2 (this module's calculate_training_status_logic already
@@ -27,41 +27,6 @@ from src.metrics import (
 from src.api.deps import get_db_connection, DEFAULT_MAX_HR, DEFAULT_REST_HR
 
 logger = logging.getLogger("race_planner.api")
-
-
-def get_performance_standing(stats):
-    ctl = stats.get('fitness_ctl') or 0
-    tsb = stats.get('form_tsb') or 0
-    vo2 = stats.get('latest_vo2_max') or 0
-    gender = (stats.get('sex') or 'M').upper()
-
-    # CTL Standing
-    ctl_lbl = 'Developing'
-    if ctl > 100: ctl_lbl = 'Elite Pro'
-    elif ctl > 70: ctl_lbl = 'Advanced Enthusiast'
-    elif ctl > 40: ctl_lbl = 'Consistent Runner'
-
-    # TSB Standing
-    tsb_lbl = 'Balanced'
-    if tsb > 15: tsb_lbl = 'Fresh (Peaking)'
-    elif tsb < -30: tsb_lbl = 'High Overload'
-    elif tsb < -10: tsb_lbl = 'Optimal Training'
-
-    # VO2 Max (Simplified Table for Prompt Context)
-    vo2_lbl = 'Average'
-    if vo2 > 0:
-        if gender == 'M':
-            if vo2 > 52: vo2_lbl = 'Excellent/Superior'
-            elif vo2 > 45: vo2_lbl = 'Good'
-        else:
-            if vo2 > 46: vo2_lbl = 'Excellent/Superior'
-            elif vo2 > 39: vo2_lbl = 'Good'
-
-    return {
-        "ctl_standing": ctl_lbl,
-        "tsb_standing": tsb_lbl,
-        "vo2_standing": vo2_lbl
-    }
 
 
 def recorded_max_hr(con, athlete_id):
@@ -153,7 +118,7 @@ def calculate_training_status_logic(user_id: int, hr_max=None, hr_rest=None):
         merged['TSB'] = calculate_tsb(merged['CTL'], merged['ATL'])
         merged['ACWR'] = calculate_acwr(merged['CTL'], merged['ATL'])
 
-        # Calculate Rolling Averages for Insights (7-day)
+        # 7-day rolling averages
         merged['EF_7d'] = merged['daily_ef'].rolling(window=7, min_periods=1).mean()
         merged['Decoup_7d'] = merged['daily_decoup'].rolling(window=7, min_periods=1).mean()
 

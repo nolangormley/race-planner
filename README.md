@@ -46,7 +46,7 @@ DATABASE_URL=postgresql://user:pass@localhost/raceplanner python scripts/demo.py
 
 *   Python 3.12 and Postgres 15 or later.
 *   A Strava account, to register an API application. Without one you can still sign up and import FIT and GPX files.
-*   Optional: an SMTP account for password-reset and digest emails, a COROS account, an API key for one of the LLM providers (for the coach's note on the dashboard).
+*   Optional: an SMTP account for password-reset and digest emails, and a COROS account.
 
 ### 1. Register a Strava API application
 
@@ -76,7 +76,6 @@ Copy `.env.example` to `.env` and fill it in:
 | `STRAVA_REFRESH_TOKEN` | Only for the single-athlete command-line pipeline. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Optional; without `SMTP_HOST`, emails are written to the server log. |
 | `APP_URL` | The link at the foot of the weekly digest. |
-| `LLM_PROVIDER`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY` | Optional coach's note; `local` means LM Studio on `localhost:1234`, and with no provider reachable the note is simply left out. |
 | `COROS_ENABLED` | `false` switches COROS off entirely, see [COROS](#coros-unofficial). |
 
 `STRAVA_API_BASE` and `COROS_API_BASE` point the app at stand-ins for the tests and the demo; leave them unset.
@@ -148,6 +147,10 @@ A quality day spells out its warm-up, its tempo block or 800 m reps, and its coo
 Every full week before race week adds up to its target to the half unit.
 Every entry is an ordinary calendar entry afterwards, so edit or delete whatever does not fit.
 Building again replaces planned days after today unless you untick that option, in which case only empty days are filled.
+
+### Public course pages
+Anyone can open `/courses` without an account: every course of race-courses with its elevation profile, a pacing plan for any goal time and a printable pace band.
+The home page searches them, and `/sitemap.xml` lists them for search engines (set `HOST_URL` to the public address).
 
 ### Races
 Add races on the profile page, or your first one when you sign up.

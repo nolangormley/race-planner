@@ -123,6 +123,7 @@ from src.api.routers import digest  # noqa: E402
 from src.api.routers import coros  # noqa: E402
 from src.api.routers import imports  # noqa: E402
 from src.api.routers import pacing  # noqa: E402
+from src.api.routers import courses  # noqa: E402
 
 app.include_router(pages.router)
 app.include_router(activities.router)
@@ -138,6 +139,7 @@ if COROS_ENABLED:
     app.include_router(coros.router)
 app.include_router(imports.router)
 app.include_router(pacing.router)
+app.include_router(courses.router)
 
 # A new install has no warehouse until the first sync. Creating the schema
 # here means every page works from the first login instead of failing on
