@@ -465,6 +465,32 @@ def test_profile_race_search_names_the_race_and_brings_its_course(app_server, re
     expect(page.locator("#races .list-row", has_text="Three Rivers Marathon")).to_contain_text("course map")
     expect(page.locator("#races .list-row", has_text="Monongahela Half")).not_to_contain_text("course map")
 
+def test_a_visitor_finds_a_course_and_its_pace_band_without_an_account(app_server, page):
+    page.goto(f"{app_server}/")
+    expect(page.locator("h1")).to_have_text("Pace your race on its real course.")
+    page.fill("#home-search", "three rivers")                  # the fake race-courses catalog
+    page.click("#home-search-races [role=option]:has-text('Three Rivers Half')")
+    page.wait_for_url("**/courses/three-rivers-half/half-marathon")
+    expect(page.locator("#goal")).to_have_value("1:58:00")      # 13.1 miles at the example 9:00 a mile
+    expect(page.locator("#goal-source")).to_contain_text("Example goal")
+    expect(page.locator("#pacing-summary")).to_contain_text("ft up")
+    expect(page.locator("#profile-chart svg").first).to_be_visible()
+
+    page.fill("#goal", "1:45:00")
+    page.click("#pacing-form button[type=submit]")
+    expect(page.locator("#splits-table tbody tr").last).to_contain_text("1:45:00")
+    expect(page.locator("#goal-source")).to_have_text("")
+    expect(page.locator("#pace-band tr")).to_have_count(14)
+    expect(page.locator(".course-cta a")).to_have_attribute("href", "/register")
+
+    page.goto(f"{app_server}/courses")
+    rows = page.locator(".course-row:not(.hidden)")
+    expect(rows).to_have_count(3)                               # the three events with a course file
+    page.fill("#course-filter", "allegheny")
+    expect(rows).to_have_count(1)
+    page.fill("#course-filter", "boston")
+    expect(page.locator("#course-empty")).to_be_visible()
+
 def wait_for_idle_sync(page, app_server, user_id, seconds=60):
     """The last sync job once nothing is running (the COROS link above may
     have started a recompute)."""

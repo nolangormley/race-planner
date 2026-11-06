@@ -149,6 +149,10 @@ Every full week before race week adds up to its target to the half unit.
 Every entry is an ordinary calendar entry afterwards, so edit or delete whatever does not fit.
 Building again replaces planned days after today unless you untick that option, in which case only empty days are filled.
 
+### Public course pages
+Anyone can open `/courses` without an account: every course of race-courses with its elevation profile, a pacing plan for any goal time and a printable pace band.
+The home page searches them, and `/sitemap.xml` lists them for search engines (set `HOST_URL` to the public address).
+
 ### Races
 Add races on the profile page, or your first one when you sign up.
 The name field searches [race-courses](https://github.com/nolangormley/race-courses), large US road races: pick yours and the distance is filled in, and its course map comes with it when the dataset has one.
