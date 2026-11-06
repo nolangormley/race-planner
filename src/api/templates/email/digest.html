@@ -1,0 +1,136 @@
+{% extends "email/base.html" %}
+{% from "email/components.html" import line, ink, muted, accent, tones, text, heading, section, stat, meter, badge, button %}
+{% block title %}Your week in running{% endblock %}
+
+{% block content %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr><td style="padding:0 0 24px;{{ text(15) }}">Hi {{ first_name }}, here is your week in running.</td></tr>
+    <tr><td>
+        {{ heading("Last week · " ~ week_label) }}
+        <div class="hero" style="{{ text(36, 700, ink, 1.1) }}">{{ distance }}</div>
+        <div style="padding-top:6px;{{ text(15, 400, muted) }}">{{ change }}</div>
+    </td></tr>
+    <tr><td style="padding:24px 0 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            {{ stat("Runs", runs, runs_note) }}{{ stat("Time", time) }}{{ stat("Climb", climb) }}
+        </tr></table>
+    </td></tr>
+    {% if plan %}
+    <tr><td style="padding:24px 0 0;">
+        <div style="padding:0 0 8px;{{ text(14, 600) }}">{{ plan.done }} of {{ plan.planned }} planned sessions done</div>
+        {{ meter(plan.share) }}
+        {% if plan.distance %}<div style="padding-top:8px;{{ text(13, 400, muted, 1.4) }}">{{ plan.distance }}</div>{% endif %}
+    </td></tr>
+    {% endif %}
+
+    {% if records %}
+    {{ section("New bests") }}
+    <tr><td>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            {% for record in records %}
+            <tr>
+                <td style="padding:4px 0;{{ text(15, 600) }}">{{ record.label }}</td>
+                <td style="padding:4px 0;{{ text(15) }}">{{ record.time }}</td>
+                <td align="right" style="padding:4px 0;{{ text(14, 400, muted) }}">{{ record.day }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </td></tr>
+    {% endif %}
+
+    {% if fitness %}
+    {{ section("Fitness") }}
+    <tr><td>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            {{ stat("Fitness", fitness.fitness) }}{{ stat("Fatigue", fitness.fatigue) }}{{ stat("Form", fitness.form, fitness.form_label) }}
+        </tr></table>
+        <div style="padding-top:12px;{{ text(14, 400, muted) }}">{{ fitness.form_meaning }}</div>
+    </td></tr>
+    {% endif %}
+
+    {% if energy or nightly %}
+    {{ section("Recovery") }}
+    {% if energy %}
+    <tr><td>
+        <div style="{{ text(15) }}">{{ badge(energy.label, energy.tone) }}&nbsp; Energy <strong>{{ energy.morning }}</strong> of 100 on waking</div>
+        <div style="padding-top:10px;">{{ meter(energy.morning / 100, tones[energy.tone].fill) }}</div>
+        <div style="padding-top:12px;{{ text(15) }}">{{ energy.advice }}</div>
+        {% if energy.reasons %}
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;">
+            {% for amount, reason in energy.reasons %}
+            <tr>
+                <td valign="top" align="right" style="padding:2px 12px 2px 0;white-space:nowrap;{{ text(14, 600) }}">{{ amount }}</td>
+                <td valign="top" style="padding:2px 0;{{ text(14, 400, muted) }}">{{ reason }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% endif %}
+        {% if energy.hint %}
+        <div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:{{ tones.warning.soft }};{{ text(14, 400, tones.warning.ink) }}">{{ energy.hint }}</div>
+        {% endif %}
+    </td></tr>
+    {% endif %}
+    {% if nightly %}
+    <tr><td style="padding:{{ '20px' if energy else '0' }} 0 0;">
+        <div style="padding:0 0 8px;{{ text(13, 400, muted, 1.4) }}">Last week's nightly averages</div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            {% for label, value, note in nightly %}{{ stat(label, value, note) }}{% endfor %}
+            {#- Empty cells keep the columns in line with the rows above. #}
+            {% for _ in range(3 - nightly | length) %}<td width="33%"></td>{% endfor %}
+        </tr></table>
+    </td></tr>
+    {% endif %}
+    {% endif %}
+
+    {{ section("This week") }}
+    <tr><td>
+        {% if sessions %}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            {% for session in sessions %}
+            {% set rule = "" if loop.first else "border-top:1px solid " ~ line ~ ";" %}
+            <tr>
+                <td width="56" valign="top" style="padding:8px 0;{{ rule }}{{ text(14, 600) }}">{{ session.weekday }}</td>
+                <td valign="top" style="padding:8px 0;{{ rule }}{{ text(14) }}">{{ session.kind }}</td>
+                <td valign="top" align="right" style="padding:8px 0;{{ rule }}white-space:nowrap;{{ text(14, 400, muted) }}">{{ session.distance }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <div style="{{ text(15, 400, muted) }}">Nothing planned yet.{% if app_url %} <a href="{{ app_url }}/training-calendar" style="color:{{ accent }};">Build a plan on the calendar</a>.{% endif %}</div>
+        {% endif %}
+    </td></tr>
+
+    {% if races %}
+    {{ section("Races") }}
+    <tr><td>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            {% for race in races %}
+            {% set rule = "" if loop.first else "border-top:1px solid " ~ line ~ ";" %}
+            <tr>
+                <td valign="middle" style="padding:10px 0;{{ rule }}">
+                    <div style="{{ text(15, 600, ink, 1.4) }}">{{ race.name }}</div>
+                    <div style="padding-top:2px;{{ text(13, 400, muted, 1.4) }}">{{ race.detail }}</div>
+                </td>
+                <td valign="middle" align="right" style="padding:10px 0 10px 16px;{{ rule }}white-space:nowrap;">
+                    {% if race.days == 0 %}
+                    <div style="{{ text(17, 700, accent, 1.2) }}">Today</div>
+                    {% else %}
+                    <div style="{{ text(22, 700, ink, 1.1) }}">{{ race.days }}</div>
+                    <div style="{{ text(12, 400, muted, 1.4) }}">day{{ "s" if race.days != 1 }} to go</div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </td></tr>
+    {% endif %}
+
+    {% if app_url %}
+    <tr><td style="padding:32px 0 0;">{{ button(app_url ~ "/dashboard", "Open Race Planner") }}</td></tr>
+    {% endif %}
+</table>
+{% endblock %}
+
+{% block footer %}
+You get this email on Monday mornings because the weekly digest is on.{% if app_url %} <a href="{{ app_url }}/profile" style="color:{{ muted }};text-decoration:underline;">Turn it off on your profile</a>.{% endif %}
+{% endblock %}

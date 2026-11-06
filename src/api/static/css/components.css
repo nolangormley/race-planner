@@ -298,16 +298,10 @@ select.input {
 /* Weekly digest controls on the profile page */
 .digest-actions { flex-wrap: wrap; justify-content: flex-end; }
 .digest-hint { padding: 0 0 10px; }
-.digest-body {
-  margin: 0 0 12px;
-  padding: 12px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-  white-space: pre-wrap;
-  color: var(--text-2);
-}
+.digest-body { margin: 0 0 12px; }
+.digest-subject { padding: 0 0 8px; }
+.digest-frame { display: block; width: 100%; border: 1px solid var(--border); border-radius: var(--radius); }
+.digest-frame[hidden] { display: none; }
 
 /* Race name search (js/race-search.js): suggestions under the input */
 .race-search { position: relative; }

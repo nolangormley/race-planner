@@ -2,12 +2,14 @@
 the plan went, fitness and form, new best efforts, this week's sessions
 and upcoming races. Sent on Monday mornings to users who opted in.
 
-compose_digest turns plain values into the email text so it can be tested
+compose_digest turns plain values into the email text and digest_html into
+its HTML version (templates/email/digest.html), so both can be tested
 without a database; build_digest gathers those values for one user.
 send_due_digests is the pass the scheduler (services/scheduler.py) runs.
 """
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 
 from src.api.database import SessionLocal, User, Race, TrainingPlan, TrainingPlanEntry
@@ -15,6 +17,7 @@ from src.api.deps import get_db_connection, DEFAULT_MAX_HR
 from src.api.services.email import send_email
 from src.api.services.metrics import calculate_training_status_logic, detected_max_hr, resolve_resting_hr
 from src.api.services.readiness import energy_for
+from src.api.web import templates
 from src.metrics import planned_distance_km, BEST_EFFORT_DISTANCES_M
 
 logger = logging.getLogger("race_planner.digest")
@@ -80,6 +83,44 @@ def form_label(tsb):
     if tsb >= -30:
         return "productive"
     return "overreaching"
+
+
+# What each form label means, under the form number in the HTML email.
+FORM_MEANINGS = {
+    "fresh": "Fatigue is well under fitness: ready to race, but weeks like this let fitness slip.",
+    "rested": "Recovered and ready for quality work.",
+    "neutral": "Training and recovery are in balance.",
+    "productive": "Carrying the fatigue that builds fitness. Keep the easy days easy.",
+    "overreaching": "Fatigue is far above fitness. Ease off before it turns into injury or illness.",
+}
+# An energy reason that starts with its amount: "+63 overnight, ...".
+LEDGER_LINE = re.compile(r"([+-]\d+) (.+)")
+
+
+def countdown(days):
+    return "today" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
+
+
+def signed(value):
+    """A whole number with its sign, with a real minus sign for the HTML email."""
+    return f"{round(value):+d}".replace("-", "−")
+
+
+def length_label(race_length):
+    """'5k' gives '5K', 'half marathon' gives 'Half marathon'."""
+    if re.fullmatch(r"\d+k", race_length):
+        return race_length.upper()
+    return race_length[:1].upper() + race_length[1:]
+
+
+def ledger_line(reason):
+    """An energy reason as (amount, text): "+63 overnight, ..." gives
+    ("+63", "Overnight, ..."). A reason without an amount keeps all its text."""
+    match = LEDGER_LINE.fullmatch(reason)
+    if not match:
+        return "", reason
+    amount, text = match.groups()
+    return amount.replace("-", "−"), text[:1].upper() + text[1:]
 
 
 def compose_digest(name, today, week, previous, plan, sessions, races, records, status, app_url=None, recovery=None, energy=None):
@@ -150,12 +191,92 @@ def compose_digest(name, today, week, previous, plan, sessions, races, records, 
     if races:
         lines += ["", "Races"]
         for race_name, race_length, race_day in races:
-            days_to_go = (race_day - today).days
-            when = "today" if days_to_go == 0 else f"in {days_to_go} day{'s' if days_to_go != 1 else ''}"
-            lines.append(f"  {race_name or race_length} · {race_length} · {when} ({day_label(race_day)})")
+            lines.append(f"  {race_name or race_length} · {race_length} · {countdown((race_day - today).days)} ({day_label(race_day)})")
 
     lines += ["", "Race Planner" + (f"  {app_url}" if app_url else "")]
     return subject, "\n".join(lines)
+
+
+def digest_html(name, today, week, previous, plan, sessions, races, records, status, app_url=None, recovery=None, energy=None):
+    """compose_digest's content as an HTML email, from the same arguments."""
+    last_week = week_start(today) - timedelta(days=7)
+    delta_mi = (week["distance_m"] - previous["distance_m"]) / METERS_PER_MILE
+    if round(delta_mi, 1) == 0:
+        change = "The same distance as the week before"
+    else:
+        change = f"{abs(delta_mi):.1f} mi {'more' if delta_mi > 0 else 'less'} than the week before"
+
+    plan_view = None
+    if plan and plan["planned"]:
+        plan_view = {
+            "done": plan["done"],
+            "planned": plan["planned"],
+            "share": plan["done"] / plan["planned"],
+            "distance": f"{week['distance_m'] / METERS_PER_MILE:.1f} of {miles(plan['planned_m'])} planned" if plan["planned_m"] else None,
+        }
+    fitness = None
+    if status:
+        label = form_label(status["form_tsb"])
+        fitness = {
+            "fitness": f"{status['fitness_ctl']:.0f}",
+            "fatigue": f"{status['fatigue_atl']:.0f}",
+            "form": signed(status["form_tsb"]),
+            "form_label": label,
+            "form_meaning": FORM_MEANINGS[label],
+        }
+    energy_view = None
+    if energy:
+        call = energy["call"]
+        energy_view = {
+            "label": call["label"],
+            "tone": call["badge"],
+            "advice": call["advice"],
+            "hint": call["hint"],
+            "morning": energy["morning"],
+            "reasons": [ledger_line(reason) for reason in energy["reasons"]],
+        }
+    nightly = []
+    if recovery:
+        if recovery.get("rhr"):
+            nightly.append(("Resting HR", f"{recovery['rhr']:.0f} bpm", None))
+        if recovery.get("hrv"):
+            baseline = f"Baseline {recovery['hrv_baseline']:.0f}" if recovery.get("hrv_baseline") else None
+            nightly.append(("HRV", f"{recovery['hrv']:.0f} ms", baseline))
+        if recovery.get("sleep_min"):
+            nightly.append(("In bed", duration(recovery["sleep_min"] * 60), None))
+    upcoming = [
+        {
+            "name": race_name or length_label(race_length),
+            "detail": f"{length_label(race_length)} · {race_day.strftime('%a, %b %-d')}",
+            "days": (race_day - today).days,
+        }
+        for race_name, race_length, race_day in races
+    ]
+
+    preheader = [f"{miles(week['distance_m'])} over {week['runs']} run{'s' if week['runs'] != 1 else ''}"]
+    if energy:
+        preheader.append(f"today: {energy['call']['label']}")
+    if upcoming:
+        preheader.append(f"{upcoming[0]['name']} {countdown(upcoming[0]['days'])}")
+    return templates.get_template("email/digest.html").render(
+        preheader=" · ".join(preheader),
+        app_url=app_url.rstrip("/") if app_url else None,
+        first_name=(name or "there").split()[0],
+        week_label=f"{day_label(last_week)} – {day_label(last_week + timedelta(days=6))}",
+        distance=miles(week["distance_m"]),
+        change=change,
+        runs=week["runs"],
+        runs_note=f"{previous['runs']} the week before",
+        time=duration(week["moving_s"]),
+        climb=f"{round(week['climb_m'] * FEET_PER_METER):,} ft",
+        plan=plan_view,
+        records=[{"label": label, "time": race_time(seconds), "day": day_label(day)} for label, seconds, day in records],
+        fitness=fitness,
+        energy=energy_view,
+        nightly=nightly,
+        sessions=[{"weekday": day.strftime("%a"), "kind": kind, "distance": distance or ""} for day, kind, distance in sessions],
+        races=upcoming,
+    )
 
 
 # ---- Gathering ----
@@ -249,7 +370,7 @@ def plan_week(db, user_id, start, runs=()):
 
 
 def build_digest(db, user, now=None):
-    """Subject and body for one user as of now (default: the real now)."""
+    """Subject, text and HTML for one user as of now (default: the real now)."""
     now = now or datetime.now()
     today = now.date()
     this_week = week_start(today)
@@ -287,7 +408,10 @@ def build_digest(db, user, now=None):
         (race.name, race.race_length, race.race_date)
         for race in db.query(Race).filter(Race.user_id == user.id, Race.race_date >= today).order_by(Race.race_date).limit(3).all()
     ]
-    return compose_digest(user.name, today, week, previous, plan, sessions, races, records, status, app_url=os.getenv("APP_URL"), recovery=recovery, energy=today_energy)
+    values = (user.name, today, week, previous, plan, sessions, races, records, status)
+    extras = {"app_url": os.getenv("APP_URL"), "recovery": recovery, "energy": today_energy}
+    subject, body = compose_digest(*values, **extras)
+    return subject, body, digest_html(*values, **extras)
 
 
 # ---- Sending ----
@@ -295,8 +419,8 @@ def build_digest(db, user, now=None):
 def send_digest(db, user, now=None):
     """Builds and sends the digest and stamps the user. Commits."""
     now = now or datetime.now()
-    subject, body = build_digest(db, user, now)
-    send_email(user.email, subject, body)
+    subject, body, html = build_digest(db, user, now)
+    send_email(user.email, subject, body, html)
     user.digest_sent_at = now
     db.commit()
     return subject

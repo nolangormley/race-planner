@@ -7,6 +7,7 @@ Jinja2 pages rendered by `../routers/pages.py` and `../auth_routes.py`. `base.ht
 - `privacy.html`: the privacy page, public, plain text in one narrow column (`css/pages/privacy.css`). Every claim on it is checked against the code; change it when the data the app stores or the services it talks to change.
 - `login.html`, `register.html`, `setup.html` (first race; `pages/setup.js` turns its name field into the race search and fills the hidden catalog fields), `strava_auth.html`: the sign-up flow. Plain form posts; `register.html` has a small inline module that converts height and weight to meters and kilograms before submit.
 - `forgot_password.html`, `reset_password.html`: the emailed password reset. Plain form posts; the reset token rides in a hidden field.
+- `email/`: the HTML emails, not pages; see its own AGENTS.md.
 
 `coros_enabled` (a global set in `../main.py`) leaves the COROS card out of `profile.html` and the Recovery card out of `dashboard.html` when COROS is switched off; `is_admin` (set there too) decides the Admin link in `base.html`.
 
