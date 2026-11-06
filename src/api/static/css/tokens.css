@@ -29,6 +29,7 @@
   --serious-soft: rgba(236, 131, 90, 0.16);
   --critical: #d03b3b;
   --critical-soft: rgba(208, 59, 59, 0.16);
+  --critical-border: rgba(208, 59, 59, 0.35);
   /* Status colors as text need more contrast than as marks. */
   --good-ink: #3dbb3d;
   --warning-ink: #fab219;
@@ -83,6 +84,7 @@
   --warning-soft: rgba(250, 178, 25, 0.18);
   --serious-soft: rgba(236, 131, 90, 0.16);
   --critical-soft: rgba(208, 59, 59, 0.12);
+  --critical-border: rgba(208, 59, 59, 0.3);
   --good-ink: #006300;
   --warning-ink: #8a5a00;
   --serious-ink: #b2461b;

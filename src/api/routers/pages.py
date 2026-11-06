@@ -81,6 +81,15 @@ def training_calendar_page(request: Request):
     return templates.TemplateResponse("training_calendar.html", {"request": request, "user": user})
 
 
+@router.get("/privacy")
+def privacy_page(request: Request):
+    """Public: what the app stores and who it talks to, signed in or not."""
+    db = SessionLocal()
+    user = get_current_user_from_session(request, db)
+    db.close()
+    return templates.TemplateResponse("privacy.html", {"request": request, "user": user})
+
+
 @router.get("/races/{race_id}/pacing")
 def pacing_page(request: Request, race_id: int):
     db = SessionLocal()

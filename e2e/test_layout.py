@@ -21,6 +21,7 @@ PUBLIC_PAGES = [
     ("/", "#home-search"),
     ("/courses", "#course-list .course-row"),
     ("/courses/three-rivers-half/half-marathon", "#splits-table tbody tr"),
+    ("/privacy", ".prose h2"),
 ]
 
 # Elements that stick out past the right edge with no scrolling parent to hold them.

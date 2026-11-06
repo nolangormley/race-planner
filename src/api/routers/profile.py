@@ -1,14 +1,15 @@
-"""Profile updates and the heart rate profile."""
-from fastapi import APIRouter, HTTPException, Depends
+"""Profile updates, the heart rate profile and account deletion."""
+from fastapi import APIRouter, HTTPException, Depends, Request
 from datetime import datetime
 import logging
 
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User
 from src.api.deps import get_db_connection, DEFAULT_MAX_HR, DEFAULT_REST_HR
-from src.api.schemas import ProfileUpdate
+from src.api.schemas import AccountDelete, ProfileUpdate
+from src.api.services.account import WrongPassword, delete_account
 from src.api.services.metrics import recorded_max_hr
-from src.api.services.sync import queue_recompute
+from src.api.services.sync import queue_recompute, registry as sync_registry
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
@@ -82,3 +83,25 @@ def update_profile(user_id: int, profile: ProfileUpdate, current_user: User = De
     if hr_changed:
         queue_recompute(user_id)
     return {"message": "Profile updated", "recompute_started": hr_changed}
+
+
+@router.delete("/api/account")
+def delete_own_account(body: AccountDelete, request: Request, current_user: User = Depends(get_current_user)):
+    """Deletes the signed-in user's account and everything stored for them
+    (services/account.py), then ends the session. Refused while a sync or
+    recompute runs for the user, because that job would write rows back."""
+    job = sync_registry.snapshot(current_user.id)
+    if job and job["status"] == "running":
+        raise HTTPException(status_code=409, detail="A sync is running. Wait for it to finish, then try again.")
+    db, con = SessionLocal(), get_db_connection()
+    try:
+        user = db.query(User).filter(User.id == current_user.id).first()
+        try:
+            delete_account(db, con, user, body.password)
+        except WrongPassword:
+            raise HTTPException(status_code=400, detail="The password is incorrect.")
+    finally:
+        con.close()
+        db.close()
+    request.session.clear()
+    return {"deleted": True}

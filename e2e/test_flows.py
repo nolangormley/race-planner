@@ -716,3 +716,56 @@ def test_coros_switched_off_leaves_out_the_cards_and_the_routes(app_without_coro
     assert page.locator("#recovery-card").count() == 0
     for path in (f"/api/coros/{user_id}", f"/api/recovery/{user_id}", f"/api/readiness/{user_id}", f"/api/energy/{user_id}"):
         assert page.request.get(f"{app_without_coros}{path}").status == 404
+
+
+def test_the_privacy_page_renders_signed_out(app_server, page):
+    page.goto(f"{app_server}/privacy")
+    expect(page.locator("h1")).to_have_text("Privacy")
+    text = page.text_content("article")
+    assert "Nolan Gormley" in text and "Last updated: November 6, 2026" in text
+    expect(page.locator(".topbar a[href='/login']")).to_be_visible()      # signed out: the visitor top bar
+    expect(page.locator("footer a[href='/privacy']")).to_be_visible()
+    page.goto(f"{app_server}/login")
+    expect(page.locator(".auth a[href='/privacy']")).to_be_visible()
+
+
+def test_a_runner_deletes_their_account_from_the_profile(app_server, page, tmp_path):
+    user = {"email": f"leaving{int(time.time())}@example.com", "password": "leaving-123456", "name": "Leaving Runner"}
+    page.goto(f"{app_server}/register")
+    page.fill("#name", user["name"])
+    page.fill("#email", user["email"])
+    page.fill("#password", user["password"])
+    page.fill("#date_of_birth", "1993-06-07")
+    page.select_option("#gender", "Other")
+    page.fill("#height-ft", "5")
+    page.fill("#height-in", "9")
+    page.fill("#weight-input", "150")
+    page.click("button[type=submit]")
+    page.wait_for_url("**/setup-race")
+    # Rows in the warehouse to delete as well: an imported run.
+    start = (datetime.now(timezone.utc) - timedelta(days=2)).replace(hour=7, minute=0, second=0, microsecond=0)
+    track = tmp_path / "last.gpx"
+    track.write_text(gpx_track(start, "Last run"))
+    page.goto(f"{app_server}/warehouse")
+    page.wait_for_load_state("networkidle")
+    page.set_input_files("#import-input", str(track))
+    page.wait_for_selector("#activities-body tr:has-text('Last run')")
+
+    page.goto(f"{app_server}/profile")
+    page.wait_for_load_state("networkidle")
+    page.click("#delete-account")
+    page.wait_for_selector("#delete-modal.open")
+    page.fill("#delete-password", "not-the-password")
+    page.click("#delete-confirm")
+    expect(page.locator("#delete-form .status")).to_have_text("The password is incorrect.")
+    page.fill("#delete-password", user["password"])
+    page.click("#delete-confirm")
+    page.wait_for_url(re.compile(r"/login\?deleted=1$"))
+    expect(page.locator(".alert-info")).to_have_text("Your account and data were deleted.")
+
+    page.fill("input[name=username]", user["email"])
+    page.fill("input[name=password]", user["password"])
+    page.click("button[type=submit]")
+    expect(page.locator(".alert-error")).to_have_text("Invalid email or password.")
+    # The browser logs the refused password, a 400, as an error. This test expects it.
+    page.problems[:] = [problem for problem in page.problems if not ("status of 400" in problem and "/api/account" in problem)]

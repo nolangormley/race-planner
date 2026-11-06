@@ -83,6 +83,11 @@
         {% block content %}{% endblock %}
     </main>
 
+    <footer class="footer">
+        <a href="/privacy">Privacy</a>
+        <a href="https://github.com/nolangormley/race-planner">Source on GitHub</a>
+    </footer>
+
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="/static/js/app.js"></script>
     {% if user and user.strava_athlete_id %}
