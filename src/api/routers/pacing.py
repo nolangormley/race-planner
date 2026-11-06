@@ -3,19 +3,22 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 import logging
 
 from src.pacing import (
-    METERS_PER_MILE, STRATEGIES, course_profile, format_clock, goal_range, parse_clock, parse_goal, parse_gpx_course,
-    plan_splits,
+    LENGTH_TOLERANCE, METERS_PER_MILE, STRATEGIES, course_profile, format_clock, goal_range, parse_clock, parse_goal,
+    parse_gpx_course, plan_splits,
 )
 from src.api.auth_routes import get_current_user
 from src.api.database import SessionLocal, User, Race
 from src.api.deps import get_db_connection
 from src.api.routers.analytics import RACE_DISTANCES_M, recent_best_efforts, predict_from_efforts
+from src.api.schemas import LibraryCourse
+from src.api.services import course_library as library
 
 logger = logging.getLogger("race_planner.api")
 router = APIRouter()
 
 MAX_GPX_BYTES = 5 * 1024 * 1024
 UNITS_M = {"mi": METERS_PER_MILE, "km": 1000.0}
+LIBRARY_FIELDS = ("race", "event", "name", "event_name", "city", "state", "status", "detail", "length_m", "ascent_m")
 
 
 def own_race(db, race_id, current_user):
@@ -79,6 +82,17 @@ def predicted_goal(user, distance_m):
     return seconds
 
 
+def save_course(db, race, text):
+    """Store a course file on the race once it parses."""
+    try:
+        course = parse_gpx_course(text)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    race.course_gpx = text
+    db.commit()
+    return {"course": course_summary(course)}
+
+
 @router.post("/api/races/{race_id}/course")
 def upload_course(race_id: int, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     db = SessionLocal()
@@ -87,16 +101,45 @@ def upload_course(race_id: int, file: UploadFile = File(...), current_user: User
         data = file.file.read(MAX_GPX_BYTES + 1)
         if len(data) > MAX_GPX_BYTES:
             raise HTTPException(status_code=413, detail="Course files up to 5 MB.")
-        text = data.decode("utf-8", errors="replace")
-        try:
-            course = parse_gpx_course(text)
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail=str(error))
-        race.course_gpx = text
-        db.commit()
+        return save_course(db, race, data.decode("utf-8", errors="replace"))
     finally:
         db.close()
-    return {"course": course_summary(course)}
+
+
+@router.get("/api/races/{race_id}/course-library")
+def course_library(race_id: int, current_user: User = Depends(get_current_user)):
+    """Courses from the race-courses dataset whose race distance is within LENGTH_TOLERANCE of this
+    race's, by name."""
+    db = SessionLocal()
+    try:
+        race = own_race(db, race_id, current_user)
+    finally:
+        db.close()
+    distance = race_distance(race)
+    try:
+        courses = library.courses()
+    except library.LibraryUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error))
+    fitting = [course for course in courses if abs(course["distance_m"] - distance) <= LENGTH_TOLERANCE * distance]
+    fitting.sort(key=lambda course: (course["name"], course["event_name"]))
+    return {"courses": [{field: course.get(field) for field in LIBRARY_FIELDS} for course in fitting]}
+
+
+@router.post("/api/races/{race_id}/course/library")
+def use_library_course(race_id: int, choice: LibraryCourse, current_user: User = Depends(get_current_user)):
+    """Store a course from the race-courses dataset on the race, as an upload does."""
+    db = SessionLocal()
+    try:
+        race = own_race(db, race_id, current_user)
+        try:
+            text = library.course_file(choice.race, choice.event)
+        except library.LibraryUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error))
+        if text is None:
+            raise HTTPException(status_code=404, detail="That course is not in the library.")
+        return save_course(db, race, text)
+    finally:
+        db.close()
 
 
 @router.delete("/api/races/{race_id}/course")

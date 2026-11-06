@@ -397,6 +397,42 @@ def test_pacing_page_builds_splits_for_a_race_with_a_goal(app_server, registered
     page.problems[:] = [problem for problem in page.problems if not ("status of 400" in problem and refusal in problem)]
 
 
+def test_pacing_page_takes_a_course_from_the_course_library(app_server, registered_user, page):
+    login(page, app_server)
+    user_id = page.evaluate("document.body.dataset.userId")
+    response = page.request.post(f"{app_server}/api/races/{user_id}", data={
+        "name": "Library Half", "race_length": "half marathon",
+        "race_date": (date.today() + timedelta(weeks=10)).isoformat(), "goal_time": "1:50:00",
+    })
+    assert response.ok, response.text()
+    race_id = response.json()["id"]
+
+    page.goto(f"{app_server}/races/{race_id}/pacing")
+    page.wait_for_selector("#splits-table tbody tr")
+    expect(page.locator("#profile-chart")).to_contain_text("No course yet")
+
+    page.click("#course-find")
+    rows = page.locator("#library-list .list-row")
+    expect(rows).to_have_count(2)                               # the halves with a course file, not the marathon
+    expect(rows.nth(0)).to_contain_text("Allegheny Half")
+    expect(rows.nth(0).locator(".badge-warning")).to_have_text("Check it")
+    page.fill("#library-search", "pittsburgh")                  # the city
+    expect(rows).to_have_count(1)
+    expect(rows.nth(0)).to_contain_text("Three Rivers Half")
+    expect(rows.nth(0)).to_contain_text("13.1 mi")
+    page.fill("#library-search", "boston")
+    expect(page.locator("#library-list")).to_contain_text("No match")
+    page.fill("#library-search", "three rivers")
+    rows.nth(0).get_by_role("button", name="Use").click()
+
+    expect(page.locator("#library-modal")).to_be_hidden()
+    expect(page.locator("#pacing-summary")).to_contain_text("13.1 mi")
+    expect(page.locator("#gpx-remove")).to_be_visible()
+    expect(page.locator("#profile-chart")).not_to_contain_text("No course yet")
+    expect(page.locator("#splits-table.no-grade")).to_have_count(0)
+    assert "1:50:00" in page.locator("#splits-table tbody tr").last.text_content()
+
+
 def wait_for_idle_sync(page, app_server, user_id, seconds=60):
     """The last sync job once nothing is running (the COROS link above may
     have started a recompute)."""

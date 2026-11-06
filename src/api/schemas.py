@@ -91,6 +91,11 @@ class DigestSettings(BaseModel):
     enabled: bool
 
 
+class LibraryCourse(BaseModel):
+    race: str = Field(max_length=200)
+    event: str = Field(max_length=200)
+
+
 class CorosLink(BaseModel):
     email: str = Field(max_length=254)
     password: str = Field(min_length=1, max_length=200)

@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from src.api.database import Base, Race, User
 from src.api.routers import analytics, pacing as pacing_router
+from src.api.schemas import LibraryCourse
 from src.pacing import (
     METERS_PER_MILE, course_profile, format_clock, goal_range, grade_factor, parse_clock, parse_goal,
     parse_gpx_course, plan_splits, whole_second_splits,
@@ -245,3 +246,56 @@ def test_predictions_card_reads_each_race_goal_for_its_distance(db, runner, monk
     races = {race["id"]: race for race in analytics.get_predictions(runner.athlete_id, current_user=runner)["races"]}
     assert races[two_part]["goal_seconds"] == 6300              # as the pace band reads it, not 105 s
     assert races[implausible]["goal_seconds"] is None           # no verdict against a goal no runner can hold
+
+
+LIBRARY = [
+    {"race": "pittsburgh-marathon", "event": "half-marathon", "name": "Pittsburgh Marathon", "event_name": "Half Marathon",
+     "city": "Pittsburgh", "state": "PA", "distance_m": 21097.5, "status": "warn", "detail": "joined from 5 of 11 pieces of the map",
+     "file": "courses/pa/pittsburgh-marathon/half-marathon.gpx", "length_m": 21000.0, "ascent_m": 180.0, "geometry_sha256": "ab12"},
+    {"race": "boston-marathon", "event": "marathon", "name": "Boston Marathon", "event_name": "Marathon", "city": "Boston",
+     "state": "MA", "distance_m": 42195.0, "status": "ok", "detail": "osm map", "file": "courses/ma/boston-marathon/marathon.gpx",
+     "length_m": 42150.0, "ascent_m": 250.0, "geometry_sha256": "cd34"},
+    {"race": "akron-marathon", "event": "half-marathon", "name": "Akron Marathon", "event_name": "Half Marathon", "city": "Akron",
+     "state": "OH", "distance_m": 21097.5, "status": "ok", "detail": "mymaps map", "file": "courses/oh/akron-marathon/half-marathon.gpx",
+     "length_m": 21120.0, "ascent_m": 140.0, "geometry_sha256": "ef56"},
+]
+
+
+def test_course_library_lists_the_courses_of_the_race_distance_by_name(db, runner, monkeypatch):
+    monkeypatch.setattr(pacing_router.library, "courses", lambda: LIBRARY)
+    listed = pacing_router.course_library(add_half(db, runner, "1:45:00"), current_user=runner)["courses"]
+    assert [(course["name"], course["event"]) for course in listed] == [
+        ("Akron Marathon", "half-marathon"), ("Pittsburgh Marathon", "half-marathon"),
+    ]
+    assert set(listed[1]) == set(pacing_router.LIBRARY_FIELDS)    # no file paths or digests
+    assert listed[1]["status"] == "warn" and listed[1]["detail"] == "joined from 5 of 11 pieces of the map"
+
+
+def test_a_library_course_is_stored_as_an_upload_is(db, runner, monkeypatch):
+    files = {("pittsburgh-marathon", "half-marathon"): GPX, ("akron-marathon", "half-marathon"): "<gpx/>"}
+    monkeypatch.setattr(pacing_router.library, "course_file", lambda race, event: files.get((race, event)))
+    race_id = add_half(db, runner, "1:45:00")
+    saved = pacing_router.use_library_course(
+        race_id, LibraryCourse(race="pittsburgh-marathon", event="half-marathon"), current_user=runner,
+    )
+    assert 3950 < saved["course"]["length_m"] < 4060
+    assert pacing_router.pacing_plan(race_id, current_user=runner)["course"] == saved["course"]
+    for race, status in (("akron-marathon", 400), ("not-in-the-library", 404)):
+        with pytest.raises(HTTPException) as refused:
+            pacing_router.use_library_course(race_id, LibraryCourse(race=race, event="half-marathon"), current_user=runner)
+        assert refused.value.status_code == status
+    assert pacing_router.pacing_plan(race_id, current_user=runner)["course"] == saved["course"]   # kept
+
+
+def test_course_library_that_cannot_be_read_answers_503(db, runner, monkeypatch):
+    def offline(*args):
+        raise pacing_router.library.LibraryUnavailable("The course library could not be read (offline).")
+    monkeypatch.setattr(pacing_router.library, "courses", offline)
+    monkeypatch.setattr(pacing_router.library, "course_file", offline)
+    race_id = add_half(db, runner, "1:45:00")
+    with pytest.raises(HTTPException) as refused:
+        pacing_router.course_library(race_id, current_user=runner)
+    assert (refused.value.status_code, refused.value.detail) == (503, "The course library could not be read (offline).")
+    with pytest.raises(HTTPException) as refused:
+        pacing_router.use_library_course(race_id, LibraryCourse(race="akron-marathon", event="half-marathon"), current_user=runner)
+    assert refused.value.status_code == 503

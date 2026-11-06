@@ -43,6 +43,7 @@
                 <span class="label">Course</span>
                 <div class="row wrap">
                     <input type="file" id="gpx-file" accept=".gpx,application/gpx+xml" class="hidden">
+                    <button type="button" class="btn btn-sm" id="course-find">Find course</button>
                     <button type="button" class="btn btn-sm" id="gpx-upload">Upload GPX</button>
                     <button type="button" class="btn btn-sm hidden" id="gpx-remove">Remove course</button>
                 </div>
@@ -60,7 +61,7 @@
         <div class="card-head">
             <div>
                 <h2 class="card-title">Course profile</h2>
-                <div class="card-sub" id="course-note">Elevation along the course, with each split marked. Upload the race GPX and the splits follow the hills at one effort.</div>
+                <div class="card-sub" id="course-note">Elevation along the course, with each split marked. Find your race's course or upload its GPX, and the splits follow the hills at one effort.</div>
             </div>
         </div>
         <div id="profile-chart" class="chart-slot"></div>
@@ -90,6 +91,25 @@
     </section>
 
     <aside class="pace-band" id="pace-band" aria-hidden="true"></aside>
+</div>
+
+<div class="modal" id="library-modal" aria-hidden="true">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="library-modal-title" tabindex="-1">
+        <div class="modal-head">
+            <div>
+                <h2 id="library-modal-title">Find your race's course</h2>
+                <div class="card-sub">Courses of large US races of this distance, read from the organizers' maps and rebuilt every week by <a href="https://github.com/nolangormley/race-courses" target="_blank" rel="noopener">race-courses</a>.</div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon btn-sm" data-close aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="field">
+            <label for="library-search">Race or city</label>
+            <input id="library-search" class="input" type="search" autocomplete="off">
+        </div>
+        <div class="mt-3" id="library-list"><div class="empty">Loading courses…</div></div>
+    </div>
 </div>
 {% endblock %}
 
