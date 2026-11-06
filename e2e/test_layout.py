@@ -14,6 +14,7 @@ PAGES = [
     ("/workout_streams/{activity_id}", "#splits tbody tr"),
     ("/profile", "#races .list-row"),
     ("/races/{race_id}/pacing", "#splits-table tbody tr"),
+    ("/admin", "#cohorts tbody tr"),
 ]
 
 # Elements that stick out past the right edge with no scrolling parent to hold them.

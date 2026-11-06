@@ -1,9 +1,9 @@
 """Server-rendered pages. Each checks the session and renders a template; the page's data comes from the API routers."""
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 import logging
 
-from src.api.auth_routes import get_current_user_from_session
+from src.api.auth_routes import get_current_user_from_session, is_admin
 from src.api.database import SessionLocal, Race
 from src.api.web import templates
 from src.importers import IMPORT_ID_BASE
@@ -78,3 +78,14 @@ def pacing_page(request: Request, race_id: int):
     if not race:
         return RedirectResponse(url="/profile", status_code=302)
     return templates.TemplateResponse("pacing.html", {"request": request, "user": user, "race": race})
+
+
+@router.get("/admin")
+def admin_page(request: Request):
+    db = SessionLocal()
+    user = get_current_user_from_session(request, db)
+    db.close()
+    # For anyone but an admin the page does not exist.
+    if not is_admin(user):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return templates.TemplateResponse("admin.html", {"request": request, "user": user})

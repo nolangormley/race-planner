@@ -1,0 +1,4 @@
+/* The note keeps its line breaks and takes the room the other columns leave;
+   on a phone the table scrolls inside its card. */
+#feedback-table .note { white-space: pre-wrap; min-width: 260px; color: var(--text); }
+#cohorts .total td { color: var(--text); font-weight: 600; border-top: 1px solid var(--border-strong); }

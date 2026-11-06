@@ -9,6 +9,7 @@ ES modules, no bundler. `base.html` loads `app.js` on every page; each template 
 - `race-search.js`: `attachRaceSearch(input, { onPick, onEdit })`, the race name search over `/api/race-catalog` (fetched once a page): an ARIA combobox under the input (`<div class="race-search">`) with up to 8 suggestions where every typed word must appear in the race, event, city or state; arrow keys and Enter or a click pick one, Escape and blur close the list. `raceName` is the name a pick stores, `courseNote` the line that says whether its course map comes with it. Used by the profile race form and the sign-up setup page.
 - `sync.js`: the top bar Sync button. Starts `POST /api/sync-strava/{id}`, polls `GET` on the same path, renders the floating progress panel and fires a `strava:synced` event on `document` when a sync finishes. Pages listen for it and reload their data.
   A page that starts a job another way (a recompute after a heart rate change) calls `refreshSync(true)`, which shows the result even when the job is already done.
+- `feedback.js`: the Feedback button (every `[data-feedback]`: the top bar's, and the profile page's Settings row for phones) and its modal in `base.html`. Posts the note, the page path and the contact choice to `/api/feedback`, then thanks with a toast.
 - `charts/`: the chart module, see its own AGENTS.md.
 - `pages/`: one module per template; they own fetching and rendering for that page.
 

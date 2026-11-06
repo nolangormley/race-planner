@@ -102,3 +102,10 @@ class CorosLink(BaseModel):
     email: str = Field(max_length=254)
     password: str = Field(min_length=1, max_length=200)
     region: str = Field(default="us", pattern="^(us|eu|asia)$")
+
+
+class FeedbackCreate(BaseModel):
+    message: str = Field(max_length=4000)
+    # The path of the page the note was written on.
+    page: Optional[str] = Field(default=None, max_length=200)
+    contact_ok: bool = False

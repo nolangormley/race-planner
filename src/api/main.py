@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 # Makes `src.` imports work however the app is started (uvicorn --app-dir,
 # plain `python -m`, or the tests).
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from src.api.auth_routes import router as auth_router  # noqa: E402
+from src.api.auth_routes import is_admin, router as auth_router  # noqa: E402
 from src.api.web import BASE_DIR, templates  # noqa: E402
 
 load_dotenv()
@@ -31,6 +31,8 @@ elif os.path.exists('.env.dev'):
 # the dashboard recovery card, the routes and the nightly pull.
 COROS_ENABLED = os.getenv("COROS_ENABLED", "true").strip().lower() != "false"
 templates.env.globals["coros_enabled"] = COROS_ENABLED
+# The top bar shows the Admin link to the users ADMIN_EMAILS names.
+templates.env.globals["is_admin"] = is_admin
 
 
 @asynccontextmanager
@@ -123,6 +125,8 @@ from src.api.routers import digest  # noqa: E402
 from src.api.routers import coros  # noqa: E402
 from src.api.routers import imports  # noqa: E402
 from src.api.routers import pacing  # noqa: E402
+from src.api.routers import feedback  # noqa: E402
+from src.api.routers import admin  # noqa: E402
 
 app.include_router(pages.router)
 app.include_router(activities.router)
@@ -138,6 +142,8 @@ if COROS_ENABLED:
     app.include_router(coros.router)
 app.include_router(imports.router)
 app.include_router(pacing.router)
+app.include_router(feedback.router)
+app.include_router(admin.router)
 
 # A new install has no warehouse until the first sync. Creating the schema
 # here means every page works from the first login instead of failing on

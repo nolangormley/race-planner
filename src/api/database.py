@@ -30,7 +30,11 @@ class User(Base):
     gender = Column(String)
     height = Column(Float)
     weight = Column(Float)
-    
+    # When the account was made (NULL for accounts from before this was
+    # kept) and the last day it was used, for the admin page's numbers.
+    created_at = Column(DateTime, nullable=True, default=datetime.now)
+    last_seen_at = Column(DateTime, nullable=True)
+
     # Race details
     race_length = Column(String, nullable=True)
     race_date = Column(Date, nullable=True)
@@ -82,6 +86,20 @@ class Race(Base):
     course_gpx = Column(Text, nullable=True)  # the course file behind the pacing plan
 
     user = relationship("User", back_populates="races")
+
+
+class Feedback(Base):
+    """A note sent from the Feedback button, with the page it was written on."""
+    __tablename__ = "feedback"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    page = Column(String(200), nullable=True)
+    message = Column(Text, nullable=False)
+    contact_ok = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    user = relationship("User")
 
 
 class TrainingPlan(Base):

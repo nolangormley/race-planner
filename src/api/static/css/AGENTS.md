@@ -19,5 +19,5 @@ Every page fits a 360 px screen; `e2e/test_layout.py` checks the logged-in pages
   Controls are at least 36 px (chart legend toggles 32 px).
   A link inside text gets a taller target from padding and an equal negative margin.
 - At 560 px and below, card actions wrap under the title when they would squeeze it under 160 px, and a segmented control always takes its own line.
-- At 1000 px and below the top bar drops the brand name and the sync time.
-  At 720 px and below it shows the three nav links, an icon-only Sync button and an icon-only profile link; the theme toggle and Log out move to the profile page's Settings card.
+- At 1100 px and below the Feedback button keeps only its icon, and at 1000 px and below the top bar drops the brand name, the sync time and the Admin link.
+  At 720 px and below it shows the three nav links, an icon-only Sync button and an icon-only profile link; the theme toggle, Log out and Feedback move to the profile page's Settings card.
