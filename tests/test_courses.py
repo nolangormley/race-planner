@@ -91,9 +91,11 @@ def test_pages_render_logged_out(app, stubbed):
     home = client.get("/", follow_redirects=False)
     assert home.status_code == 200 and "Pace your race on its real course." in home.text
     assert 'href="/courses/bloomsday/12k"' in home.text and "for 2 large US road races" in home.text
+    assert "10 Miler · Pittsburgh, PA · November" in home.text            # each card says which event it is
     listing = client.get("/courses")
     assert listing.status_code == 200
     assert 'href="/courses/pittsburgh-10-miler/10-miler"' in listing.text and "flying-pig" not in listing.text
+    assert "10 Miler · Pittsburgh, PA · November" in listing.text         # and so does each row
     page = client.get("/courses/bloomsday/12k")
     assert page.status_code == 200 and "<h1>Lilac Bloomsday Run – 12K</h1>" in page.text
     assert "Check this course before you trust it: joined from 5 of 11 pieces of the map." in page.text

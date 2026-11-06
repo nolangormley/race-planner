@@ -21,7 +21,8 @@
 </div>
 
 {% if not user.strava_athlete_id %}
-<div class="card mb-3" id="connect-prompt">
+{# pages/dashboard.js shows this card only while the user has no activities. #}
+<div class="card mb-3 hidden" id="connect-prompt">
     <div class="empty">
         <strong>Connect Strava, or import your files</strong>
         Fitness, fatigue, zones and weekly volume are all built from your activities. Sync them from Strava, or import FIT and GPX files from your watch.

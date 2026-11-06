@@ -33,6 +33,14 @@ function fitnessStanding(ctl) {
   return 'Building';
 }
 
+// The ratio needs a chronic side; the server says when the history is long enough for one.
+function acwrFoot(status) {
+  if (!status.acwr_ready) return 'Acute:chronic ratio needs four weeks of runs';
+  const acwr = status.acwr;
+  if (acwr == null) return '';
+  return `Acute:chronic ratio ${acwr.toFixed(2)} · ${acwr > 1.5 ? 'high, injury risk rises' : acwr < 0.8 ? 'low, detraining' : 'in the 0.8–1.3 sweet spot'}`;
+}
+
 function vo2Standing(vo2) {
   const male = (config.sex || '').toLowerCase().startsWith('m');
   const age = config.dob ? new Date().getFullYear() - new Date(config.dob).getFullYear() : 35;
@@ -89,12 +97,11 @@ export function renderTiles(state) {
     delta: latest.fitness - weekAgo.fitness, deltaLabel: 'vs 7 days ago', deltaGood: true,
     spark: spark('fitness'), foot: fitnessStanding(status.fitness_ctl),
   });
-  const acwr = status.acwr;
   fillTile('fatigue', {
     value: Math.round(status.fatigue_atl),
     delta: latest.fatigue - weekAgo.fatigue, deltaLabel: 'vs 7 days ago',
     spark: spark('fatigue'),
-    foot: acwr == null ? '' : `Acute:chronic ratio ${acwr.toFixed(2)} · ${acwr > 1.5 ? 'high, injury risk rises' : acwr < 0.8 ? 'low, detraining' : 'in the 0.8–1.3 sweet spot'}`,
+    foot: acwrFoot(status),
   });
   const form = status.form_tsb;
   const ready = readiness(form);

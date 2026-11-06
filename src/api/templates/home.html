@@ -25,7 +25,7 @@
             {% for course in featured %}
             <a class="card home-course" href="/courses/{{ course.race }}/{{ course.event }}">
                 <span class="strong">{{ course.title }}</span>
-                <span class="small muted">{{ course.city }}, {{ course.state }}{% if course.month_name %} · {{ course.month_name }}{% endif %}</span>
+                <span class="small muted">{{ course.event_name }} · {{ course.city }}, {{ course.state }}{% if course.month_name %} · {{ course.month_name }}{% endif %}</span>
             </a>
             {% endfor %}
         </div>

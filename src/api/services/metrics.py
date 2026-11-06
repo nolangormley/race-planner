@@ -28,6 +28,9 @@ from src.api.deps import get_db_connection, DEFAULT_MAX_HR, DEFAULT_REST_HR
 
 logger = logging.getLogger("race_planner.api")
 
+# The acute:chronic ratio means nothing before the chronic side has a history: four weeks from the first activity.
+ACWR_HISTORY_DAYS = 28
+
 
 def recorded_max_hr(con, athlete_id):
     """The highest heart rate in the athlete's activities, or None without any."""
@@ -104,6 +107,8 @@ def calculate_training_status_logic(user_id: int, hr_max=None, hr_rest=None):
 
         merged = pd.merge(daily_data, df, on='activity_date', how='left')
         merged['daily_load'] = merged['daily_load'].fillna(0)
+        # One row per day from the first activity to today.
+        history_days = len(merged)
 
         # Treat 0s as NaNs for EF and decoup so they don't skew the average or display as 0
         merged['daily_ef'] = merged['daily_ef'].replace(0, np.nan)
@@ -177,6 +182,7 @@ def calculate_training_status_logic(user_id: int, hr_max=None, hr_rest=None):
             "fatigue_atl": clean_val(today_stats['ATL']),
             "form_tsb":    clean_val(today_stats['TSB']),
             "acwr":        clean_val(today_stats['ACWR'], 2),
+            "acwr_ready":  history_days >= ACWR_HISTORY_DAYS,
             "target_category": target_category,
             "efficiency_factor_7d": clean_val(today_stats.get('EF_7d'), 2),
             "aerobic_decoupling_7d": clean_val(today_stats.get('Decoup_7d'), 1),
