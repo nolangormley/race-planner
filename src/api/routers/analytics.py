@@ -9,6 +9,7 @@ from src.pacing import parse_goal
 from src.metrics import race_time_for_vdot, riegel_prediction, BEST_EFFORT_DISTANCES_M
 from src.api.deps import get_db_connection
 from src.api.services.metrics import (
+    EASY_RUN_SQL,
     calculate_training_status_logic,
     calculate_vo2max,
     calculate_pace_zones,
@@ -257,13 +258,12 @@ def get_efficiency(user_id: int, days: int = 180, current_user: User = Depends(g
     try:
         hr_max = float(current_user.max_hr or detected_max_hr(con, user_id))
         hr_rest = resolve_resting_hr(current_user)
-        rows = con.execute("""
+        rows = con.execute(f"""
             SELECT da.start_date_local::DATE AS day, da.activity_id, da.name, ae.efficiency_factor,
                    da.average_heartrate, da.average_speed, da.moving_time
             FROM dim_activity da
             JOIN activity_effectiveness ae ON ae.activity_id = da.activity_id
-            WHERE da.athlete_id = ? AND da.type = 'Run' AND da.moving_time >= 1200
-              AND ae.efficiency_factor > 0 AND ae.intensity_factor BETWEEN 0.60 AND 0.82
+            WHERE da.athlete_id = ? AND {EASY_RUN_SQL}
               AND da.start_date_local >= current_date - to_days(?)
             ORDER BY da.start_date_local
         """, [user_id, days]).fetchall()

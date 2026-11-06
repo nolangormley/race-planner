@@ -1,12 +1,13 @@
 // Dashboard: loads each card's data and hands it to the renderers in
-// dashboard-training.js, dashboard-tables.js, dashboard-recovery.js and
-// energy.js; also the header and the unit and range toggles.
+// dashboard-training.js, dashboard-tables.js, dashboard-recovery.js,
+// dashboard-insights.js and energy.js; also the header and the unit and range toggles.
 import { config, fetchJson, units, fmtDate, daysUntil, escapeHtml, qs, qsa } from '../app.js';
 import {
   renderTiles, renderVo2, renderPmc, renderPmcEmpty, renderVolume, renderHrZones, renderTypeShare, renderEfficiency,
 } from './dashboard-training.js';
 import { renderPredictions, renderRecords, renderPaceZones, renderWeek, renderRecent } from './dashboard-tables.js';
 import { renderRecovery, renderReadiness } from './dashboard-recovery.js';
+import { renderInsights } from './dashboard-insights.js';
 import { renderEnergy } from './energy.js';
 
 const athleteId = config.athleteId;
@@ -25,6 +26,7 @@ const state = {
   records: null,
   recovery: null,
   readiness: null,
+  insights: null,
   pmcDays: Number(localStorage.getItem('pmcWindow') || 42),
 };
 
@@ -151,7 +153,14 @@ async function loadEfficiency() {
   renderEfficiency(state.efficiency);
 }
 
+// The notes carry paces, so the server writes them in the chosen unit.
+async function loadInsights() {
+  state.insights = await fetchJson(`/api/insights/${userId}?unit=${units.isMetric() ? 'km' : 'mi'}`).catch(() => null);
+  renderInsights(state.insights);
+}
+
 function loadAll() {
+  loadInsights();
   loadStatus().then(loadVo2).then(loadProjection);
   loadAnalytics();
   loadPaceZones();
@@ -174,6 +183,7 @@ function rerenderUnits() {
   if (state.predictions) renderPredictions(state.predictions);
   if (state.efficiency) renderEfficiency(state.efficiency);
   if (state.records) renderRecords(state.records);
+  if (state.insights) loadInsights();
   if (state.activities.length || state.plan.length) {
     renderWeek(state);
     renderRecent(state);

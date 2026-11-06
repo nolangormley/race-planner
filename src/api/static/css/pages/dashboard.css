@@ -50,3 +50,13 @@
   .energy-now { flex-direction: column; gap: 10px; }
   .energy-reasons { max-width: none; text-align: left; }
 }
+
+/* What to work on (dashboard-insights.js) */
+.insights { margin: 0; padding: 0; list-style: none; }
+.insight { padding: 12px 0; border-top: 1px solid var(--border); }
+.insight:first-child { padding-top: 0; border-top: 0; }
+.insight:last-child { padding-bottom: 0; }
+.insight-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.insight-title { font-weight: 600; color: var(--text); }
+.insight-text { margin: 6px 0 0; max-width: 75ch; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.insight-evidence { margin: 4px 0 0; font-size: 12px; color: var(--text-3); }

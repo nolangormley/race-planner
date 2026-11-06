@@ -138,6 +138,7 @@ from src.api.routers import pacing  # noqa: E402
 from src.api.routers import courses  # noqa: E402
 from src.api.routers import feedback  # noqa: E402
 from src.api.routers import admin  # noqa: E402
+from src.api.routers import insights  # noqa: E402
 
 app.include_router(pages.router)
 app.include_router(activities.router)
@@ -156,6 +157,7 @@ app.include_router(pacing.router)
 app.include_router(courses.router)
 app.include_router(feedback.router)
 app.include_router(admin.router)
+app.include_router(insights.router)
 
 # A new install has no warehouse until the first sync. Creating the schema
 # here means every page works from the first login instead of failing on
