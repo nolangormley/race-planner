@@ -465,6 +465,19 @@ def test_profile_race_search_names_the_race_and_brings_its_course(app_server, re
     expect(page.locator("#races .list-row", has_text="Three Rivers Marathon")).to_contain_text("course map")
     expect(page.locator("#races .list-row", has_text="Monongahela Half")).not_to_contain_text("course map")
 
+    # Two events of one race whose name says both: the meta line tells them apart, and the name stored is
+    # the race's, not the event's.
+    page.click("#add-race")
+    page.fill("#r-name", "steel city")
+    options = page.locator("#r-name-races [role=option]")
+    expect(options).to_have_count(2)
+    expect(options.nth(0).locator(".race-search-meta")).to_have_text("10 Miler · Pittsburgh, PA · May · course map")
+    expect(options.nth(1).locator(".race-search-meta")).to_have_text("10K · Pittsburgh, PA · May · course map")
+    options.nth(1).click()
+    expect(page.locator("#r-name")).to_have_value("Steel City 10 Miler & 10K")
+    expect(page.locator("#r-length")).to_have_value("10k")
+    page.click("#cancel-race")
+
 def test_a_visitor_finds_a_course_and_its_pace_band_without_an_account(app_server, page):
     page.goto(f"{app_server}/")
     expect(page.locator("h1")).to_have_text("Pace your race on its real course.")
@@ -485,9 +498,13 @@ def test_a_visitor_finds_a_course_and_its_pace_band_without_an_account(app_serve
 
     page.goto(f"{app_server}/courses")
     rows = page.locator(".course-row:not(.hidden)")
-    expect(rows).to_have_count(3)                               # the three events with a course file
+    expect(rows).to_have_count(5)                               # the five events with a course file
     page.fill("#course-filter", "allegheny")
     expect(rows).to_have_count(1)
+    page.fill("#course-filter", "steel city")
+    expect(rows).to_have_count(2)                               # one race, two events: each row says which
+    expect(rows.nth(0)).to_contain_text("10 Miler · Pittsburgh, PA")
+    expect(rows.nth(1)).to_contain_text("10K · Pittsburgh, PA")
     page.fill("#course-filter", "boston")
     expect(page.locator("#course-empty")).to_be_visible()
 
@@ -676,6 +693,12 @@ def test_a_runner_without_strava_imports_a_gpx_file(app_server, page, tmp_path):
     page.goto(f"{app_server}/dashboard")
     page.wait_for_load_state("networkidle")
     page.wait_for_selector("#recent tr:has-text('Riverfront loop')")
+    # With a run in the warehouse the card asking to connect Strava or import files is gone, and the
+    # acute:chronic ratio waits for four weeks of history instead of calling one run an injury risk.
+    expect(page.locator("#connect-prompt")).to_be_hidden()
+    fatigue = page.locator("#stat-fatigue .stat-foot")
+    expect(fatigue).to_contain_text("needs four weeks of runs")
+    assert not re.search(r"injury|detraining|sweet spot|\d\.\d\d", fatigue.text_content())
 
 
 def test_an_imported_run_marks_the_planned_run_done(app_server, page, tmp_path):

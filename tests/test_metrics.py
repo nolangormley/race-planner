@@ -186,3 +186,30 @@ def test_riegel_scales_time_with_distance():
     # A 20:00 5K predicts a 10K just over double the time.
     assert riegel_prediction(1200, 5000, 10000) == pytest.approx(2502, abs=2)
     assert riegel_prediction(1200, 5000, 5000) == 1200
+
+
+def test_training_status_says_when_the_history_is_long_enough_for_the_ratio(tmp_path, monkeypatch):
+    from datetime import date, datetime, time, timedelta
+    import src.api.deps as deps
+    from src.api.services.metrics import ACWR_HISTORY_DAYS, calculate_training_status_logic
+    from src.pipeline import StravaDB
+
+    monkeypatch.setattr(deps, "DB_PATH", str(tmp_path / "warehouse.duckdb"))
+    warehouse = StravaDB(deps.DB_PATH)
+    warehouse.con.execute("INSERT INTO dim_athlete (athlete_id, sex) VALUES (9, 'F')")
+
+    def add_run(activity_id, days_ago):
+        started = datetime.combine(date.today() - timedelta(days=days_ago), time(7))
+        warehouse.con.execute("INSERT INTO dim_activity (activity_id, athlete_id, type, start_date_local) VALUES (?, 9, 'Run', ?)",
+                              [activity_id, started])
+        warehouse.con.execute("INSERT INTO activity_effectiveness (activity_id, trimp_banister) VALUES (?, 60.0)", [activity_id])
+
+    # One run yesterday: a ratio comes out, far past the 1.5 risk line, but the history is two days.
+    add_run(91, 1)
+    status = calculate_training_status_logic(9)
+    assert status["acwr"] > 1.5 and status["acwr_ready"] is False
+    add_run(92, ACWR_HISTORY_DAYS - 2)                          # 27 days from the first run to today: one short
+    assert calculate_training_status_logic(9)["acwr_ready"] is False
+    add_run(93, ACWR_HISTORY_DAYS - 1)                          # four weeks
+    assert calculate_training_status_logic(9)["acwr_ready"] is True
+    warehouse.con.close()

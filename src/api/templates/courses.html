@@ -28,7 +28,7 @@
             <a class="list-row course-row" href="/courses/{{ course.race }}/{{ course.event }}" data-search="{{ (course.title ~ ' ' ~ course.city ~ ' ' ~ course.state)|lower }}">
                 <span>
                     <span class="strong course-title">{{ course.title }}</span>
-                    <span class="small muted">{{ course.city }}, {{ course.state }}{% if course.month_name %} · {{ course.month_name }}{% endif %}</span>
+                    <span class="small muted">{{ course.event_name }} · {{ course.city }}, {{ course.state }}{% if course.month_name %} · {{ course.month_name }}{% endif %}</span>
                 </span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
             </a>

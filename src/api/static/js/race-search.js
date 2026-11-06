@@ -72,9 +72,10 @@ export function attachRaceSearch(input, { onPick, onEdit, source = '/api/race-ca
   }
 
   function render() {
+    // The event comes first in the meta line: two events of one race share its name when the name says both.
     list.innerHTML = shown.map((entry, index) => `<li role="option" id="${list.id}-${index}" aria-selected="false" data-index="${index}">
       <span class="race-search-name">${escapeHtml(raceName(entry))}</span>
-      <span class="race-search-meta">${escapeHtml(entry.city)}, ${escapeHtml(entry.state)}${entry.month ? ` · ${MONTHS[entry.month - 1]}` : ''}${entry.has_course ? ' · course map' : ''}</span>
+      <span class="race-search-meta">${escapeHtml(entry.event_name)} · ${escapeHtml(entry.city)}, ${escapeHtml(entry.state)}${entry.month ? ` · ${MONTHS[entry.month - 1]}` : ''}${entry.has_course ? ' · course map' : ''}</span>
     </li>`).join('');
     list.hidden = !shown.length;
     input.setAttribute('aria-expanded', String(shown.length > 0));

@@ -40,6 +40,13 @@ function renderHeader(races) {
   sub.innerHTML = `Training for <span class="strong">${escapeHtml(next.name || next.race_length)}</span><span class="sep">·</span>${escapeHtml(next.race_length)}<span class="sep">·</span>${fmtDate(next.race_date, { month: 'long', day: 'numeric' })}, ${when}${next.goal_time ? `<span class="sep">·</span>goal ${escapeHtml(next.goal_time)}` : ''}<span class="sep">·</span><a href="/races/${next.id}/pacing">Pacing plan</a>`;
 }
 
+// ---- Connect prompt ----
+// The template puts the card on the page for a user without Strava; it shows only while they have no
+// activities at all, synced or imported.
+function renderConnectPrompt(activities) {
+  qs('#connect-prompt')?.classList.toggle('hidden', activities.length > 0);
+}
+
 // ---- Loading ----
 async function loadStatus() {
   try {
@@ -90,6 +97,7 @@ async function loadPlanAndActivities() {
   ]);
   state.plan = plan.entries || [];
   state.activities = Array.isArray(activities) ? activities : [];
+  renderConnectPrompt(state.activities);
   renderWeek(state);
   renderRecent(state);
 }
