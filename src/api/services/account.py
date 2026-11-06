@@ -6,7 +6,7 @@ import logging
 import requests
 
 from src.api.auth_routes import verify_password
-from src.api.database import Race, TrainingPlan, TrainingPlanEntry, User
+from src.api.database import Feedback, Race, TrainingPlan, TrainingPlanEntry, User
 from src.pipeline import ACTIVITY_CHILD_TABLES, CLIENT_ID, CLIENT_SECRET, STRAVA_API_BASE
 
 logger = logging.getLogger("race_planner.account")
@@ -56,8 +56,8 @@ def delete_account(db, con, user, password, revoke=revoke_strava):
     deletes nothing.
 
     The warehouse rows go first, so a failure there leaves the account in
-    place to try again; then the training plan entries, plans and races,
-    then the user row. A stored Strava token is revoked last through
+    place to try again; then the training plan entries, plans, races and
+    feedback notes, then the user row. A stored Strava token is revoked last through
     revoke(refresh_token), best effort: a failure is logged and the
     deletion stands."""
     if not verify_password(password, user.password):
@@ -68,6 +68,7 @@ def delete_account(db, con, user, password, revoke=revoke_strava):
     db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id.in_(plan_ids)).delete(synchronize_session=False)
     db.query(TrainingPlan).filter(TrainingPlan.user_id == user_id).delete(synchronize_session=False)
     db.query(Race).filter(Race.user_id == user_id).delete(synchronize_session=False)
+    db.query(Feedback).filter(Feedback.user_id == user_id).delete(synchronize_session=False)
     db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
     db.commit()
     if refresh_token:

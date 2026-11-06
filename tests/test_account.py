@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.api.auth_routes import hash_password
-from src.api.database import Base, Race, TrainingPlan, TrainingPlanEntry, User
+from src.api.database import Base, Feedback, Race, TrainingPlan, TrainingPlanEntry, User
 from src.api.routers import profile as profile_router
 from src.api.schemas import AccountDelete
 from src.api.services import account
@@ -25,17 +25,17 @@ IMPORTED_ACTIVITY = 2**40 + 1
 @pytest.fixture
 def db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine, tables=[User.__table__, Race.__table__, TrainingPlan.__table__, TrainingPlanEntry.__table__])
+    Base.metadata.create_all(engine, tables=[User.__table__, Race.__table__, TrainingPlan.__table__, TrainingPlanEntry.__table__, Feedback.__table__])
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     yield session
     session.close()
 
 
 def add_user(db, user_id, **fields):
-    """A user with a race, a plan for it and one planned session."""
+    """A user with a race, a plan for it, one planned session and a feedback note."""
     user = User(id=user_id, email=f"runner{user_id}@example.com", password=hash_password(PASSWORD), name="Runner", **fields)
     race = Race(user_id=user_id, race_length="half marathon", race_date=date(2027, 4, 10))
-    db.add_all([user, race])
+    db.add_all([user, race, Feedback(user_id=user_id, page="/dashboard", message="A note")])
     db.flush()
     plan = TrainingPlan(user_id=user_id, name="Plan", race_id=race.id)
     db.add(plan)
@@ -81,6 +81,7 @@ def postgres_rows(db, user_id):
         "races": db.query(Race).filter(Race.user_id == user_id).count(),
         "training_plans": plans.count(),
         "training_plan_entries": db.query(TrainingPlanEntry).filter(TrainingPlanEntry.plan_id.in_([plan.id for plan in plans])).count(),
+        "feedback": db.query(Feedback).filter(Feedback.user_id == user_id).count(),
     }
 
 
@@ -106,8 +107,8 @@ def test_deleting_an_account_removes_only_that_users_rows(db):
 
     assert set(warehouse_rows(warehouse.con, STRAVA_ATHLETE, STRAVA_ACTIVITY).values()) == {0}
     assert warehouse_rows(warehouse.con, staying.athlete_id, IMPORTED_ACTIVITY) == before
-    assert postgres_rows(db, 1) == {"users": 0, "races": 0, "training_plans": 0, "training_plan_entries": 0}
-    assert postgres_rows(db, 2) == {"users": 1, "races": 1, "training_plans": 1, "training_plan_entries": 1}
+    assert postgres_rows(db, 1) == {"users": 0, "races": 0, "training_plans": 0, "training_plan_entries": 0, "feedback": 0}
+    assert postgres_rows(db, 2) == {"users": 1, "races": 1, "training_plans": 1, "training_plan_entries": 1, "feedback": 1}
     assert revoked == ["refresh-1"]
 
 
@@ -119,7 +120,7 @@ def test_a_wrong_password_deletes_nothing(db):
     with pytest.raises(account.WrongPassword):
         account.delete_account(db, warehouse.con, leaving, "not it", revoke=revoked.append)
     assert set(warehouse_rows(warehouse.con, STRAVA_ATHLETE, STRAVA_ACTIVITY).values()) == {1}
-    assert postgres_rows(db, 1) == {"users": 1, "races": 1, "training_plans": 1, "training_plan_entries": 1}
+    assert postgres_rows(db, 1) == {"users": 1, "races": 1, "training_plans": 1, "training_plan_entries": 1, "feedback": 1}
     assert revoked == []
 
 
