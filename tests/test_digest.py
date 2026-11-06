@@ -87,6 +87,47 @@ def test_compose_digest_without_data_still_reads():
     assert "Fitness" not in body and "Races" not in body
 
 
+def test_digest_html_shows_the_week_and_escapes_what_users_typed():
+    week = {"runs": 4, "distance_m": 13.3 * 1609.344, "moving_s": 2 * 3600 + 39 * 60, "climb_m": 318}
+    previous = {"runs": 4, "distance_m": 16.0 * 1609.344, "moving_s": 3 * 3600, "climb_m": 300}
+    energy = {
+        "morning": 58,
+        "reasons": ["+63 overnight, no COROS reading, so the usual rate", "-26 Morning Run, yesterday", "HRV under baseline"],
+        "call": {"label": "Easy", "badge": "warning", "advice": "Keep today easy and move quality to another day.",
+                 "hint": "Intervals are planned today."},
+    }
+
+    html = digest.digest_html(
+        "Nolan Gormley", date(2026, 11, 6), week, previous, {"planned": 2, "done": 1, "planned_m": 8 * 1609.344},
+        [(date(2026, 11, 3), "Intervals", "3.5 miles")], [("<b>Turkey</b> Trot", "5k", date(2026, 11, 26))],
+        [("5K", 22 * 60 + 31, date(2026, 10, 28))], {"fitness_ctl": 65.2, "fatigue_atl": 68.4, "form_tsb": -3.2},
+        app_url="https://example.test/", recovery={"rhr": 48.2, "hrv": 76.1, "hrv_baseline": 71}, energy=energy,
+    )
+
+    assert "Hi Nolan, here is your week in running." in html
+    assert "Last week · Oct 26 – Nov 1" in html and "13.3 mi" in html
+    assert "2.7 mi less than the week before" in html
+    assert "1 of 2 planned sessions done" in html and "13.3 of 8.0 mi planned" in html
+    assert "−3" in html and "Training and recovery are in balance." in html
+    assert ">+63<" in html and "Overnight, no COROS reading, so the usual rate" in html
+    assert ">−26<" in html and "HRV under baseline" in html
+    assert "Intervals are planned today." in html and "76 ms" in html and "Baseline 71" in html
+    assert "22:31" in html and "3.5 miles" in html
+    assert "&lt;b&gt;Turkey&lt;/b&gt; Trot" in html and "<b>Turkey" not in html
+    assert "5K · Thu, Nov 26" in html and ">20<" in html
+    assert 'href="https://example.test/dashboard"' in html and 'href="https://example.test/profile"' in html
+    assert "13.3 mi over 4 runs · today: Easy · &lt;b&gt;Turkey&lt;/b&gt; Trot in 20 days" in html
+
+
+def test_digest_html_without_data_still_reads():
+    empty = {"runs": 0, "distance_m": 0.0, "moving_s": 0.0, "climb_m": 0.0}
+    html = digest.digest_html(None, date(2026, 11, 2), empty, empty, None, [], [], [], None)
+    assert "Hi there," in html and "The same distance as the week before" in html
+    assert "Nothing planned yet." in html
+    for absent in ("Fitness", "Recovery", "Races", "New bests", "planned sessions", "<img", "Open Race Planner", "None"):
+        assert absent not in html, absent
+
+
 @pytest.fixture
 def db_session(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -100,8 +141,8 @@ def db_session(monkeypatch):
 
 def test_send_due_digests_sends_once_and_stamps_the_user(db_session, monkeypatch):
     sent = []
-    monkeypatch.setattr(digest, "send_email", lambda to, subject, body: sent.append((to, subject)))
-    monkeypatch.setattr(digest, "build_digest", lambda db, user, now=None: ("Your week", "body"))
+    monkeypatch.setattr(digest, "send_email", lambda to, subject, body, html: sent.append((to, subject, html)))
+    monkeypatch.setattr(digest, "build_digest", lambda db, user, now=None: ("Your week", "body", "<p>html</p>"))
     db_session.add_all([
         User(email="in@example.com", password="x", name="In", weekly_digest=True),
         User(email="out@example.com", password="x", name="Out", weekly_digest=False),
@@ -109,7 +150,7 @@ def test_send_due_digests_sends_once_and_stamps_the_user(db_session, monkeypatch
     db_session.commit()
 
     assert digest.send_due_digests(MONDAY_MORNING) == 1
-    assert sent == [("in@example.com", "Your week")]
+    assert sent == [("in@example.com", "Your week", "<p>html</p>")]
     assert digest.send_due_digests(MONDAY_MORNING) == 0
     stamped = db_session.query(User).filter_by(email="in@example.com").one()
     assert stamped.digest_sent_at == MONDAY_MORNING
@@ -154,7 +195,7 @@ def test_the_plan_line_counts_a_session_done_when_the_dashboard_does(db_session,
     ])
     db_session.commit()
 
-    _, body = digest.build_digest(db_session, user, MONDAY_MORNING)
+    _, body, _ = digest.build_digest(db_session, user, MONDAY_MORNING)
     assert "Plan       4 of 6 planned sessions done" in body
 
 

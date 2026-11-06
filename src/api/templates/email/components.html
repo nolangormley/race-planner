@@ -1,0 +1,67 @@
+{#- Shared styles and pieces of the HTML emails. Mail clients drop most
+    stylesheets, so every style is inline and the layout is tables. The
+    colours are the light theme of static/css/tokens.css; the soft tones are
+    those colours over white, because some clients do not blend rgba. -#}
+{% set font = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" %}
+{% set page = "#f5f6f8" %}
+{% set surface = "#ffffff" %}
+{% set line = "#e3e6eb" %}
+{% set track = "#e9ecf1" %}
+{% set ink = "#15181d" %}
+{% set muted = "#5b6170" %}
+{% set accent = "#2a78d6" %}
+{% set tones = {
+    "good": {"fill": "#0ca30c", "soft": "#e2f4e2", "ink": "#006300"},
+    "accent": {"fill": "#2a78d6", "soft": "#e5effa", "ink": "#1f66bd"},
+    "warning": {"fill": "#fab219", "soft": "#fef1d6", "ink": "#8a5a00"},
+    "serious": {"fill": "#ec835a", "soft": "#fcebe5", "ink": "#b2461b"},
+} %}
+
+{# Type as longhand properties: Outlook ignores the font shorthand. #}
+{% macro text(size, weight=400, color=ink, height=1.5) -%}
+font-family:{{ font }};font-size:{{ size }}px;line-height:{{ height }};font-weight:{{ weight }};color:{{ color }};
+{%- endmacro %}
+
+{% macro heading(label) -%}
+<div style="padding:0 0 12px;{{ text(12, 600, muted, 1.4) }}letter-spacing:0.06em;text-transform:uppercase;">{{ label }}</div>
+{%- endmacro %}
+
+{# Starts a new part of the card: a rule, then the heading. #}
+{% macro section(label) -%}
+<tr><td style="padding:28px 0 0;"><div style="border-top:1px solid {{ line }};font-size:0;line-height:0;">&nbsp;</div></td></tr>
+<tr><td style="padding:24px 0 0;">{{ heading(label) }}</td></tr>
+{%- endmacro %}
+
+{% macro stat(label, value, note=None) -%}
+<td valign="top" width="33%" style="padding:0 12px 0 0;">
+    <div style="{{ text(13, 400, muted, 1.4) }}">{{ label }}</div>
+    <div style="padding-top:2px;{{ text(20, 600, ink, 1.3) }}">{{ value }}</div>
+    {% if note %}<div style="padding-top:2px;{{ text(13, 400, muted, 1.4) }}">{{ note }}</div>{% endif %}
+</td>
+{%- endmacro %}
+
+{# A bar filled to share (0 to 1) over a grey track, rounded at both ends. #}
+{% macro meter(share, color=accent) -%}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr><td height="8" style="height:8px;background:{{ track }};border-radius:4px;font-size:0;line-height:0;">
+        {%- if share > 0 %}
+        <table role="presentation" width="{{ [(share * 100) | round | int, 100] | min }}%" cellpadding="0" cellspacing="0" border="0">
+            <tr><td height="8" style="height:8px;background:{{ color }};border-radius:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        </table>
+        {%- else %}&nbsp;{% endif -%}
+    </td></tr>
+</table>
+{%- endmacro %}
+
+{% macro badge(label, tone) -%}
+<span style="display:inline-block;padding:3px 10px;border-radius:999px;background:{{ tones[tone].soft }};{{ text(13, 600, tones[tone].ink, 1.4) }}">{{ label }}</span>
+{%- endmacro %}
+
+{# A button that survives Outlook: the colour sits on the cell, not only on the link. #}
+{% macro button(href, label) -%}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0">
+    <tr><td align="center" bgcolor="{{ accent }}" style="border-radius:8px;background:{{ accent }};">
+        <a href="{{ href }}" style="display:inline-block;padding:12px 22px;border-radius:8px;{{ text(15, 600, '#ffffff', 1.2) }}text-decoration:none;">{{ label }}</a>
+    </td></tr>
+</table>
+{%- endmacro %}

@@ -1,0 +1,45 @@
+{% from "email/components.html" import page, surface, line, ink, muted, text %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>{% block title %}{% endblock %}</title>
+<style>
+    :root { color-scheme: light; supported-color-schemes: light; }
+    @media (max-width: 600px) {
+        .card { padding: 24px 20px !important; }
+        .hero { font-size: 32px !important; }
+    }
+</style>
+</head>
+<body style="margin:0;padding:0;background:{{ page }};-webkit-text-size-adjust:100%;">
+{#- The inbox shows the preheader next to the subject. The filler after it
+    keeps the inbox from showing the start of the body after it. #}
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">{{ preheader }}{% for _ in range(40) %}&#847;&zwnj;&nbsp;{% endfor %}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{{ page }};">
+    <tr><td align="center" style="padding:32px 12px;">
+        <!--[if mso]><table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+            <tr><td style="padding:0 4px 16px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+                    {% if app_url %}<td style="padding-right:10px;"><img src="{{ app_url }}/static/icons/icon-192.png" width="28" height="28" alt="" style="display:block;border:0;border-radius:7px;"></td>{% endif %}
+                    <td style="{{ text(16, 600, ink, 1.75) }}">Race Planner</td>
+                </tr></table>
+            </td></tr>
+            <tr><td class="card" style="padding:32px;background:{{ surface }};border:1px solid {{ line }};border-radius:12px;">
+                {% block content %}{% endblock %}
+            </td></tr>
+            <tr><td style="padding:20px 4px 0;{{ text(13, 400, muted, 1.6) }}">
+                {% block footer %}{% endblock %}
+            </td></tr>
+        </table>
+        <!--[if mso]></td></tr></table><![endif]-->
+    </td></tr>
+</table>
+</body>
+</html>
