@@ -135,13 +135,20 @@ dl { margin: 0; }
 .mt-4 { margin-top: 16px; }
 .mb-3 { margin-bottom: 12px; }
 
+/* Room for the nav: the Feedback button keeps only its icon. font-size: 0
+   hides its label but keeps it as the accessible name. */
+@media (max-width: 1100px) {
+  #feedback-btn { aspect-ratio: 1; padding: 0; gap: 0; font-size: 0; }
+}
+
 /* Single columns use minmax(0, 1fr): a bare 1fr track cannot get narrower
    than its widest content, so one wide table would widen the whole page. */
 @media (max-width: 1000px) {
   .grid-main { grid-template-columns: minmax(0, 1fr); }
   .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  /* Room for the nav: the brand keeps only its mark and the sync time goes. */
-  .brand > span:not(.brand-mark), .sync-status { display: none; }
+  /* Room for the nav: the brand keeps only its mark, and the sync time and
+     the Admin link (admins only; /admin is a desktop page) go. */
+  .brand > span:not(.brand-mark), .sync-status, .nav a[href="/admin"] { display: none; }
 }
 @media (max-width: 720px) {
   .topbar-inner, .page, .footer { padding-left: 16px; padding-right: 16px; gap: 10px; }
@@ -152,7 +159,8 @@ dl { margin: 0; }
   /* The three nav links, an icon-only Sync button and an icon-only profile
      link fit in one row down to 360 px. font-size: 0 hides their labels but
      keeps them as accessible names. The theme toggle gives its place to the
-     profile link (theme is also on the profile's Settings, and so is Log out).
+     profile link (theme is also on the profile's Settings, and so are Log out
+     and Feedback, which the ghost-button rule above hides here).
      The brand mark shows only on pages without the nav. */
   .nav ~ .topbar-right [data-theme-toggle] { display: none; }
   .topbar-right .user-link { justify-content: center; width: 36px; height: 36px; padding: 0; font-size: 0; }

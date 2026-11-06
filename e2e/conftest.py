@@ -135,7 +135,7 @@ def running_app(workdir, settings):
 def app_server(tmp_path_factory, fake_strava, fake_coros, fake_courses, database):
     settings = {
         "DATABASE_URL": database, "STRAVA_API_BASE": fake_strava, "COROS_API_BASE": fake_coros,
-        "RACE_COURSES_URL": f"{fake_courses}/",
+        "RACE_COURSES_URL": f"{fake_courses}/", "ADMIN_EMAILS": USER["email"],
     }
     with running_app(tmp_path_factory.mktemp("app"), settings) as base:
         yield base

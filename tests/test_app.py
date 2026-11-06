@@ -68,6 +68,9 @@ def test_every_router_is_mounted(app):
         ("POST", "/api/strava/webhook/{token}"),
         ("POST", "/login"),
         ("GET", "/strava-callback"),
+        ("POST", "/api/feedback"),
+        ("GET", "/admin"),
+        ("GET", "/api/admin/stats"),
     }
     missing = expected - routes
     assert not missing, f"routes missing from the app: {sorted(missing)}"

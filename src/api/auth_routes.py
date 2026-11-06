@@ -9,7 +9,7 @@ import os
 import requests
 from dotenv import load_dotenv
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import bcrypt
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -78,7 +78,10 @@ def get_current_user_from_session(request: Request, db: Session):
     user_id = request.session.get("user_id")
     if not user_id:
         return None
-    return db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        touch_last_seen(user, db)
+    return user
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -88,6 +91,42 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = get_current_user_from_session(request, db)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+# ---- Last seen ----
+# users.last_seen_at feeds the admin page's "came back" count. It is written
+# at most once a day per user, so an ordinary request does not write.
+
+SEEN_INTERVAL = timedelta(days=1)
+
+
+def touch_last_seen(user: User, db: Session, now: datetime = None) -> None:
+    now = now or datetime.now()
+    if user.last_seen_at and now - user.last_seen_at < SEEN_INTERVAL:
+        return
+    user.last_seen_at = now
+    db.commit()
+    # The commit expired the row. Load it again so a page route can still
+    # read the user after it closes the session.
+    db.refresh(user)
+
+
+# ---- Admins ----
+# ADMIN_EMAILS (comma-separated, any case) names who may open /admin. It is
+# read on each call; with it unset, nobody is an admin.
+
+def is_admin(user) -> bool:
+    admins = {email.strip().lower() for email in os.getenv("ADMIN_EMAILS", "").split(",") if email.strip()}
+    return bool(user and user.email) and user.email.strip().lower() in admins
+
+
+def get_admin(request: Request, db: Session = Depends(get_db)) -> User:
+    """FastAPI dependency for the admin API: the logged-in admin, or a 404,
+    so the route does not exist for anyone else."""
+    user = get_current_user_from_session(request, db)
+    if not is_admin(user):
+        raise HTTPException(status_code=404, detail="Not Found")
     return user
 
 

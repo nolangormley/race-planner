@@ -705,6 +705,50 @@ def test_an_imported_run_marks_the_planned_run_done(app_server, page, tmp_path):
     assert entry["strava_activity_id"]
 
 
+def test_feedback_button_sends_a_note_from_any_page(app_server, registered_user, page):
+    login(page, app_server)
+    page.goto(f"{app_server}/training-calendar")
+    page.wait_for_load_state("networkidle")
+    page.click("#feedback-btn")
+    page.wait_for_selector("#feedback-modal.open")
+    page.fill("#feedback-message", "The calendar could show the week's total.")
+    page.check("#feedback-contact")
+    page.click("#feedback-form button[type=submit]")
+    page.locator("#feedback-modal.open").wait_for(state="hidden")
+    page.wait_for_selector("#toast.show")
+    assert "Thanks" in page.text_content("#toast")
+
+
+def test_admin_page_shows_sign_ups_and_notes_to_an_admin_only(app_server, registered_user, page):
+    login(page, app_server)                                     # ADMIN_EMAILS names the e2e user
+    page.click(".nav a[href='/admin']")
+    page.wait_for_url("**/admin")
+    rows = page.locator("#cohorts tbody tr")
+    expect(rows).to_have_count(9)                               # eight weeks and all time
+    this_week = [int(cell) for cell in rows.nth(7).locator("td.num").all_text_contents()]
+    all_time = [int(cell) for cell in rows.nth(8).locator("td.num").all_text_contents()]
+    assert this_week[0] >= 1 and all_time[0] >= this_week[0]
+    assert all(count >= 1 for count in this_week[1:4])          # connected data, a race, a course file
+    assert this_week[4] == 0 == all_time[4]                     # nobody signed up a week ago
+    note = page.locator("#feedback-table tbody tr").first
+    expect(note).to_contain_text("The calendar could show the week's total.")
+    expect(note).to_contain_text(registered_user["email"])
+    expect(note).to_contain_text("/training-calendar")
+
+    other = {"email": f"other{int(time.time())}@example.com", "password": "other-password-1", "name": "Other Runner"}
+    response = requests.post(f"{app_server}/register", data={
+        **other, "date_of_birth": "1991-03-04", "gender": "Male", "height": "1.8", "weight": "75",
+    }, allow_redirects=False)
+    assert response.status_code == 302, response.text
+    page.goto(f"{app_server}/logout")
+    login(page, app_server, other)
+    expect(page.locator(".nav a[href='/admin']")).to_have_count(0)
+    assert page.request.get(f"{app_server}/admin").status == 404
+    assert page.request.get(f"{app_server}/api/admin/stats").status == 404
+    page.goto(f"{app_server}/logout")
+    assert page.request.get(f"{app_server}/admin").status == 404
+
+
 def test_coros_switched_off_leaves_out_the_cards_and_the_routes(app_without_coros, registered_user, page):
     login(page, app_without_coros)
     user_id = page.evaluate("document.body.dataset.userId")

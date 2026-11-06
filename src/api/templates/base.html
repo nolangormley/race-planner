@@ -43,7 +43,8 @@
             <nav class="nav" aria-label="Main">
                 {% set links = [('/dashboard', 'Dashboard', path == '/dashboard'),
                                 ('/training-calendar', 'Calendar', path == '/training-calendar'),
-                                ('/warehouse', 'Activities', path == '/warehouse' or path.startswith('/workout_streams'))] %}
+                                ('/warehouse', 'Activities', path == '/warehouse' or path.startswith('/workout_streams'))]
+                               + ([('/admin', 'Admin', path == '/admin')] if is_admin(user) else []) %}
                 {% for href, label, active in links %}
                 <a href="{{ href }}"{% if active %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
                 {% endfor %}
@@ -53,6 +54,10 @@
                 <span id="sync-status" class="sync-status"></span>
                 <button id="sync-btn" class="btn btn-sm" type="button">Sync Strava</button>
                 {% endif %}
+                <button id="feedback-btn" class="btn btn-ghost btn-sm" type="button" data-feedback title="Send feedback">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    Feedback
+                </button>
                 <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme">
                     <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
                     <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -88,6 +93,33 @@
         <a href="https://github.com/nolangormley/race-planner">Source on GitHub</a>
     </footer>
 
+    {% if user %}
+    <div class="modal" id="feedback-modal" aria-hidden="true">
+        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-modal-title" tabindex="-1">
+            <div class="modal-head">
+                <div>
+                    <h2 id="feedback-modal-title">Send feedback</h2>
+                    <div class="card-sub">Something confusing, broken or missing? A sentence is plenty.</div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon btn-sm" data-close aria-label="Close">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <form id="feedback-form" class="stack">
+                <div class="field">
+                    <label for="feedback-message">Your note</label>
+                    <textarea id="feedback-message" class="input" rows="5" required maxlength="4000"></textarea>
+                </div>
+                <label class="check"><input type="checkbox" id="feedback-contact"> You can email me about this</label>
+                <div class="form-actions">
+                    <button type="button" class="btn" data-close>Cancel</button>
+                    <button type="submit" class="btn btn-primary">Send</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="/static/js/app.js"></script>
     {% if user and user.strava_athlete_id %}
@@ -95,6 +127,9 @@
         import { initSync } from '/static/js/sync.js';
         initSync();
     </script>
+    {% endif %}
+    {% if user %}
+    <script type="module" src="/static/js/feedback.js"></script>
     {% endif %}
     {% block scripts %}{% endblock %}
 </body>

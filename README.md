@@ -77,6 +77,7 @@ Copy `.env.example` to `.env` and fill it in:
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Optional; without `SMTP_HOST`, emails are written to the server log. |
 | `APP_URL` | The link at the foot of the weekly digest. |
 | `COROS_ENABLED` | `false` switches COROS off entirely, see [COROS](#coros-unofficial). |
+| `ADMIN_EMAILS` | Comma-separated emails (any case) of the people who may open the [admin page](#feedback-and-the-admin-page); unset, nobody can. |
 
 `STRAVA_API_BASE` and `COROS_API_BASE` point the app at stand-ins for the tests and the demo; leave them unset.
 
@@ -199,6 +200,12 @@ Sending needs SMTP in `.env`, the same variables the password reset uses: `SMTP_
 Set `APP_URL` for the link in the footer.
 Without `SMTP_HOST` the digest is written to the server log, and **Preview** on the profile page shows it in the browser.
 A thread in the app checks every half hour and sends after 06:00 server time on Mondays; **Send now** sends it straight away.
+
+### Feedback and the admin page
+The **Feedback** button in the top bar (on a phone, the Settings card of the profile page) opens a note to whoever runs the app, sent with the page it was written on and whether the sender is happy to be emailed about it.
+`/admin` is a page for the people in `ADMIN_EMAILS`, and answers 404 to everyone else.
+It shows, for each of the last eight weeks, the users who signed up that week and how many of them connected data (a Strava link, a COROS link or an activity in the warehouse), added a race, have a course file on a race, and came back a week or more after signing up, with the all-time totals and the latest 50 feedback notes.
+Sign-up dates are kept from this version on; earlier accounts count in the totals only.
 
 ### COROS (unofficial)
 The COROS card on the profile page links a COROS Training Hub account and pulls the nightly readings the watch uploads: resting heart rate, overnight HRV with its baseline and training load. (Sleep is only in the phone app's API, which the app does not use because logging in there signs the phone app out; `scripts/coros_probe.py` prints the raw fields if you want to look for more.)
