@@ -10,6 +10,15 @@
     {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
     <form method="post" action="/setup-race" class="card stack">
         <div class="form-grid">
+            <div class="field full">
+                <label for="race_name">Race <span class="faint">(optional)</span></label>
+                <div class="race-search">
+                    <input class="input" type="text" id="race_name" name="race_name" maxlength="200" placeholder="Search known races, or type any name">
+                </div>
+                <input type="hidden" id="course_race" name="course_race">
+                <input type="hidden" id="course_event" name="course_event">
+                <span class="small faint" id="race-course-note"></span>
+            </div>
             <div class="field">
                 <label for="race_length">Distance</label>
                 <select class="input" id="race_length" name="race_length" required>
@@ -33,4 +42,8 @@
         <button class="btn btn-primary btn-block" type="submit">Continue to Strava</button>
     </form>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/setup.js"></script>
 {% endblock %}

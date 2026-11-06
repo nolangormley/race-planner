@@ -304,3 +304,15 @@ select.input {
   white-space: pre-wrap;
   color: var(--text-2);
 }
+
+/* Race name search (js/race-search.js): suggestions under the input */
+.race-search { position: relative; }
+.race-search-list {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30;
+  max-height: 300px; overflow-y: auto; margin: 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop);
+}
+.race-search-list [role="option"] { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; }
+.race-search-list [role="option"]:hover, .race-search-list [aria-selected="true"] { background: var(--surface-2); }
+.race-search-name { font-size: 14px; color: var(--text); }
+.race-search-meta { font-size: 12px; color: var(--text-2); }

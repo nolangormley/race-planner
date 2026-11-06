@@ -28,11 +28,18 @@ class SettingsUpdate(BaseModel):
     race_goal_time: str = Field(max_length=20)
 
 
+class LibraryCourse(BaseModel):
+    race: str = Field(max_length=200)
+    event: str = Field(max_length=200)
+
+
 class RaceCreate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=200)
     race_length: str = Field(max_length=50)
     race_date: str
     goal_time: Optional[str] = Field(default=None, max_length=20)
+    # A race picked from the race-courses catalog: its course is stored with the race when the dataset has one.
+    course: Optional[LibraryCourse] = None
 
 
 class ProfileUpdate(BaseModel):
@@ -89,11 +96,6 @@ class PlanBuildRequest(BaseModel):
 
 class DigestSettings(BaseModel):
     enabled: bool
-
-
-class LibraryCourse(BaseModel):
-    race: str = Field(max_length=200)
-    event: str = Field(max_length=200)
 
 
 class CorosLink(BaseModel):

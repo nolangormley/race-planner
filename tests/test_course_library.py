@@ -15,6 +15,13 @@ HALF = {
 KEPT = {**HALF, "race": "akron-marathon", "status": "stale", "file": "courses/oh/akron-marathon/half-marathon.gpx"}
 PDF_ONLY = {**HALF, "race": "flying-pig-marathon", "status": "unsupported", "file": None}
 REJECTED = {**HALF, "race": "cowtown-marathon", "status": "reject"}
+COURSE = """<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>
+  <trkpt lat="40.4400" lon="-79.9500"><ele>100</ele></trkpt>
+  <trkpt lat="40.4490" lon="-79.9500"><ele>120</ele></trkpt>
+  <trkpt lat="40.4580" lon="-79.9500"><ele>140</ele></trkpt>
+  <trkpt lat="40.4670" lon="-79.9500"><ele>130</ele></trkpt>
+</trkseg></trk></gpx>"""
 
 
 class Reply:
@@ -45,12 +52,15 @@ def dataset(monkeypatch):
 
     monkeypatch.setattr(library.requests, "get", get)
     monkeypatch.setattr(library, "clock", lambda: state.now)
-    monkeypatch.setattr(library, "cache", {"courses": None, "read_at": 0.0})
+    monkeypatch.setattr(library, "cache", {"entries": None, "read_at": 0.0})
     return state
 
 
-def test_the_index_is_read_once_a_day_and_keeps_the_published_courses(dataset):
-    dataset.files["index.json"] = json.dumps([HALF, KEPT, PDF_ONLY, REJECTED]).encode()
+def test_the_index_is_read_once_a_day_and_courses_are_the_events_with_a_file(dataset):
+    dataset.files["index.json"] = json.dumps([HALF, KEPT, PDF_ONLY, REJECTED, ["not an event"]]).encode()
+    assert [entry["race"] for entry in library.entries()] == [
+        "pittsburgh-marathon", "akron-marathon", "flying-pig-marathon", "cowtown-marathon",
+    ]
     assert [course["race"] for course in library.courses()] == ["pittsburgh-marathon", "akron-marathon"]
     dataset.now += library.INDEX_TTL_S - 1
     library.courses()
@@ -93,3 +103,17 @@ def test_a_file_over_5_mb_is_refused(dataset):
     dataset.files[HALF["file"]] = b"x" * (library.MAX_FILE_BYTES + 1)
     with pytest.raises(library.LibraryUnavailable, match="over 5 MB"):
         library.course_file("pittsburgh-marathon", "half-marathon")
+
+
+def test_attach_stores_the_course_or_leaves_the_race_without_one(dataset):
+    dataset.files["index.json"] = json.dumps([HALF, PDF_ONLY]).encode()
+    dataset.files[HALF["file"]] = COURSE.encode()
+    race = SimpleNamespace(course_gpx=None)
+    course = library.attach(race, "pittsburgh-marathon", "half-marathon")
+    assert race.course_gpx == COURSE and 2900 < course["length_m"] < 3100
+    for files, event in (({}, ("flying-pig-marathon", "half-marathon")),            # no course file
+                         ({HALF["file"]: b"<html>moved</html>"}, ("pittsburgh-marathon", "half-marathon")),
+                         ({HALF["file"]: requests.ConnectionError("offline")}, ("pittsburgh-marathon", "half-marathon"))):
+        dataset.files.update(files)
+        race = SimpleNamespace(course_gpx=None)
+        assert library.attach(race, *event) is None and race.course_gpx is None
