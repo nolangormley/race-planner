@@ -1,0 +1,17 @@
+/* The course list and the public course page; the course page also loads pacing.css for the plan. */
+.course-row { color: var(--text); text-decoration: none; }
+.course-row:hover { text-decoration: none; }
+.course-row:hover .course-title { color: var(--accent); }
+.course-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.course-row svg { flex-shrink: 0; width: 16px; height: 16px; color: var(--text-3); }
+.course-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+.course-check { margin-bottom: 16px; }
+.course-cta { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.course-cta p { margin-top: 4px; }
+
+@media (max-width: 800px) {
+  .course-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .course-cta { flex-direction: column; align-items: stretch; }
+}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Course not found · Race Planner{% endblock %}
+
+{% block content %}
+<section class="card">
+    {% if reason == 'unavailable' %}
+    <div class="empty"><strong>The course library cannot be read right now</strong>Try again in a few minutes.<div><a class="btn btn-sm" href="/courses">All courses</a></div></div>
+    {% else %}
+    <div class="empty"><strong>No course here</strong>The race may have changed its name, or its course is not in the library yet.<div><a class="btn btn-sm" href="/courses">All courses</a></div></div>
+    {% endif %}
+</section>
+{% endblock %}

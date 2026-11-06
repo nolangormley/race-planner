@@ -53,6 +53,7 @@ def dataset(monkeypatch):
     monkeypatch.setattr(library.requests, "get", get)
     monkeypatch.setattr(library, "clock", lambda: state.now)
     monkeypatch.setattr(library, "cache", {"entries": None, "read_at": 0.0})
+    monkeypatch.setattr(library, "files", {})
     return state
 
 
@@ -115,5 +116,17 @@ def test_attach_stores_the_course_or_leaves_the_race_without_one(dataset):
                          ({HALF["file"]: b"<html>moved</html>"}, ("pittsburgh-marathon", "half-marathon")),
                          ({HALF["file"]: requests.ConnectionError("offline")}, ("pittsburgh-marathon", "half-marathon"))):
         dataset.files.update(files)
+        dataset.now += library.INDEX_TTL_S                  # past the day the file is kept in memory
         race = SimpleNamespace(course_gpx=None)
         assert library.attach(race, *event) is None and race.course_gpx is None
+
+
+def test_a_course_file_is_kept_in_memory_for_a_day(dataset):
+    dataset.files["index.json"] = json.dumps([HALF]).encode()
+    dataset.files[HALF["file"]] = COURSE.encode()
+    for _ in range(3):
+        assert library.course_file("pittsburgh-marathon", "half-marathon") == COURSE
+    assert dataset.reads == ["index.json", HALF["file"]]
+    dataset.now += library.INDEX_TTL_S
+    library.course_file("pittsburgh-marathon", "half-marathon")
+    assert dataset.reads == ["index.json", HALF["file"], "index.json", HALF["file"]]
