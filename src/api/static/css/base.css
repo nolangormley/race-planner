@@ -114,8 +114,9 @@ dl { margin: 0; }
   display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;
   font-size: 12px;
 }
-.footer a { color: var(--text-3); }
-.footer a:hover { color: var(--text-2); }
+.footer a, .footer button { color: var(--text-3); }
+.footer a:hover, .footer button:hover { color: var(--text-2); }
+.footer button { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
 
 /* ---- Layout helpers ---- */
 .grid { display: grid; gap: 16px; }
@@ -175,5 +176,5 @@ dl { margin: 0; }
 /* Touch screens: links that stand on their own get a 36 px target. */
 @media (pointer: coarse) {
   .brand { min-width: 36px; min-height: 36px; }
-  .auth-foot a, .back-link, .user-link, .footer a { display: inline-flex; align-items: center; min-height: 36px; }
+  .auth-foot a, .back-link, .user-link, .footer a, .footer button { display: inline-flex; align-items: center; min-height: 36px; }
 }

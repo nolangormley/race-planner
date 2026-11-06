@@ -91,6 +91,9 @@ def test_logged_in_pages_fit_a_phone_screen(app_server, registered_user, phone):
         assert profile and profile["x"] + profile["width"] <= width, url
         if path == "/profile":
             assert phone.locator("section.card a[href='/logout']").is_visible()
+    # The top bar has no room for Feedback on a phone, so the footer keeps it one tap away.
+    phone.click(".footer [data-feedback]")
+    phone.wait_for_selector("#feedback-modal.open")
 
 
 def test_public_pages_fit_a_phone_screen(app_server, phone):
