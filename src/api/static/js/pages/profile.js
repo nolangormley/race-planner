@@ -5,6 +5,7 @@ import {
 } from '../app.js';
 import { refreshSync } from '../sync.js';
 import { attachRaceSearch, courseNote } from '../race-search.js';
+import { initDeleteAccount } from './profile-account.js';
 
 const userId = config.userId;
 // The catalog race behind the race form's name, until the runner edits the name.
@@ -475,6 +476,7 @@ document.addEventListener('strava:synced', () => {
   loadSyncState();
   loadWarehouseStats();
 });
+initDeleteAccount();
 
 renderPrefs();
 renderAthleteView();

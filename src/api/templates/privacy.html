@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Privacy · Race Planner{% endblock %}
+{% block page_class %}page-narrow{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/pages/privacy.css">{% endblock %}
+
+{% block content %}
+<article class="prose">
+    <h1>Privacy</h1>
+    <p class="sub">Last updated: November 6, 2026</p>
+
+    <h2>Who runs this</h2>
+    <p>
+        Race Planner is run by Nolan Gormley, a single developer, as a personal project.
+        The code is open source at <a href="https://github.com/nolangormley/race-planner">github.com/nolangormley/race-planner</a>, so you can read exactly what it does.
+    </p>
+
+    <h2>What is stored</h2>
+    <p>
+        Your account: name, email, a bcrypt hash of your password (never the password itself), date of birth, sex, height, weight, the resting and maximum heart rate you set, and your settings, such as the weekly digest switch.
+    </p>
+    <p>
+        Your races, with a course map when you add one, and your training plans with their workouts.
+    </p>
+    <p>
+        Your training data: activities with their streams (heart rate, pace, cadence, elevation, power, temperature) and laps.
+        They come from Strava when you connect it, and from the FIT and GPX files you import.
+        An imported file is read once and not kept; only the activity made from it is.
+    </p>
+    <p>
+        When Strava is connected, the app also keeps the tokens that let it read your Strava account, your Strava athlete id, and the profile Strava gives: name, username, city, state, country, sex and weight.
+    </p>
+    <p>
+        When COROS is connected, the app keeps the nightly readings your watch uploads: resting heart rate, overnight HRV and its baseline, training load, VO2 max and stamina.
+        Your COROS password is sent to COROS once to log in and is not stored; only the session token is kept.
+    </p>
+    <p>
+        The numbers the app works out from all of this (training load, zones, best efforts, detected intervals and the rest) are stored too.
+    </p>
+    <p>
+        The app sets one cookie: a signed session cookie that keeps you signed in for 14 days.
+        Your theme and distance unit stay in your browser's local storage and never reach the server.
+    </p>
+
+    <h2>Where</h2>
+    <p>
+        Everything lives on one server at Carnegie Mellon University that the developer runs, served over HTTPS: a PostgreSQL database holds accounts, races and plans, and a DuckDB database holds the training data.
+        The server keeps ordinary web server logs: which pages were asked for, when, and from which address.
+    </p>
+
+    <h2>Who sees it</h2>
+    <p>
+        You.
+        Every page and endpoint shows only the signed-in user's own data.
+        There are no ads, no third-party analytics and no trackers.
+        Your data is never sold or shared.
+        The developer can open the databases to keep the server running, and does not read your training otherwise.
+    </p>
+
+    <h2>Who else is contacted</h2>
+    <ul>
+        <li>
+            <strong>Strava</strong>, when you connect it: to sign in and link your account, to sync your activities, streams and laps, and through its webhook, by which Strava tells the app about new, changed or deleted activities and about you revoking access.
+        </li>
+        <li>
+            <strong>COROS Training Hub</strong>, when you connect it: to log in once, and to pull the nightly readings once a day.
+        </li>
+        <li>
+            <strong>GitHub</strong>: the server downloads the public race-courses dataset (race names and course maps) from there.
+            Nothing about you is sent.
+        </li>
+        <li>
+            <strong>An email service</strong>, when the server has one configured: for password reset links and, if you switch it on, the weekly digest, which carries a summary of your week.
+        </li>
+        <li>
+            <strong>Google Fonts</strong>: your browser loads the Inter font from Google's servers, which see that request like any other web request.
+        </li>
+    </ul>
+
+    <h2>Deleting your data</h2>
+    <p>
+        <strong>Delete account</strong> at the bottom of your profile page removes everything at once: your account, races, plans, activities, streams, laps, COROS nights and the derived numbers.
+        If Strava is connected, the app also asks Strava to revoke its access.
+        This cannot be undone.
+    </p>
+    <p>
+        You can also delete single activities on the Activities page, and <strong>Unlink</strong> on the profile page forgets the COROS session and deletes the stored nights.
+    </p>
+    <p>
+        If you revoke Race Planner in your Strava settings instead, Strava's tokens stop working, and when Strava sends the app its revocation event the stored tokens are dropped too.
+        The activities already synced stay in the app until you delete them or your account.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+        Use the feedback button in the app, or open an issue at <a href="https://github.com/nolangormley/race-planner/issues">github.com/nolangormley/race-planner/issues</a>.
+    </p>
+</article>
+{% endblock %}

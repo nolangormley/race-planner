@@ -92,8 +92,12 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
 
 
 @router.get("/login", response_class=HTMLResponse)
-def login_get(request: Request, reset: bool = False):
-    notice = "Your password has been reset. Sign in with the new one." if reset else None
+def login_get(request: Request, reset: bool = False, deleted: bool = False):
+    notice = None
+    if reset:
+        notice = "Your password has been reset. Sign in with the new one."
+    elif deleted:
+        notice = "Your account and data were deleted."
     return templates.TemplateResponse("login.html", {"request": request, "notice": notice})
 
 

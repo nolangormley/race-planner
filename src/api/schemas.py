@@ -59,6 +59,10 @@ class PasswordChange(BaseModel):
     new_password: str = Field(max_length=200)
 
 
+class AccountDelete(BaseModel):
+    password: str = Field(max_length=200)
+
+
 class PlanEntryCreate(BaseModel):
     date: str
     workout_type: Optional[str] = Field(default=None, max_length=200)

@@ -1,0 +1,9 @@
+/* The privacy page (templates/privacy.html): short sections in one narrow column. */
+.prose { margin-top: 24px; }
+.prose h1 { font-size: 24px; }
+.prose .sub { color: var(--text-2); margin-top: 4px; }
+.prose h2 { margin: 28px 0 8px; }
+.prose p, .prose li { line-height: 1.6; }
+.prose p + p { margin-top: 10px; }
+.prose ul { margin: 0; padding-left: 20px; }
+.prose li + li { margin-top: 8px; }

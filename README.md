@@ -228,6 +228,10 @@ What it cannot see: Garmin reads stress from heart rate variability all day long
 So daytime stress, naps, when you actually slept, illness, alcohol and activities without heart rate are invisible here, and waking hours drain at a flat rate instead.
 WHOOP Recovery, Oura Readiness and Garmin Training Readiness combine similar overnight inputs but publish no formula; this one is all in `src/energy.py`, with its constants and full references.
 
+### Privacy and deleting your account
+`/privacy`, linked from the footer of every page, says what the app stores, where, who sees it and which services it talks to.
+**Delete account** at the bottom of the profile page asks for your password, then removes the account with every row of its data from Postgres and the warehouse, and asks Strava to revoke the app's access.
+
 ## Maintenance
 
 ### Running the pipeline from the command line
